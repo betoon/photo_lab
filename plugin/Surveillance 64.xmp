@@ -1,0 +1,62 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:ConvertToGrayscale="True"
+   crs:Exposure="0.15"
+   crs:Contrast="32"
+   crs:Highlights="-10"
+   crs:Shadows="-15"
+   crs:Blacks="-8"
+   crs:Clarity="25"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:GrayMixerRed="22"
+   crs:GrayMixerOrange="18"
+   crs:GrayMixerYellow="12"
+   crs:GrayMixerGreen="30"
+   crs:GrayMixerAqua="-15"
+   crs:GrayMixerBlue="-45"
+   crs:GrayMixerPurple="-20"
+   crs:GrayMixerMagenta="5"
+   crs:GrainSize="12"
+   crs:GrainFrequency="15"
+   crs:GrainAmount="10"
+   crs:uuid="E59C73CA-060D-4D40-AC6F-29CBB835D177">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Surveillance 64</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

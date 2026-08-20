@@ -1,0 +1,60 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="D4D84603-909E-4C1D-9C09-33A3C8923EE0"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Blacks2012="-5"
+   crs:Clarity2012="0"
+   crs:Dehaze="-5"
+   crs:Exposure2012="-0.3"
+   crs:FullX="0.5"
+   crs:FullY="0.1"
+   crs:HasSettings="True"
+   crs:Highlights2012="-15"
+   crs:MaskValue="1.0"
+   crs:ParametricDarks="-5"
+   crs:ParametricHighlights="0"
+   crs:ParametricShadows="0"
+   crs:ProcessVersion="15.4"
+   crs:Saturation="0"
+   crs:Version="16.0"
+   crs:Whites2012="0"
+   crs:ZeroX="0.5"
+   crs:ZeroY="0.35"
+   crs:uuid="D4D84603-909E-4C1D-9C09-33A3C8923EE0">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">enhance_mountain_haze</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

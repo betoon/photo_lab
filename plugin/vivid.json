@@ -1,0 +1,23 @@
+{
+  "exposure": 0.1,
+  "smart_light": 15.0,
+  "contrast": 18.0,
+  "highlights": -10.0,
+  "shadows": 12.0,
+  "whites": 5.0,
+  "blacks": -5.0,
+  "clarity": 20.0,
+  "microcontrast": 10.0,
+  "gamma": 1.0,
+  "temperature": 5500.0,
+  "tint": 0.0,
+  "wb_as_shot": true,
+  "vibrance": 25.0,
+  "saturation": 8.0,
+  "clearview": 10.0,
+  "sharpen_intensity": 40.0,
+  "sharpen_radius": 1.0,
+  "sharpen_detail": 20.0,
+  "denoise_luminance": 10.0,
+  "denoise_chroma": 15.0
+}

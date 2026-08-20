@@ -1,0 +1,66 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="0.20"
+   crs:Contrast="-8"
+   crs:Highlights="-18"
+   crs:Shadows="14"
+   crs:Blacks="6"
+   crs:Clarity="-4"
+   crs:Vibrance="2"
+   crs:Saturation="-5"
+   crs:Temperature="3"
+   crs:Tint="1"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="4"
+   crs:SaturationAdjustmentRed="2"
+   crs:HueAdjustmentOrange="-2"
+   crs:SaturationAdjustmentOrange="-4"
+   crs:LuminanceAdjustmentOrange="4"
+   crs:HueAdjustmentYellow="-2"
+   crs:SaturationAdjustmentYellow="-8"
+   crs:HueAdjustmentGreen="-8"
+   crs:SaturationAdjustmentGreen="-12"
+   crs:LuminanceAdjustmentGreen="2"
+   crs:HueAdjustmentBlue="-4"
+   crs:SaturationAdjustmentBlue="-8"
+   crs:uuid="B69C73CA-060D-4D40-AC6F-19CBB835D188">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Kodak Portra 160</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

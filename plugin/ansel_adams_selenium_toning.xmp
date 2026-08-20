@@ -1,0 +1,71 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="193329B9-DDBA-4DFD-AB89-6CC579016641"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:BlackAndWhiteAqua="-30"
+   crs:BlackAndWhiteBlue="-55"
+   crs:BlackAndWhiteMagenta="-15"
+   crs:BlackAndWhiteOrange="-5"
+   crs:BlackAndWhitePurple="-35"
+   crs:BlackAndWhiteRed="-15"
+   crs:Blacks2012="-15"
+   crs:ColorGradingBalance="0"
+   crs:ColorGradingBlending="50"
+   crs:ColorGradingHighlightsHue="40"
+   crs:ColorGradingHighlightsSat="5"
+   crs:ColorGradingMidtonesHue="0"
+   crs:ColorGradingMidtonesSat="0"
+   crs:ColorGradingShadowsHue="215"
+   crs:ColorGradingShadowsSat="8"
+   crs:ConvertToServerRGB="False"
+   crs:GrainAmount="8"
+   crs:GrainFrequency="50"
+   crs:GrainSize="20"
+   crs:HasSettings="True"
+   crs:ProcessVersion="15.4"
+   crs:Shadows2012="-8"
+   crs:SplitTonerBalance="0"
+   crs:SplitTonerHighlightHue="40"
+   crs:SplitTonerHighlightSaturation="5"
+   crs:SplitTonerOn="True"
+   crs:SplitTonerShadowHue="215"
+   crs:SplitTonerShadowSaturation="8"
+   crs:Version="16.0"
+   crs:uuid="193329B9-DDBA-4DFD-AB89-6CC579016641">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">ansel_adams_selenium_toning</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

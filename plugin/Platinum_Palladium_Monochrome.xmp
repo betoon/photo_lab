@@ -1,0 +1,77 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:ConvertGrayscale="True"
+   crs:Exposure2012="+0.08"
+   crs:Contrast2012="-5"
+   crs:Highlights2012="-15"
+   crs:Shadows2012="+25"
+   crs:Whites2012="-8"
+   crs:Blacks2012="+18"
+   crs:Clarity2012="-8"
+   crs:Texture="-4"
+   crs:GrayMixerRed="+18"
+   crs:GrayMixerOrange="+12"
+   crs:GrayMixerYellow="+4"
+   crs:GrayMixerGreen="-8"
+   crs:GrayMixerCyan="-12"
+   crs:GrayMixerBlue="-22"
+   crs:GrayMixerPurple="-4"
+   crs:GrayMixerMagenta="0"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:SplitToningHighlightHue="42"
+   crs:SplitToningHighlightSaturation="6"
+   crs:SplitToningShadowHue="45"
+   crs:SplitToningShadowSaturation="5"
+   crs:SplitToningBalance="0"
+   crs:PostCropVignetteAmount="-12"
+   crs:PostCropVignetteMidpoint="50"
+   crs:PostCropVignetteFeather="70"
+   crs:PostCropVignetteStyle="1"
+   crs:Sharpness="35"
+   crs:SharpenRadius="1.0"
+   crs:SharpenDetail="20"
+   crs:SharpenEdgeMasking="40"
+   crs:GrainAmount="18"
+   crs:GrainSize="25"
+   crs:GrainFrequency="60"
+   crs:uuid="C4D5E6F7-A8B9-62E3-A2B3-C4D5E6F7A8E2">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Platinum_Palladium_Monochrome</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

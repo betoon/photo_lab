@@ -1,0 +1,68 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="B55DD3FA-CE4E-43B6-BA58-45BCFA9C319C"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="0.05"
+   crs:Contrast="16"
+   crs:Highlights="-12"
+   crs:Shadows="8"
+   crs:Blacks="-2"
+   crs:Clarity="5"
+   crs:Vibrance="12"
+   crs:Saturation="6"
+   crs:Temperature="4"
+   crs:Tint="2"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="-5"
+   crs:SaturationAdjustmentRed="18"
+   crs:LuminanceAdjustmentRed="-2"
+   crs:HueAdjustmentOrange="-2"
+   crs:SaturationAdjustmentOrange="8"
+   crs:HueAdjustmentYellow="2"
+   crs:HueAdjustmentGreen="-6"
+   crs:SaturationAdjustmentGreen="5"
+   crs:HueAdjustmentBlue="4"
+   crs:SaturationAdjustmentBlue="14"
+   crs:LuminanceAdjustmentBlue="-5"
+   crs:GrainSize="25"
+   crs:GrainFrequency="35"
+   crs:GrainAmount="14"
+   crs:uuid="72283714-DF7B-452C-AEB9-1D9B2EE5619D">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Agfa Vista 400</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

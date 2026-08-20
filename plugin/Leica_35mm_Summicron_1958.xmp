@@ -1,0 +1,75 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure2012="+0.10"
+   crs:Contrast2012="-12"
+   crs:Highlights2012="-15"
+   crs:Shadows2012="+18"
+   crs:Whites2012="-8"
+   crs:Blacks2012="-5"
+   crs:Clarity2012="-10"
+   crs:Texture="-5"
+   crs:Vibrance="+8"
+   crs:Saturation="-6"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="-2"
+   crs:SaturationAdjustmentRed="+8"
+   crs:LuminanceAdjustmentRed="+2"
+   crs:HueAdjustmentOrange="-3"
+   crs:SaturationAdjustmentOrange="+4"
+   crs:LuminanceAdjustmentOrange="+1"
+   crs:HueAdjustmentGreen="+6"
+   crs:SaturationAdjustmentGreen="-18"
+   crs:LuminanceAdjustmentGreen="-2"
+   crs:HueAdjustmentBlue="-6"
+   crs:SaturationAdjustmentBlue="-10"
+   crs:LuminanceAdjustmentBlue="-4"
+   crs:PostCropVignetteAmount="-22"
+   crs:PostCropVignetteMidpoint="38"
+   crs:PostCropVignetteRoundness="+10"
+   crs:PostCropVignetteFeather="65"
+   crs:PostCropVignetteStyle="1"
+   crs:Sharpness="35"
+   crs:SharpenRadius="1.2"
+   crs:SharpenDetail="20"
+   crs:SharpenEdgeMasking="35"
+   crs:uuid="8E1A4CB2-7F78-47E4-96B2-E9ACA0AE99D9">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Leica_35mm_Summicron_1958</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

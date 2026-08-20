@@ -1,0 +1,78 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="F5575028-C6C4-4313-8FB8-2B9E1965C714"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:ColorGradingBalance="-15"
+   crs:ColorGradingBlending="60"
+   crs:ColorGradingHighlightsHue="45"
+   crs:ColorGradingHighlightsSat="12"
+   crs:ColorGradingMidtonesHue="35"
+   crs:ColorGradingMidtonesSat="6"
+   crs:ColorGradingShadowsHue="210"
+   crs:ColorGradingShadowsSat="14"
+   crs:ConvertToServerRGB="True"
+   crs:Exposure2012="-0.2"
+   crs:HasSettings="True"
+   crs:Highlights2012="-35"
+   crs:HueAdjustmentBlue="-15"
+   crs:HueAdjustmentGreen="-25"
+   crs:HueAdjustmentOrange="-5"
+   crs:HueAdjustmentYellow="-18"
+   crs:LuminanceAdjustmentBlue="-15"
+   crs:LuminanceAdjustmentGreen="-18"
+   crs:LuminanceAdjustmentOrange="-5"
+   crs:LuminanceAdjustmentRed="-10"
+   crs:LuminanceAdjustmentYellow="-12"
+   crs:PostCropVignetteAmount="-12"
+   crs:PostCropVignetteFeather="75"
+   crs:PostCropVignetteMidpoint="40"
+   crs:PostCropVignetteStyle="1"
+   crs:ProcessVersion="15.4"
+   crs:Saturation="-12"
+   crs:SaturationAdjustmentAqua="-25"
+   crs:SaturationAdjustmentBlue="-30"
+   crs:SaturationAdjustmentGreen="-50"
+   crs:SaturationAdjustmentRed="-5"
+   crs:SaturationAdjustmentYellow="-35"
+   crs:SplitTonerOn="True"
+   crs:Version="16.0"
+   crs:Vibrance="-10"
+   crs:Whites2012="-15"
+   crs:uuid="F5575028-C6C4-4313-8FB8-2B9E1965C714">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">cinematic_moody_color</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

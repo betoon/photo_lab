@@ -1,0 +1,13 @@
+{% extends "calibration/base.html" %}
+
+{% block content %}
+<h1>An error occurred …</h1>
+
+<p>The following error occurred after your upload:</p>
+
+<blockquote><em><pre>{{ error }}</pre></em></blockquote>
+
+<p>If you have questions regarding this,
+contact <a href="mailto:{{ admin_email }}">{{ admin_name }}</a>.</p>
+
+{% endblock %}

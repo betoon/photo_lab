@@ -1,0 +1,1660 @@
+"""main_window.py — PhotoLab main window, DxO-inspired layout.
+
+Right panel category tabs (icons): Light | Color | Detail | Geometry | Effects
+Collapsible correction groups matching DxO PhotoLab structure.
+"""
+
+from __future__ import annotations
+
+import os
+import cv2
+import numpy as np
+
+from PyQt6.QtCore import Qt, QTimer, QSize, QRect, QDir
+from PyQt6.QtGui import QIcon, QAction, QKeySequence, QFont, QFileSystemModel
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
+    QScrollArea, QListWidget, QListWidgetItem, QFileDialog, QToolBar,
+    QGroupBox, QPushButton, QSplitter, QStatusBar, QComboBox, QTabWidget,
+    QCheckBox, QFrame, QLineEdit, QToolButton, QSizePolicy, QMessageBox, QStackedWidget, QButtonGroup, QMenu,
+    QTreeView,
+)
+
+from imaging import Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw
+from presets import load_preset_file, list_preset_files
+from qt_utils import cv_to_qpixmap
+from workers import ThumbnailWorker, ExportWorker, LoadImageWorker
+from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
+
+
+def collapsible_group(title: str, parent_layout, checked=True):
+    """DxO-style collapsible group with enable checkbox."""
+    box = QGroupBox()
+    box.setCheckable(True)
+    box.setChecked(checked)
+    box.setTitle(title)
+    box.setStyleSheet("""
+        QGroupBox {
+            color: #ccc; border: 1px solid #3a3a3a; border-radius: 4px;
+            margin-top: 8px; font-weight: 600; font-size: 12px;
+            padding-top: 8px;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin; left: 8px; padding: 0 4px;
+        }
+        QGroupBox::indicator {
+            width: 13px; height: 13px;
+            border: 1px solid #666; border-radius: 2px; background: #2a2a2a;
+        }
+        QGroupBox::indicator:checked {
+            background: #2a6ad4; border-color: #2a6ad4;
+        }
+    """)
+    inner = QVBoxLayout(box)
+    inner.setSpacing(4)
+    inner.setContentsMargins(8, 12, 8, 8)
+    parent_layout.addWidget(box)
+    return box, inner
+
+
+class PhotoLab(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("PhotoLab")
+        self.resize(1600, 1000)
+        self.setStyleSheet(self._stylesheet())
+
+        self.folder = None
+        self.image_paths: list[str] = []
+        self.recipes: dict[str, Recipe] = {}
+        self.meta_cache: dict[str, dict] = {}
+        self.current_path: str | None = None
+        self.original_bgr: np.ndarray | None = None
+
+        self.render_timer = QTimer()
+        self.render_timer.setSingleShot(True)
+        self.render_timer.setInterval(45)
+        self.render_timer.timeout.connect(self.render_preview)
+
+        self._load_worker = None
+        self.sliders: dict[str, SliderRow] = {}
+        self._history_push_pending = False
+        self._local_mode = False
+        self._copied_recipe = None
+
+        self._build_menu_bar()
+        self._build_toolbar()
+        self._build_layout()
+        self._build_shortcuts()
+        self.statusBar().showMessage(
+            "Open a folder to begin  •  Wheel=zoom  •  Space+drag=pan  •  C=split  •  B=side-by-side"
+        )
+
+    # ------------------------------------------------------------------
+    def _stylesheet(self):
+        return """
+            QMainWindow, QWidget { background: #181818; color: #ddd; letter-spacing: 0px; }
+            QGroupBox, QGroupBox::title, QLabel { letter-spacing: 0px; }
+            QLabel { color: #ccc; }
+            QPushButton, QToolButton {
+                background: #2b2b2b; color: #eee; border: 1px solid #3d3d3d;
+                padding: 5px 12px; border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover, QToolButton:hover { background: #3d3d3d; border-color: #555; }
+            QPushButton:pressed, QToolButton:pressed { background: #1f1f1f; }
+            QPushButton:checked, QToolButton:checked {
+                background: #2a6ad4; color: #fff; border-color: #2a6ad4; font-weight: 600;
+            }
+            
+            /* Custom Sleek Scrollbar */
+            QScrollBar:vertical {
+                border: none; background: #141414; width: 8px; margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3a3a3a; min-height: 20px; border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #4a4a4a;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                height: 0px; background: none;
+            }
+            QScrollBar:horizontal {
+                border: none; background: #141414; height: 8px; margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #3a3a3a; min-width: 20px; border-radius: 4px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #4a4a4a;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                width: 0px; background: none;
+            }
+            
+            /* Custom Sliders */
+            QSlider::groove:horizontal {
+                background: #252525; height: 4px; border-radius: 2px; border: 1px solid #333;
+            }
+            QSlider::handle:horizontal {
+                background: #2a6ad4; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #488df2;
+            }
+            QSlider::sub-page:horizontal {
+                background: #2a6ad4; border-radius: 2px;
+            }
+            
+            QListWidget { background: #121212; border: 1px solid #2b2b2b; color: #ddd; border-radius: 3px; }
+            QListWidget::item { padding: 4px 6px; }
+            QListWidget::item:hover { background: #222; }
+            QListWidget::item:selected { background: #2a5080; color: #fff; }
+            
+            QToolBar {
+                background: #202020; border-bottom: 1px solid #2d2d2d; spacing: 4px; padding: 4px;
+            }
+            QStatusBar { color: #aaa; background: #141414; border-top: 1px solid #282828; }
+            QScrollArea { border: none; background: transparent; }
+            QComboBox {
+                background: #252525; color: #eee; border: 1px solid #3d3d3d;
+                border-radius: 3px; padding: 3px 8px; font-size: 11px;
+            }
+            QComboBox::drop-down {
+                border: none; width: 16px;
+            }
+            QComboBox QAbstractItemView {
+                background: #202020; color: #eee; selection-background-color: #2a6ad4; border: 1px solid #3d3d3d;
+            }
+            QLineEdit {
+                background: #252525; color: #eee; border: 1px solid #3d3d3d;
+                border-radius: 3px; padding: 4px 8px; font-size: 11px;
+            }
+            QLineEdit:focus { border-color: #2a6ad4; }
+            QCheckBox { color: #ccc; spacing: 6px; font-size: 11px; }
+            QCheckBox::indicator {
+                width: 13px; height: 13px; border: 1px solid #444; border-radius: 2px; background: #222;
+            }
+            QCheckBox::indicator:checked {
+                background: #2a6ad4; border-color: #2a6ad4;
+            }
+        """
+
+    # ------------------------------------------------------------------
+
+    def _build_menu_bar(self):
+        """DxO-style menu bar: File / Edit / View / Image / Help."""
+        mb = self.menuBar()
+        mb.setStyleSheet("""
+            QMenuBar {
+                background: #2a2a2a; color: #ddd; border-bottom: 1px solid #3a3a3a;
+                padding: 2px;
+            }
+            QMenuBar::item {
+                background: transparent; color: #ddd;
+                padding: 4px 10px;
+            }
+            QMenuBar::item:selected {
+                background: #3a3a3a; color: #fff;
+            }
+            QMenu {
+                background: #2a2a2a; color: #ddd;
+                border: 1px solid #444;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 28px 6px 24px;
+            }
+            QMenu::item:selected {
+                background: #2a6ad4; color: #fff;
+            }
+            QMenu::separator {
+                height: 1px; background: #444; margin: 4px 8px;
+            }
+            QMenu::item:disabled {
+                color: #666;
+            }
+        """)
+
+        def add_action(menu, text, slot=None, shortcut=None, enabled=True, checkable=False):
+            act = QAction(text, self)
+            if shortcut:
+                act.setShortcut(QKeySequence(shortcut))
+            act.setEnabled(enabled)
+            act.setCheckable(checkable)
+            if slot:
+                act.triggered.connect(slot)
+            menu.addAction(act)
+            return act
+
+        # ----- File -----
+        file_m = mb.addMenu("&File")
+        add_action(file_m, "Open Folder…", self.open_folder, "Ctrl+O")
+        file_m.addSeparator()
+        add_action(file_m, "Export to Disk…", self.export_current, "Ctrl+E")
+        add_action(file_m, "Export to Nik Collection", enabled=False)
+        add_action(file_m, "Export to Application", enabled=False)
+        add_action(file_m, "Export to Flickr", enabled=False)
+        add_action(file_m, "Export to Lightroom", enabled=False)
+        file_m.addSeparator()
+        add_action(file_m, "Load Preset… (XMP / JSON)", self.load_preset)
+        add_action(file_m, "Import Preset Folder…", self.load_preset_folder)
+        add_action(file_m, "Save Preset… (JSON)", self.save_preset)
+        file_m.addSeparator()
+        add_action(file_m, "Print", enabled=False, shortcut="Ctrl+P")
+        file_m.addSeparator()
+        add_action(file_m, "E&xit", self.close, "Ctrl+Q")
+
+        # ----- Edit -----
+        edit_m = mb.addMenu("&Edit")
+        add_action(edit_m, "Undo", enabled=False, shortcut="Ctrl+Z")
+        add_action(edit_m, "Redo", enabled=False, shortcut="Ctrl+Y")
+        edit_m.addSeparator()
+        add_action(edit_m, "Reset Image", self.reset_current, "Ctrl+R")
+        edit_m.addSeparator()
+        add_action(edit_m, "Copy Settings", self.copy_settings, "Ctrl+Shift+C")
+        add_action(edit_m, "Paste Settings", self.paste_settings, "Ctrl+Shift+V")
+        edit_m.addSeparator()
+        add_action(edit_m, "Preferences…", enabled=False, shortcut="Ctrl+,")
+
+        # ----- View -----
+        view_m = mb.addMenu("&View")
+        add_action(view_m, "Fit to Window", lambda: self.preview.fit_to_view(), "F")
+        add_action(view_m, "Actual Size (1:1)", lambda: self.preview.zoom_1_to_1(), "1")
+        view_m.addSeparator()
+        add_action(view_m, "Compare Off", lambda: self.set_compare_mode(ImageCanvas.MODE_NORMAL))
+        add_action(view_m, "Split Compare", lambda: self.set_compare_mode(ImageCanvas.MODE_SPLIT), "C")
+        add_action(view_m, "Side-by-Side Compare", lambda: self.set_compare_mode(ImageCanvas.MODE_SIDE_BY_SIDE), "B")
+        view_m.addSeparator()
+        add_action(view_m, "Previous Image", self.prev_image, "Left")
+        add_action(view_m, "Next Image", self.next_image, "Right")
+        view_m.addSeparator()
+        add_action(view_m, "Full Screen", enabled=False, shortcut="F11")
+
+        # ----- Image -----
+        image_m = mb.addMenu("&Image")
+        add_action(image_m, "Rotate 90° Clockwise", lambda: self._rotate(1))
+        add_action(image_m, "Rotate 90° Counter-clockwise", lambda: self._rotate(-1))
+        image_m.addSeparator()
+        add_action(image_m, "Crop Tool", lambda: self.crop_tool_btn.setChecked(True))
+        add_action(image_m, "Clear Crop", self.clear_crop)
+        image_m.addSeparator()
+        add_action(image_m, "Local Adjustments (Control Point)", self._toggle_local_mode)
+        image_m.addSeparator()
+        add_action(image_m, "Auto Exposure", self.auto_exposure)
+        add_action(image_m, "Auto White Balance", self.auto_wb)
+
+        # ----- Help -----
+        help_m = mb.addMenu("&Help")
+        add_action(help_m, "PhotoLab Help", enabled=False, shortcut="F1")
+        add_action(help_m, "Keyboard Shortcuts", self._show_shortcuts)
+        help_m.addSeparator()
+        add_action(help_m, "About PhotoLab", self._show_about)
+
+    def _show_shortcuts(self):
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self,
+            "Keyboard Shortcuts",
+            "Ctrl+O\tOpen folder\n"
+            "Ctrl+E\tExport\n"
+            "Ctrl+R\tReset image\n"
+            "Ctrl+Q\tExit\n"
+            "C\tSplit compare\n"
+            "B\tSide-by-side compare\n"
+            "F\tFit to window\n"
+            "1\tActual size 1:1\n"
+            "Left/Right\tPrev / Next image\n"
+            "Wheel\tZoom\n"
+            "Space+drag\tPan",
+        )
+
+    def _show_about(self):
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.about(
+            self,
+            "About PhotoLab",
+            "PhotoLab\n\n"
+            "A DxO PhotoLab-inspired RAW/photo editor written in Python.\n\n"
+            "Non-destructive Recipe pipeline, local adjustments, HSL, history.\n\n"
+            "Built with PyQt6, OpenCV, NumPy, rawpy.",
+        )
+
+    def _build_toolbar(self):
+        tb = QToolBar("Main")
+        tb.setMovable(False)
+        self.addToolBar(tb)
+
+        def act(text, slot, shortcut=None, checkable=False):
+            a = QAction(text, self)
+            if shortcut:
+                a.setShortcut(QKeySequence(shortcut))
+            a.setCheckable(checkable)
+            a.triggered.connect(slot)
+            tb.addAction(a)
+            return a
+
+        act("Open Folder", self.open_folder, "Ctrl+O")
+        tb.addSeparator()
+
+        mode = QLabel("  Customize  ")
+        mode.setStyleSheet("color:#8af; font-weight:600; padding:2px 6px;")
+        tb.addWidget(mode)
+        tb.addSeparator()
+
+        self.act_edit = act("Compare Off", lambda: self.set_compare_mode(ImageCanvas.MODE_NORMAL), checkable=True)
+        self.act_edit.setChecked(True)
+        self.act_split = act("Split", lambda: self.set_compare_mode(ImageCanvas.MODE_SPLIT), "C", True)
+        self.act_side = act("Side-by-Side", lambda: self.set_compare_mode(ImageCanvas.MODE_SIDE_BY_SIDE), "B", True)
+        tb.addSeparator()
+
+        act("Fit", lambda: self.preview.fit_to_view(), "F")
+        act("1:1", lambda: self.preview.zoom_1_to_1(), "1")
+        self.zoom_label = QLabel(" 100% ")
+        self.zoom_label.setStyleSheet("color:#ccc; min-width:48px;")
+        tb.addWidget(self.zoom_label)
+        tb.addSeparator()
+
+        act("Prev", self.prev_image, "Left")
+        act("Next", self.next_image, "Right")
+        tb.addSeparator()
+
+        self.act_local = act("Local Adjustments", self._toggle_local_mode, checkable=True)
+        tb.addSeparator()
+        act("Reset", self.reset_current, "Ctrl+R")
+        act("Apply Preset", self.load_preset)
+        act("Save Preset", self.save_preset)
+        tb.addSeparator()
+        act("Export to Disk", self.export_current, "Ctrl+E")
+
+        self.setStatusBar(QStatusBar())
+        self.path_label = QLabel("")
+        self.path_label.setStyleSheet("color:#888;")
+        self.statusBar().addWidget(self.path_label, stretch=1)
+        self.count_label = QLabel("")
+        self.statusBar().addPermanentWidget(self.count_label)
+
+    def _build_shortcuts(self):
+        pass
+
+    # ------------------------------------------------------------------
+    def _build_layout(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        outer.addWidget(splitter, stretch=1)
+
+        # LEFT: histogram + navigator + history (DxO-style)
+        left = QWidget()
+        left.setObjectName("leftPanel")
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(8, 8, 8, 8)
+        ll.setSpacing(8)
+
+        # Shared clean group style — avoid ALL CAPS + letter-spacing issues on Windows
+        gstyle = """
+            QGroupBox {
+                color: #c8c8c8;
+                border: 1px solid #3a3a3a;
+                border-radius: 4px;
+                margin-top: 12px;
+                padding-top: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 0px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 10px;
+                padding: 0 6px;
+                color: #b0b0b0;
+                letter-spacing: 0px;
+            }
+        """
+
+        folder_box = QGroupBox("Folders")
+        folder_box.setStyleSheet(gstyle)
+        fb = QVBoxLayout(folder_box)
+        fb.setContentsMargins(4, 10, 4, 4)
+        self.folder_model = QFileSystemModel()
+        self.folder_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot)
+        self.folder_model.setRootPath("")
+        self.folder_tree = QTreeView()
+        self.folder_tree.setModel(self.folder_model)
+        self.folder_tree.setHeaderHidden(True)
+        self.folder_tree.setMaximumHeight(150)
+        for i in range(1, 4):
+            self.folder_tree.hideColumn(i)
+        self.folder_tree.setStyleSheet("""
+            QTreeView {
+                background: #141414;
+                border: none;
+                color: #ccc;
+                font-size: 11px;
+            }
+            QTreeView::item:hover { background: #2a2a2a; }
+            QTreeView::item:selected { background: #2a5080; color: #fff; }
+        """)
+        self.folder_tree.clicked.connect(self._on_folder_tree_clicked)
+        fb.addWidget(self.folder_tree)
+        ll.addWidget(folder_box)
+
+        hist_box = QGroupBox("Histogram")
+        hist_box.setStyleSheet(gstyle)
+        hb = QVBoxLayout(hist_box)
+        hb.setContentsMargins(6, 10, 6, 6)
+        self.histogram = HistogramWidget()
+        self.histogram.setMinimumHeight(130)
+        hb.addWidget(self.histogram)
+        ll.addWidget(hist_box)
+
+        nav_box = QGroupBox("Move / Zoom")
+        nav_box.setStyleSheet(gstyle)
+        nb = QVBoxLayout(nav_box)
+        nb.setContentsMargins(6, 10, 6, 6)
+        self.navigator = NavigatorWidget()
+        self.navigator.setMinimumHeight(110)
+        self.navigator.setMaximumHeight(140)
+        self.navigator.panRequested.connect(self._on_nav_pan)
+        nb.addWidget(self.navigator)
+        ll.addWidget(nav_box)
+
+        hist_box2 = QGroupBox("History")
+        hist_box2.setStyleSheet(gstyle)
+        hb2 = QVBoxLayout(hist_box2)
+        hb2.setContentsMargins(6, 10, 6, 6)
+        self.history_widget = HistoryWidget()
+        self.history_widget.restoreRequested.connect(self._on_history_restore)
+        self.history_widget.setMinimumHeight(100)
+        hb2.addWidget(self.history_widget)
+        ll.addWidget(hist_box2, stretch=1)
+        
+        meta_box = QGroupBox("Metadata")
+        meta_box.setStyleSheet(gstyle)
+        mb_layout = QVBoxLayout(meta_box)
+        mb_layout.setContentsMargins(8, 12, 8, 8)
+        self.metadata_label = QLabel("No metadata loaded")
+        self.metadata_label.setWordWrap(True)
+        self.metadata_label.setStyleSheet("color:#aaa; font-size:11px;")
+        mb_layout.addWidget(self.metadata_label)
+        ll.addWidget(meta_box)
+
+        left.setMinimumWidth(220)
+        left.setMaximumWidth(300)
+        splitter.addWidget(left)
+
+        # CENTER: preview
+        self.preview = ImageCanvas()
+        self.preview.crop_dragged.connect(self.on_crop_dragged)
+        self.preview.zoom_changed.connect(lambda s: self.zoom_label.setText(f" {s*100:.0f}% "))
+        
+        # Connect new control point signals
+        self.preview.controlPointSelected.connect(self._on_canvas_point_selected)
+        self.preview.controlPointMoved.connect(self._on_canvas_point_moved)
+        self.preview.controlPointResized.connect(self._on_canvas_point_resized)
+        self.preview.controlPointAdded.connect(self._on_canvas_point_added)
+        self.preview.controlPointDragFinished.connect(self._on_canvas_point_drag_finished)
+        splitter.addWidget(self.preview)
+
+        # RIGHT: DxO-style tool panel
+        right = QWidget()
+        right.setMaximumWidth(380)
+        right.setMinimumWidth(340)
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(4, 4, 4, 4)
+        rl.setSpacing(4)
+
+        # Top bar: Reset + Apply preset
+        top_row = QHBoxLayout()
+        reset_btn = QPushButton("↺ Reset")
+        reset_btn.clicked.connect(self.reset_current)
+        top_row.addWidget(reset_btn)
+        preset_btn = QPushButton("Apply preset")
+        preset_btn.clicked.connect(self.load_preset)
+        top_row.addWidget(preset_btn)
+        rl.addLayout(top_row)
+
+        # Search
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search for corrections…")
+        self.search_edit.textChanged.connect(self._filter_corrections)
+        rl.addWidget(self.search_edit)
+
+        # Category tabs (Light / Color / Detail / Geometry / Effects)
+        # DxO-style category strip (buttons, not cramped tabs)
+        cat_row = QHBoxLayout()
+        cat_row.setSpacing(4)
+        self._cat_group = QButtonGroup(self)
+        self._cat_group.setExclusive(True)
+        self.tool_stack = QStackedWidget()
+        categories = [
+            ("Light", self._build_light_tab),
+            ("Color", self._build_color_tab),
+            ("Detail", self._build_detail_tab),
+            ("Geometry", self._build_geometry_tab),
+            ("Effects", self._build_effects_tab),
+            ("Local", self._build_local_tab),
+        ]
+        self._cat_buttons = []
+        for i, (name, builder) in enumerate(categories):
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setMinimumWidth(50)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: #2a2a2a; color: #bbb; border: 1px solid #3a3a3a;
+                    border-radius: 4px; padding: 7px 10px; font-size: 12px;
+                }
+                QPushButton:checked {
+                    background: #2a6ad4; color: #fff; border-color: #2a6ad4; font-weight: 600;
+                }
+                QPushButton:hover:!checked { background: #3a3a3a; color: #eee; }
+            """)
+            if i == 0:
+                btn.setChecked(True)
+            self._cat_group.addButton(btn, i)
+            cat_row.addWidget(btn)
+            self._cat_buttons.append(btn)
+            page = builder()  # returns the scroll widget
+            self.tool_stack.addWidget(page)
+        self._cat_group.idClicked.connect(self.tool_stack.setCurrentIndex)
+        cat_row.addStretch(1)
+        rl.addLayout(cat_row)
+        rl.addWidget(self.tool_stack, stretch=1)
+
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+
+        # Filmstrip
+        film_box = QGroupBox("Filmstrip")
+        film_box.setFixedHeight(150)
+        film_box.setStyleSheet("""
+            QGroupBox {
+                color: #c8c8c8; border: 1px solid #3a3a3a; border-radius: 4px;
+                margin-top: 10px; padding-top: 4px; font-size: 12px; font-weight: 600;
+                letter-spacing: 0px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin; left: 10px; padding: 0 6px;
+                color: #b0b0b0; letter-spacing: 0px;
+            }
+        """)
+        fb = QVBoxLayout(film_box)
+        self.filmstrip = QListWidget()
+        self.filmstrip.setViewMode(QListWidget.ViewMode.IconMode)
+        self.filmstrip.setFlow(QListWidget.Flow.LeftToRight)
+        self.filmstrip.setWrapping(False)
+        self.filmstrip.setIconSize(QSize(100, 100))
+        self.filmstrip.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.filmstrip.setMovement(QListWidget.Movement.Static)
+        self.filmstrip.itemClicked.connect(self.on_thumb_clicked)
+        fb.addWidget(self.filmstrip)
+        outer.addWidget(film_box)
+
+        self.preview_label = self.preview  # alias for older code paths
+
+    def _add_slider(self, layout, key, label, lo, hi, step, decimals, default):
+        row = SliderRow(label, lo, hi, default, step,
+                        lambda val, k=key: self.on_slider(k, val), decimals)
+        self.sliders[key] = row
+        layout.addWidget(row)
+        return row
+
+    # ===== LIGHT TAB =====
+    def _build_light_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setSpacing(4)
+
+        # Exposure Compensation
+        box, v = collapsible_group("Exposure Compensation", layout)
+        self._add_slider(v, "exposure", "Exposure", -5.0, 5.0, 0.05, 2, 0.0)
+
+        # Smart Lighting
+        box, v = collapsible_group("Smart Lighting", layout)
+        self._add_slider(v, "smart_light", "Intensity", 0.0, 100.0, 1, 0, 0.0)
+
+        # Selective Tone
+        box, v = collapsible_group("Selective Tone", layout)
+        self._add_slider(v, "highlights", "Highlights", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "whites", "Whites", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "shadows", "Shadows", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "blacks", "Blacks", -100.0, 100.0, 1, 0, 0.0)
+
+        # ClearView Plus
+        box, v = collapsible_group("ClearView Plus", layout, checked=False)
+        self._add_slider(v, "clearview", "Intensity", 0.0, 100.0, 1, 0, 0.0)
+
+        # Contrast
+        box, v = collapsible_group("Contrast", layout)
+        self._add_slider(v, "contrast", "Contrast", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "microcontrast", "Microcontrast", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "clarity", "Clarity", -100.0, 100.0, 1, 0, 0.0)
+
+        # Tone Curve
+        box, v = collapsible_group("Tone Curve", layout)
+        self.tone_curve = ToneCurveWidget()
+        self.tone_curve.curveChanged.connect(self.on_curve_changed)
+        v.addWidget(self.tone_curve)
+        self._add_slider(v, "gamma", "Gamma", 0.3, 2.5, 0.05, 2, 1.0)
+
+        # Vignetting
+        box, v = collapsible_group("Vignetting", layout, checked=False)
+        self._add_slider(v, "vignette", "Intensity", 0.0, 100.0, 1, 0, 0.0)
+
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    # ===== COLOR TAB =====
+    def _build_color_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+
+        # White Balance
+        box, v = collapsible_group("White Balance", layout)
+        self.wb_as_shot_cb = QCheckBox("As Shot (camera WB)")
+        self.wb_as_shot_cb.setChecked(True)
+        self.wb_as_shot_cb.toggled.connect(self.on_wb_as_shot)
+        v.addWidget(self.wb_as_shot_cb)
+        self._add_slider(v, "temperature", "Temperature (K)", 2000, 12000, 50, 0, 5500)
+        self._add_slider(v, "tint", "Tint", -150, 150, 1, 0, 0)
+
+        # Color Accentuation
+        box, v = collapsible_group("Color Accentuation", layout)
+        self._add_slider(v, "vibrance", "Vibrancy", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "saturation", "Saturation", -100.0, 100.0, 1, 0, 0.0)
+
+        # HSL with color wheel
+        box, v = collapsible_group("HSL", layout)
+        self.color_wheel = ColorWheelWidget()
+        self.color_wheel.channelChanged.connect(self._on_hsl_channel)
+        v.addWidget(self.color_wheel)
+        self.hsl_channel_label = QLabel("Channel: Red")
+        self.hsl_channel_label.setStyleSheet("color:#aaa; font-size:11px;")
+        v.addWidget(self.hsl_channel_label)
+        self._add_slider(v, "_hsl_hue", "Hue", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "_hsl_sat", "Saturation", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "_hsl_lum", "Luminance", -100.0, 100.0, 1, 0, 0.0)
+        self.sliders["_hsl_hue"].valueChanged.connect(lambda val: self._on_hsl_slider("hue", val))
+        self.sliders["_hsl_sat"].valueChanged.connect(lambda val: self._on_hsl_slider("sat", val))
+        self.sliders["_hsl_lum"].valueChanged.connect(lambda val: self._on_hsl_slider("lum", val))
+
+        # Soft Proofing
+        box, v = collapsible_group("Soft Proofing", layout, checked=False)
+        self.soft_proof_cb = QCheckBox("Enable soft proof")
+        self.soft_proof_cb.toggled.connect(self._on_soft_proof)
+        v.addWidget(self.soft_proof_cb)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Profile"))
+        self.proof_combo = QComboBox()
+        self.proof_combo.addItems(["sRGB", "DisplayP3", "Gray"])
+        self.proof_combo.currentTextChanged.connect(self._on_proof_profile)
+        row.addWidget(self.proof_combo, 1)
+        v.addLayout(row)
+
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    def _build_detail_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+
+        box, v = collapsible_group("Noise Reduction", layout)
+        self._add_slider(v, "denoise_luminance", "Luminance", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "denoise_chroma", "Chrominance", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "denoise_strength", "Strength (NLM)", 0.0, 100.0, 1, 0, 0.0)
+        note = QLabel("Strength > 40 uses Non-Local Means (stronger, slower).")
+        note.setStyleSheet("color:#777; font-size:11px;")
+        note.setWordWrap(True)
+        v.addWidget(note)
+
+        box, v = collapsible_group("Unsharp Mask", layout)
+        self._add_slider(v, "sharpen_intensity", "Intensity", 0.0, 200.0, 1, 0, 0.0)
+        self._add_slider(v, "sharpen_radius", "Radius", 0.1, 5.0, 0.1, 1, 1.0)
+        self._add_slider(v, "sharpen_threshold", "Threshold", 0.0, 50.0, 1, 0, 0.0)
+
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    # ===== GEOMETRY TAB =====
+    def _build_geometry_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+
+        box, v = collapsible_group("Horizon", layout)
+        self._add_slider(v, "horizon", "Angle (°)", -45.0, 45.0, 0.1, 1, 0.0)
+
+        box, v = collapsible_group("Crop", layout)
+        row = QHBoxLayout()
+        self.crop_tool_btn = QPushButton("Crop Tool")
+        self.crop_tool_btn.setCheckable(True)
+        self.crop_tool_btn.toggled.connect(self.toggle_crop_mode)
+        row.addWidget(self.crop_tool_btn)
+        clear_btn = QPushButton("Clear")
+        clear_btn.clicked.connect(self.clear_crop)
+        row.addWidget(clear_btn)
+        v.addLayout(row)
+        ar_row = QHBoxLayout()
+        ar_row.addWidget(QLabel("Aspect"))
+        self.aspect_combo = QComboBox()
+        self.aspect_combo.addItems(["Free", "Original", "1:1", "4:3", "3:2", "16:9"])
+        ar_row.addWidget(self.aspect_combo, 1)
+        v.addLayout(ar_row)
+
+        box, v = collapsible_group("Distortion", layout, checked=False)
+        self._add_slider(v, "distortion", "Amount", -100.0, 100.0, 1, 0, 0.0)
+
+        box, v = collapsible_group("Perspective", layout, checked=False)
+        self._add_slider(v, "perspective", "Vertical", -100.0, 100.0, 1, 0, 0.0)
+
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    # ===== EFFECTS TAB =====
+    def _build_effects_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+
+        box, v = collapsible_group("Vignetting", layout, checked=False)
+        self._add_slider(v, "vignette", "Intensity", 0.0, 100.0, 1, 0, 0.0)
+
+        box, v = collapsible_group("Film Grain", layout, checked=False)
+        self._add_slider(v, "film_grain", "Amount", 0.0, 100.0, 1, 0, 0.0)
+
+        box, v = collapsible_group("Black & White", layout, checked=False)
+        self.bw_cb = QCheckBox("Convert to black & white")
+        self.bw_cb.toggled.connect(self._on_bw)
+        v.addWidget(self.bw_cb)
+
+        box, v = collapsible_group("Rotate", layout, checked=False)
+        row = QHBoxLayout()
+        rot_l = QPushButton("⟲ 90° CCW")
+        rot_l.clicked.connect(lambda: self._rotate(-1))
+        rot_r = QPushButton("90° CW ⟳")
+        rot_r.clicked.connect(lambda: self._rotate(1))
+        row.addWidget(rot_l)
+        row.addWidget(rot_r)
+        v.addLayout(row)
+
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    # ===== LOCAL TAB =====
+    def _build_local_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setSpacing(6)
+
+        box, v = collapsible_group("Local Adjustments", layout)
+        self.local_active_cb = QCheckBox("Enable Control Points")
+        self.local_active_cb.toggled.connect(self._on_local_active_toggled)
+        v.addWidget(self.local_active_cb)
+        
+        self.local_points_list = QListWidget()
+        self.local_points_list.setMaximumHeight(120)
+        self.local_points_list.setStyleSheet("""
+            QListWidget {
+                background: #141414; border: 1px solid #333; border-radius: 3px;
+                color: #ccc; font-size: 11px;
+            }
+            QListWidget::item { padding: 4px; }
+            QListWidget::item:selected { background: #2a5080; color: #fff; }
+        """)
+        self.local_points_list.currentRowChanged.connect(self._on_local_list_selection)
+        v.addWidget(self.local_points_list)
+
+        btn_row = QHBoxLayout()
+        self.add_pt_btn = QPushButton("+ Add CP")
+        self.add_pt_btn.clicked.connect(self._on_add_local_clicked)
+        btn_row.addWidget(self.add_pt_btn)
+        
+        self.del_pt_btn = QPushButton("Delete")
+        self.del_pt_btn.clicked.connect(self._on_delete_local_clicked)
+        btn_row.addWidget(self.del_pt_btn)
+        
+        self.clear_pt_btn = QPushButton("Clear All")
+        self.clear_pt_btn.clicked.connect(self._on_clear_local_clicked)
+        btn_row.addWidget(self.clear_pt_btn)
+        v.addLayout(btn_row)
+
+        self.local_sliders_box = QGroupBox("Selected Point Adjustment")
+        self.local_sliders_box.setStyleSheet("""
+            QGroupBox {
+                color: #ccc; border: 1px solid #3a3a3a; border-radius: 4px;
+                margin-top: 8px; font-weight: 600; font-size: 12px;
+                padding-top: 8px;
+            }
+        """)
+        lsv = QVBoxLayout(self.local_sliders_box)
+        
+        self.local_sliders = {}
+        
+        def add_local_slider(name, label, lo, hi, step, decimals, default):
+            row = SliderRow(label, lo, hi, default, step,
+                            lambda val, n=name: self._on_local_slider_changed(n, val), decimals)
+            self.local_sliders[name] = row
+            lsv.addWidget(row)
+
+        add_local_slider("local_radius", "Size (Radius %)", 1.0, 100.0, 1.0, 0, 15.0)
+        add_local_slider("local_feather", "Feather %", 0.0, 100.0, 1.0, 0, 50.0)
+        add_local_slider("local_exposure", "Exposure (EV)", -3.0, 3.0, 0.05, 2, 0.0)
+        add_local_slider("local_contrast", "Contrast", -100.0, 100.0, 1, 0, 0.0)
+        add_local_slider("local_saturation", "Saturation", -100.0, 100.0, 1, 0, 0.0)
+        add_local_slider("local_clarity", "Clarity", -100.0, 100.0, 1, 0, 0.0)
+        
+        v.addWidget(self.local_sliders_box)
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    def _on_bw(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].black_and_white = checked
+        self._schedule_history("B&W")
+        self.render_timer.start()
+
+    def _rotate(self, direction):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.rotate_90 = (int(r.rotate_90) + direction) % 4
+        self._push_history("Rotate")
+        self.render_preview()
+
+    def _filter_corrections(self, text: str):
+        # Simple: could hide groups whose title doesn't match
+        pass
+
+    # ------------------------------------------------------------------
+    # Folder / load
+    # ------------------------------------------------------------------
+
+    def prev_image(self):
+        if not self.image_paths or self.current_path is None:
+            return
+        try:
+            idx = self.image_paths.index(self.current_path)
+        except ValueError:
+            return
+        if idx > 0:
+            self.load_image(self.image_paths[idx - 1])
+            self.filmstrip.setCurrentRow(idx - 1)
+
+    def next_image(self):
+        if not self.image_paths or self.current_path is None:
+            return
+        try:
+            idx = self.image_paths.index(self.current_path)
+        except ValueError:
+            return
+        if idx < len(self.image_paths) - 1:
+            self.load_image(self.image_paths[idx + 1])
+            self.filmstrip.setCurrentRow(idx + 1)
+
+    def _on_nav_pan(self, nx, ny):
+        """Center the main view on normalized navigator coordinates."""
+        from PyQt6.QtCore import QPoint
+        canvas = self.preview
+        pm = getattr(canvas, "_pixmap", None)
+        if pm is None:
+            return
+        scale = canvas.current_scale()
+        img_x = nx * pm.width()
+        img_y = ny * pm.height()
+        canvas._fit_mode = False
+        # Offset so that image point (img_x, img_y) lands at widget center
+        canvas._offset = QPoint(
+            int(-(img_x * scale - canvas.width() / 2) - (canvas.width() - pm.width() * scale) / 2),
+            int(-(img_y * scale - canvas.height() / 2) - (canvas.height() - pm.height() * scale) / 2),
+        )
+        canvas.update()
+
+    def open_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Choose a photo folder")
+        if folder:
+            self.open_folder_path(folder)
+
+    def open_folder_path(self, folder: str):
+        self.folder = folder
+        self.image_paths = sorted(
+            os.path.join(folder, f) for f in os.listdir(folder)
+            if f.lower().endswith(IMAGE_EXTS)
+        )
+        self.filmstrip.clear()
+        self.recipes = {}
+        self.meta_cache = {}
+        
+        # Sync Folder Tree index
+        if hasattr(self, "folder_tree"):
+            self.folder_tree.blockSignals(True)
+            idx = self.folder_model.index(folder)
+            self.folder_tree.setCurrentIndex(idx)
+            self.folder_tree.scrollTo(idx)
+            self.folder_tree.blockSignals(False)
+            
+        if not self.image_paths:
+            self.statusBar().showMessage("No supported images found.")
+            return
+        for p in self.image_paths:
+            item = QListWidgetItem(os.path.basename(p))
+            item.setData(Qt.ItemDataRole.UserRole, p)
+            self.filmstrip.addItem(item)
+        self.thumb_worker = ThumbnailWorker(self.image_paths)
+        self.thumb_worker.thumb_ready.connect(self.on_thumb_ready)
+        self.thumb_worker.start()
+        n_raw = sum(1 for p in self.image_paths if is_raw(p))
+        self.statusBar().showMessage(f"Loaded {len(self.image_paths)} images ({n_raw} RAW)")
+        self.load_image(self.image_paths[0])
+
+    def on_thumb_ready(self, path, pixmap):
+        for i in range(self.filmstrip.count()):
+            item = self.filmstrip.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == path:
+                item.setIcon(QIcon(pixmap))
+                break
+
+    def on_thumb_clicked(self, item):
+        self.load_image(item.data(Qt.ItemDataRole.UserRole))
+
+    def load_image(self, path: str):
+        self.current_path = path
+        self.statusBar().showMessage(f"Loading {os.path.basename(path)}…")
+        if self._load_worker is not None and self._load_worker.isRunning():
+            try:
+                self._load_worker.terminate()
+            except Exception:
+                pass
+        self._load_worker = LoadImageWorker(path)
+        self._load_worker.loaded.connect(self._on_image_loaded)
+        self._load_worker.failed.connect(self._on_image_failed)
+        self._load_worker.start()
+
+    def _on_image_loaded(self, path, img, meta):
+        if path != self.current_path:
+            return
+        self.original_bgr = img
+        self.meta_cache[path] = meta
+        if path not in self.recipes:
+            self.recipes[path] = Recipe()
+            if meta.get("is_raw"):
+                self.recipes[path].wb_as_shot = True
+        self.sync_sliders_to_recipe()
+        self.history_widget.clear()
+        self._push_history("Original")
+        self.render_preview()
+        if path in self.image_paths:
+            self.filmstrip.setCurrentRow(self.image_paths.index(path))
+        kind = "RAW" if meta.get("is_raw") else "RGB"
+        self.statusBar().showMessage(
+            f"{os.path.basename(path)}  •  {img.shape[1]}×{img.shape[0]}  •  {kind}"
+        )
+        if hasattr(self, "path_label"):
+            self.path_label.setText(path)
+        if hasattr(self, "count_label") and self.image_paths:
+            try:
+                i = self.image_paths.index(path) + 1
+            except ValueError:
+                i = 0
+            self.count_label.setText(f"  {i} / {len(self.image_paths)} images  ")
+        
+        # Update metadata display
+        if hasattr(self, "metadata_label"):
+            self._update_metadata_display(meta)
+
+    def _on_image_failed(self, path, err):
+        if path == self.current_path:
+            self.statusBar().showMessage(f"Failed: {err}")
+
+    # ------------------------------------------------------------------
+    def sync_sliders_to_recipe(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        for key, row in self.sliders.items():
+            if key.startswith("_hsl_"):
+                continue
+            if hasattr(r, key):
+                row.set_value(getattr(r, key))
+        self.wb_as_shot_cb.blockSignals(True)
+        self.wb_as_shot_cb.setChecked(r.wb_as_shot)
+        self.wb_as_shot_cb.blockSignals(False)
+        self.sliders["temperature"].setEnabled(not r.wb_as_shot)
+        self.sliders["tint"].setEnabled(not r.wb_as_shot)
+        self.tone_curve.set_values(
+            r.curve_shadows, r.curve_darks, r.curve_mids,
+            r.curve_lights, r.curve_highlights,
+        )
+        # HSL channel sliders
+        idx = r.hsl_active_channel
+        if "_hsl_hue" in self.sliders:
+            self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx])
+            self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx])
+            self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx])
+        if hasattr(self, "soft_proof_cb"):
+            self.soft_proof_cb.blockSignals(True)
+            self.soft_proof_cb.setChecked(r.soft_proof)
+            self.soft_proof_cb.blockSignals(False)
+            self.proof_combo.blockSignals(True)
+            self.proof_combo.setCurrentText(r.soft_proof_profile)
+            self.proof_combo.blockSignals(False)
+        if hasattr(self, "bw_cb"):
+            self.bw_cb.blockSignals(True)
+            self.bw_cb.setChecked(bool(r.black_and_white))
+            self.bw_cb.blockSignals(False)
+            
+        # Control points sync
+        self.selected_local_index = -1
+        self._update_local_points_list()
+        self._sync_local_sliders()
+        if hasattr(self, "local_active_cb"):
+            self.local_active_cb.blockSignals(True)
+            self.local_active_cb.setChecked(self._local_mode)
+            self.local_active_cb.blockSignals(False)
+        self.preview.set_control_points(r.local_points, -1)
+        
+        self.crop_tool_btn.setChecked(False)
+        self.preview.set_crop_mode(False)
+
+    def on_slider(self, key, value):
+        if self.current_path is None:
+            return
+        if key.startswith("_hsl_"):
+            return  # handled by _on_hsl_slider
+        if hasattr(self.recipes[self.current_path], key):
+            setattr(self.recipes[self.current_path], key, value)
+            self._schedule_history(key)
+        self.render_timer.start()
+
+    def _schedule_history(self, label: str):
+        # Debounced history push via render timer end
+        self._pending_history_label = label
+
+    def _push_history(self, label: str):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        self.history_widget.push(label, r.to_dict())
+
+    def _on_history_restore(self, index: int):
+        d = self.history_widget.get_recipe_dict(index)
+        if d is None or self.current_path is None:
+            return
+        self.recipes[self.current_path] = Recipe.from_dict(d)
+        self.sync_sliders_to_recipe()
+        self.render_preview()
+        self.statusBar().showMessage(f"Restored history #{index + 1}")
+
+    def _on_hsl_channel(self, idx: int):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.hsl_active_channel = idx
+        names = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
+        self.hsl_channel_label.setText(f"Channel: {names[idx]}")
+        # Load channel values into sliders
+        self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx])
+        self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx])
+        self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx])
+
+    def _on_hsl_slider(self, which: str, value: float):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        idx = r.hsl_active_channel
+        def replace(tup, i, v):
+            lst = list(tup)
+            lst[i] = v
+            return tuple(lst)
+        if which == "hue":
+            r.hsl_hue = replace(r.hsl_hue, idx, value)
+        elif which == "sat":
+            r.hsl_sat = replace(r.hsl_sat, idx, value)
+        else:
+            r.hsl_lum = replace(r.hsl_lum, idx, value)
+        self._schedule_history(f"HSL {which}")
+        self.render_timer.start()
+
+    def _on_soft_proof(self, checked: bool):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].soft_proof = checked
+        self.render_timer.start()
+
+    def _on_proof_profile(self, name: str):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].soft_proof_profile = name
+        self.render_timer.start()
+
+    def on_curve_changed(self, shadows, darks, mids, lights, highlights):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.curve_shadows = shadows
+        r.curve_darks = darks
+        r.curve_mids = mids
+        r.curve_lights = lights
+        r.curve_highlights = highlights
+        self.render_timer.start()
+
+    def on_wb_as_shot(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].wb_as_shot = checked
+        self.sliders["temperature"].setEnabled(not checked)
+        self.sliders["tint"].setEnabled(not checked)
+        self.render_timer.start()
+
+    def render_preview(self):
+        if self.original_bgr is None or self.current_path is None:
+            return
+        recipe = self.recipes[self.current_path]
+        meta = self.meta_cache.get(self.current_path, {})
+        multipliers = meta.get("wb_multipliers")
+        h, w = self.original_bgr.shape[:2]
+        max_dim = 1600
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            preview_src = cv2.resize(self.original_bgr, (int(w * scale), int(h * scale)),
+                                     interpolation=cv2.INTER_AREA)
+        else:
+            preview_src = self.original_bgr
+        result = apply_recipe(preview_src, recipe, wb_multipliers=multipliers)
+        self.histogram.set_image(result)
+        pix = cv_to_qpixmap(result)
+        orig_pix = cv_to_qpixmap(preview_src)
+        self.preview.set_image(pix, original=orig_pix)
+        # Update navigator with a small thumb of the result
+        if hasattr(self, "navigator"):
+            self.navigator.set_image(pix)
+            # Approximate full-frame viewport when fitted
+            self.navigator.set_viewport(0.0, 0.0, 1.0, 1.0)
+        if getattr(self, "_pending_history_label", None):
+            self._push_history(self._pending_history_label)
+            self._pending_history_label = None
+
+    def set_compare_mode(self, mode):
+        self.act_edit.setChecked(mode == ImageCanvas.MODE_NORMAL)
+        self.act_split.setChecked(mode == ImageCanvas.MODE_SPLIT)
+        self.act_side.setChecked(mode == ImageCanvas.MODE_SIDE_BY_SIDE)
+        self.preview.set_compare_mode(mode)
+
+    def toggle_crop_mode(self, checked):
+        if self.original_bgr is None:
+            self.crop_tool_btn.setChecked(False)
+            return
+        if checked and self.recipes[self.current_path].crop is not None:
+            self.recipes[self.current_path].crop = None
+            self.render_preview()
+        self.preview.set_crop_mode(checked)
+
+    def _aspect_ratio_value(self):
+        text = self.aspect_combo.currentText()
+        if text == "Free":
+            return None
+        if text == "Original":
+            if self.original_bgr is None:
+                return None
+            h, w = self.original_bgr.shape[:2]
+            return w / h
+        return {"1:1": 1.0, "4:3": 4/3, "3:2": 3/2, "16:9": 16/9}.get(text)
+
+    def on_crop_dragged(self, rect: QRect):
+        if self.current_path is None:
+            return
+        canvas = self.preview
+        pm = getattr(canvas, "_pixmap", None)
+        if pm is None:
+            return
+        scale = canvas.current_scale()
+        off = getattr(canvas, "_offset", None)
+        ox = (canvas.width() - pm.width() * scale) / 2.0 + (off.x() if off else 0)
+        oy = (canvas.height() - pm.height() * scale) / 2.0 + (off.y() if off else 0)
+
+        def to_norm(x, y):
+            ix = (x - ox) / (scale * max(pm.width(), 1))
+            iy = (y - oy) / (scale * max(pm.height(), 1))
+            return max(0.0, min(1.0, ix)), max(0.0, min(1.0, iy))
+
+        x0, y0 = to_norm(rect.left(), rect.top())
+        x1, y1 = to_norm(rect.right(), rect.bottom())
+        if x1 < x0:
+            x0, x1 = x1, x0
+        if y1 < y0:
+            y0, y1 = y1, y0
+        if x1 - x0 < 0.01 or y1 - y0 < 0.01:
+            return
+        ratio = self._aspect_ratio_value()
+        if ratio is not None:
+            w = x1 - x0
+            h = w / ratio
+            if y0 + h > 1.0:
+                h = 1.0 - y0
+                w = h * ratio
+            x1, y1 = x0 + w, y0 + h
+        self.recipes[self.current_path].crop = (x0, y0, x1, y1)
+        self.crop_tool_btn.setChecked(False)
+        self.preview.set_crop_mode(False)
+        self.render_preview()
+
+    def clear_crop(self):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].crop = None
+        self.crop_tool_btn.setChecked(False)
+        self.preview.set_crop_mode(False)
+        self.render_preview()
+
+    def _toggle_local_mode(self, checked=False):
+        self._local_mode = checked if isinstance(checked, bool) else (not self._local_mode)
+        self.act_local.setChecked(self._local_mode)
+        if hasattr(self, "local_active_cb"):
+            self.local_active_cb.blockSignals(True)
+            self.local_active_cb.setChecked(self._local_mode)
+            self.local_active_cb.blockSignals(False)
+        self.preview.local_mode = self._local_mode
+        if self._local_mode:
+            self.statusBar().showMessage("Control Point mode: click on image to place a local adjustment")
+            self.preview.setCursor(Qt.CursorShape.CrossCursor)
+            # Switch to Local tab (index 5)
+            if hasattr(self, "_cat_group"):
+                self._cat_buttons[5].setChecked(True)
+                self.tool_stack.setCurrentIndex(5)
+        else:
+            self.preview.setCursor(Qt.CursorShape.ArrowCursor)
+            self.statusBar().showMessage("Control Point mode off")
+
+
+    def copy_settings(self):
+        if self.current_path is None:
+            return
+        self._copied_recipe = self.recipes[self.current_path].to_dict()
+        self.statusBar().showMessage("Settings copied")
+
+    def paste_settings(self):
+        if self.current_path is None or not self._copied_recipe:
+            self.statusBar().showMessage("Nothing to paste")
+            return
+        self.recipes[self.current_path] = Recipe.from_dict(self._copied_recipe)
+        self.sync_sliders_to_recipe()
+        self._push_history("Paste Settings")
+        self.render_preview()
+        self.statusBar().showMessage("Settings pasted")
+
+
+    def auto_exposure(self):
+        if self.original_bgr is None or self.current_path is None:
+            return
+        import numpy as np
+        img = self.original_bgr
+        # Simple mid-gray target
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype("float32") / 255.0
+        med = float(np.median(gray))
+        if med < 1e-4:
+            return
+        # target ~0.36 mid
+        stops = float(np.log2(0.36 / med))
+        stops = max(-2.0, min(2.0, stops))
+        self.recipes[self.current_path].exposure = round(stops, 2)
+        self.sync_sliders_to_recipe()
+        self._push_history("Auto Exposure")
+        self.render_preview()
+
+    def auto_wb(self):
+        if self.original_bgr is None or self.current_path is None:
+            return
+        import numpy as np
+        img = self.original_bgr.astype("float32")
+        b, g, r = img[:,:,0].mean(), img[:,:,1].mean(), img[:,:,2].mean()
+        avg = (r + g + b) / 3.0 + 1e-6
+        # crude temp from R/B ratio
+        rb = r / (b + 1e-6)
+        # map ratio to temp-ish
+        temp = 5500 + (rb - 1.0) * 1500
+        temp = max(2500, min(9000, temp))
+        tint = (g / avg - 1.0) * 80
+        rcp = self.recipes[self.current_path]
+        rcp.wb_as_shot = False
+        rcp.temperature = round(temp, 0)
+        rcp.tint = round(max(-150, min(150, tint)), 0)
+        self.sync_sliders_to_recipe()
+        self._push_history("Auto WB")
+        self.render_preview()
+
+    def reset_current(self):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].reset()
+        self.sync_sliders_to_recipe()
+        self.render_preview()
+
+    def export_current(self):
+        if self.current_path is None:
+            return
+        base, ext = os.path.splitext(os.path.basename(self.current_path))
+        if is_raw(self.current_path):
+            ext = ".jpg"
+        suggested = os.path.join(self.folder or ".", f"{base}_edited{ext}")
+        out_path, _ = QFileDialog.getSaveFileName(
+            self, "Export image", suggested,
+            "JPEG (*.jpg);;PNG (*.png);;TIFF (*.tif);;All (*.*)"
+        )
+        if not out_path:
+            return
+        self.statusBar().showMessage("Exporting…")
+        meta = self.meta_cache.get(self.current_path, {})
+        self.export_worker = ExportWorker(
+            self.current_path, self.recipes[self.current_path], out_path,
+            wb_multipliers=meta.get("wb_multipliers"),
+        )
+        self.export_worker.finished_ok.connect(lambda p: self.statusBar().showMessage(f"Exported → {p}"))
+        self.export_worker.failed.connect(lambda e: self.statusBar().showMessage(f"Export failed: {e}"))
+        self.export_worker.start()
+
+    def save_preset(self):
+        if self.current_path is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save Preset", "preset.json", "JSON (*.json)")
+        if path:
+            try:
+                self.recipes[self.current_path].save_json(path)
+                self.statusBar().showMessage(f"Preset saved → {path}")
+            except Exception as e:
+                QMessageBox.warning(self, "Save Preset", str(e))
+
+    def load_preset(self):
+        if self.current_path is None:
+            QMessageBox.information(self, "Load Preset", "Open an image first.")
+            return
+        path, selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Load Preset",
+            "",
+            "All Presets (*.xmp *.json);;Lightroom XMP (*.xmp);;PhotoLab JSON (*.json);;All (*.*)",
+        )
+        if not path:
+            return
+        try:
+            base = self.recipes.get(self.current_path)
+            r = load_preset_file(path, base=None)
+            self.recipes[self.current_path] = r
+            self.sync_sliders_to_recipe()
+            self._push_history(f"Preset: {os.path.basename(path)}")
+            self.render_preview()
+            self.statusBar().showMessage(f"Preset loaded ← {os.path.basename(path)}")
+        except Exception as e:
+            QMessageBox.warning(self, "Load Preset", f"Could not load preset:\n{e}")
+
+    def load_preset_folder(self):
+        """Import all .xmp/.json presets from a folder and apply the first one (list in status)."""
+        if self.current_path is None:
+            QMessageBox.information(self, "Import Presets", "Open an image first.")
+            return
+        folder = QFileDialog.getExistingDirectory(self, "Choose preset folder (XMP/JSON)")
+        if not folder:
+            return
+        files = list_preset_files(folder)
+        if not files:
+            QMessageBox.information(self, "Import Presets", "No .xmp or .json presets found in that folder.")
+            return
+        # Apply first; report count
+        try:
+            r = load_preset_file(files[0])
+            self.recipes[self.current_path] = r
+            self.sync_sliders_to_recipe()
+            self._push_history(f"Preset: {os.path.basename(files[0])}")
+            self.render_preview()
+            names = ", ".join(os.path.basename(f) for f in files[:5])
+            more = f" (+{len(files)-5} more)" if len(files) > 5 else ""
+            self.statusBar().showMessage(f"Found {len(files)} presets. Applied: {names}{more}")
+            QMessageBox.information(
+                self,
+                "Presets Found",
+                f"Found {len(files)} preset(s) in:\n{folder}\n\nApplied:\n{os.path.basename(files[0])}\n\n"
+                "Use File → Load Preset… to apply others individually.",
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Import Presets", str(e))
+
+
+    # ----- Control Point Canvas & UI Interactions -----
+    def _on_canvas_point_selected(self, idx):
+        self.selected_local_index = idx
+        self.local_points_list.blockSignals(True)
+        self.local_points_list.setCurrentRow(idx)
+        self.local_points_list.blockSignals(False)
+        self._sync_local_sliders()
+
+    def _on_canvas_point_moved(self, idx, nx, ny):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        if r.local_points and 0 <= idx < len(r.local_points):
+            r.local_points[idx]["x"] = nx
+            r.local_points[idx]["y"] = ny
+            
+            # Update coordinate text in the list widget
+            self.local_points_list.blockSignals(True)
+            item = self.local_points_list.item(idx)
+            if item:
+                item.setText(f"Control Point {idx+1} ({nx:.2f}, {ny:.2f})")
+            self.local_points_list.blockSignals(False)
+            
+            self.render_timer.start()
+
+    def _on_canvas_point_resized(self, idx, radius):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        if r.local_points and 0 <= idx < len(r.local_points):
+            r.local_points[idx]["radius"] = radius
+            if "local_radius" in self.local_sliders:
+                self.local_sliders["local_radius"].blockSignals(True)
+                self.local_sliders["local_radius"].set_value(radius * 100.0)
+                self.local_sliders["local_radius"].blockSignals(False)
+            self.render_timer.start()
+
+    def _on_canvas_point_added(self, nx, ny):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        pt = {
+            "x": nx, "y": ny, "radius": 0.15, "feather": 0.5,
+            "exposure": 0.0, "contrast": 0.0, "saturation": 0.0, "clarity": 0.0,
+        }
+        if r.local_points is None:
+            r.local_points = []
+        r.local_points = list(r.local_points) + [pt]
+        self.selected_local_index = len(r.local_points) - 1
+        self._push_history("Add Control Point")
+        self._update_local_points_list()
+        self._sync_local_sliders()
+        self.preview.set_control_points(r.local_points, self.selected_local_index)
+        self.render_preview()
+
+    def _on_canvas_point_drag_finished(self):
+        self._push_history("Modify Control Point")
+
+    def _on_local_active_toggled(self, checked):
+        self._local_mode = checked
+        self.act_local.setChecked(checked)
+        self.preview.local_mode = checked
+        if checked:
+            self.statusBar().showMessage("Control Point mode: click on image to place a local adjustment")
+            self.preview.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.preview.setCursor(Qt.CursorShape.ArrowCursor)
+            self.statusBar().showMessage("Control Point mode off")
+
+    def _on_local_list_selection(self, row):
+        self.selected_local_index = row
+        self.preview.selected_point_index = row
+        self.preview.update()
+        self._sync_local_sliders()
+
+    def _on_add_local_clicked(self):
+        self.local_active_cb.setChecked(True)
+        self.statusBar().showMessage("Click on the preview image to place the control point.")
+
+    def _on_delete_local_clicked(self):
+        if self.current_path is None or self.selected_local_index < 0:
+            return
+        r = self.recipes[self.current_path]
+        if r.local_points and 0 <= self.selected_local_index < len(r.local_points):
+            r.local_points.pop(self.selected_local_index)
+            self.selected_local_index = min(self.selected_local_index, len(r.local_points) - 1)
+            self._push_history("Delete Control Point")
+            self._update_local_points_list()
+            self._sync_local_sliders()
+            self.preview.set_control_points(r.local_points, self.selected_local_index)
+            self.render_preview()
+
+    def _on_clear_local_clicked(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        if r.local_points:
+            r.local_points = []
+            self.selected_local_index = -1
+            self._push_history("Clear Control Points")
+            self._update_local_points_list()
+            self._sync_local_sliders()
+            self.preview.set_control_points([], -1)
+            self.render_preview()
+
+    def _on_local_slider_changed(self, name, val):
+        if self.current_path is None or self.selected_local_index < 0:
+            return
+        r = self.recipes[self.current_path]
+        if not r.local_points or not (0 <= self.selected_local_index < len(r.local_points)):
+            return
+        pt = r.local_points[self.selected_local_index]
+        if name == "local_radius":
+            pt["radius"] = val / 100.0
+        elif name == "local_feather":
+            pt["feather"] = val / 100.0
+        elif name == "local_exposure":
+            pt["exposure"] = val
+        elif name == "local_contrast":
+            pt["contrast"] = val
+        elif name == "local_saturation":
+            pt["saturation"] = val
+        elif name == "local_clarity":
+            pt["clarity"] = val
+        
+        self._schedule_history("Modify Control Point")
+        self.preview.set_control_points(r.local_points, self.selected_local_index)
+        self.render_timer.start()
+
+    def _update_local_points_list(self):
+        self.local_points_list.blockSignals(True)
+        self.local_points_list.clear()
+        if self.current_path is not None:
+            r = self.recipes[self.current_path]
+            if r.local_points:
+                for i, pt in enumerate(r.local_points):
+                    self.local_points_list.addItem(f"Control Point {i+1} ({pt['x']:.2f}, {pt['y']:.2f})")
+                if 0 <= self.selected_local_index < len(r.local_points):
+                    self.local_points_list.setCurrentRow(self.selected_local_index)
+        self.local_points_list.blockSignals(False)
+
+    def _sync_local_sliders(self):
+        has_sel = (self.selected_local_index >= 0 and self.current_path is not None)
+        if has_sel:
+            r = self.recipes[self.current_path]
+            has_sel = r.local_points and (0 <= self.selected_local_index < len(r.local_points))
+        
+        self.local_sliders_box.setEnabled(has_sel)
+        if has_sel:
+            pt = self.recipes[self.current_path].local_points[self.selected_local_index]
+            for name, row in self.local_sliders.items():
+                row.blockSignals(True)
+                
+            self.local_sliders["local_radius"].set_value(pt.get("radius", 0.15) * 100.0)
+            self.local_sliders["local_feather"].set_value(pt.get("feather", 0.5) * 100.0)
+            self.local_sliders["local_exposure"].set_value(pt.get("exposure", 0.0))
+            self.local_sliders["local_contrast"].set_value(pt.get("contrast", 0.0))
+            self.local_sliders["local_saturation"].set_value(pt.get("saturation", 0.0))
+            self.local_sliders["local_clarity"].set_value(pt.get("clarity", 0.0))
+            
+            for name, row in self.local_sliders.items():
+                row.blockSignals(False)
+
+    # ----- Folder Tree & Metadata Display -----
+    def _on_folder_tree_clicked(self, index):
+        path = self.folder_model.filePath(index)
+        if os.path.isdir(path):
+            self.open_folder_path(path)
+
+    def _update_metadata_display(self, meta: dict):
+        if not meta:
+            self.metadata_label.setText("No metadata available")
+            return
+        
+        lines = []
+        camera = meta.get("camera")
+        lens = meta.get("lens")
+        shutter = meta.get("shutter")
+        aperture = meta.get("aperture")
+        iso = meta.get("iso")
+        focal = meta.get("focal")
+        dt = meta.get("datetime")
+        
+        if camera:
+            lines.append(f"📷 <b>Camera:</b> {camera}")
+        if lens:
+            lines.append(f"🔍 <b>Lens:</b> {lens}")
+            
+        settings = []
+        if shutter: settings.append(shutter)
+        if aperture: settings.append(aperture)
+        if iso: settings.append(iso)
+        if focal: settings.append(focal)
+        
+        if settings:
+            lines.append(f"⚙️ <b>Settings:</b> {' • '.join(settings)}")
+        if dt:
+            lines.append(f"📅 <b>Taken:</b> {dt}")
+            
+        if not lines:
+            self.metadata_label.setText("No metadata available")
+        else:
+            self.metadata_label.setText("<br>".join(lines))
+
+
+# Backward-compatible alias
+PhotoStudio = PhotoLab

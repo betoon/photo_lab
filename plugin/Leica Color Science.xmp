@@ -1,0 +1,70 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="0.0"
+   crs:Contrast="24"
+   crs:Highlights="-15"
+   crs:Shadows="-8"
+   crs:Whites="6"
+   crs:Blacks="-12"
+   crs:Clarity="14"
+   crs:Vibrance="4"
+   crs:Saturation="-4"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="-3"
+   crs:SaturationAdjustmentRed="12"
+   crs:LuminanceAdjustmentRed="-2"
+   crs:HueAdjustmentOrange="-2"
+   crs:SaturationAdjustmentOrange="2"
+   crs:HueAdjustmentGreen="-4"
+   crs:SaturationAdjustmentGreen="-8"
+   crs:HueAdjustmentBlue="-8"
+   crs:SaturationAdjustmentBlue="8"
+   crs:LuminanceAdjustmentBlue="-6"
+   crs:Sharpness="50"
+   crs:SharpenRadius="0.8"
+   crs:SharpenDetail="35"
+   crs:SharpenEdgeMasking="10"
+   crs:LensManualDistortionAmount="0"
+   crs:VignettingAmount="-18"
+   crs:VignettingMidpoint="45"
+   crs:uuid="E67D29A0-875C-47B6-BAC5-DCE5FC86405C">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Leica Color Science</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

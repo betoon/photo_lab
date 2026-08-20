@@ -1,0 +1,79 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure2012="+0.05"
+   crs:Contrast2012="+16"
+   crs:Highlights2012="-10"
+   crs:Shadows2012="-8"
+   crs:Whites2012="+12"
+   crs:Blacks2012="-15"
+   crs:Clarity2012="+8"
+   crs:Texture="+6"
+   crs:Vibrance="+14"
+   crs:Saturation="+2"
+   crs:Temperature="-2"
+   crs:Tint="+1"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="+2"
+   crs:SaturationAdjustmentRed="+10"
+   crs:LuminanceAdjustmentRed="-2"
+   crs:HueAdjustmentOrange="+1"
+   crs:SaturationAdjustmentOrange="+4"
+   crs:LuminanceAdjustmentOrange="-1"
+   crs:HueAdjustmentYellow="+3"
+   crs:SaturationAdjustmentYellow="+12"
+   crs:HueAdjustmentGreen="-4"
+   crs:SaturationAdjustmentGreen="+6"
+   crs:LuminanceAdjustmentGreen="-4"
+   crs:HueAdjustmentBlue="-2"
+   crs:SaturationAdjustmentBlue="+15"
+   crs:LuminanceAdjustmentBlue="-5"
+   crs:PostCropVignetteAmount="-18"
+   crs:PostCropVignetteMidpoint="45"
+   crs:PostCropVignetteRoundness="+5"
+   crs:PostCropVignetteFeather="50"
+   crs:PostCropVignetteStyle="1"
+   crs:Sharpness="+55"
+   crs:SharpenRadius="0.8"
+   crs:SharpenDetail="35"
+   crs:SharpenEdgeMasking="10"
+   crs:uuid="8C2B4DE2-9F90-50E3-934C-8BE1BB5CA606">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Nikon_Nikkor_AIS_1980s</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

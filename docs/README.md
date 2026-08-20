@@ -1,0 +1,49 @@
+# PhotoLab — DxO-inspired photo editor (Python)
+
+## Layout (from DxO PhotoLab)
+- **Left:** Histogram (R/G/B/L toggles) · Move/Zoom navigator · Advanced History
+- **Center:** Large preview with zoom/pan/crop/compare
+- **Right:** Light · Color · Detail · Geometry · Effects
+- **Bottom:** Filmstrip
+- **Top:** Compare · Fit/1:1/zoom% · Prev/Next · Local Adjustments · Presets · Export
+
+## Tools
+- Exposure, Smart Lighting, Selective Tone, ClearView Plus
+- Contrast / Microcontrast / Clarity, Tone Curve
+- White Balance, Vibrancy, **HSL Color Wheel** (8 channels)
+- Soft Proofing (sRGB / Display P3 / Gray)
+- Denoise + Unsharp Mask
+- Horizon, Crop, Distortion, Perspective
+- **Control Points** (local radial adjustments)
+- History restore, RAW support, JSON presets
+
+## Shortcuts
+| Key | Action |
+|-----|--------|
+| Ctrl+O | Open folder |
+| Ctrl+E | Export |
+| Ctrl+R | Reset |
+| C | Split compare |
+| B | Side-by-side |
+| F | Fit |
+| 1 | 1:1 |
+| ← → | Prev / Next image |
+| Wheel | Zoom |
+| Space+drag | Pan |
+
+## Run
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+
+## Presets
+- **PhotoLab JSON** — File → Save Preset…
+- **Lightroom Classic / ACR XMP** — File → Load Preset… (select `.xmp`)
+- **Batch folder** — File → Import Preset Folder…
+
+Mapped from XMP: Exposure, Contrast, Highlights/Shadows/Whites/Blacks, Clarity, Dehaze→ClearView, Vibrance, Saturation, Temperature/Tint, Sharpening, Luminance/Color NR, Grain, HSL channel adjustments, B&W.
+
+## RAW support (via rawpy / LibRaw)
+Canon CR2/CR3 · Nikon NEF · Sony ARW · Fujifilm RAF · Olympus ORF · Panasonic RW2 · Pentax PEF · DNG · and more.

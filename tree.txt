@@ -1,0 +1,17 @@
+photo_lab/
+├── main.py
+├── main_window.py          # or photo_studio.py (you have both; consolidate)
+├── imaging/
+│   ├── __init__.py
+│   ├── recipe.py           # Recipe dataclass
+│   ├── pipeline.py         # apply_recipe
+│   ├── geometry.py
+│   ├── color.py            # WB, HSL, vibrance, curves
+│   └── denoise.py
+├── ui/
+│   ├── widgets.py
+│   ├── histogram.py
+│   ├── canvas.py
+│   └── panels/             # LightPanel, DetailPanel, etc.
+├── workers.py
+└── qt_utils.py
