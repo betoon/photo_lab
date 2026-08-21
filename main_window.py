@@ -24,10 +24,14 @@ from PyQt6.QtWidgets import (
 from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark,
                      recipe_to_dict, load_snapshots_sidecar, save_snapshots_sidecar)
+
+import logging
+
+log = logging.getLogger(__name__)
 from presets import load_preset_file, list_preset_files
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
-from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
+from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, HistoryWidget, NavigatorWidget, HSLPanelWidget
 from catalog import Catalog
 from app_paths import plugin_dir, ensure_plugin_dir, list_bundled_presets, manual_file, docs_dir
 import sys
@@ -82,7 +86,7 @@ class PhotoLab(QMainWindow):
                 _f.setPointSize(10)
                 self.setFont(_f)
         except Exception:
-            pass
+            log.debug("__init__: non-critical failure, continuing", exc_info=True)
         self.resize(1600, 1000)
         self.setStyleSheet(self._stylesheet())
 
@@ -569,7 +573,7 @@ class PhotoLab(QMainWindow):
         try:
             tb.setIconSize(QSize(16, 16))
         except Exception:
-            pass
+            log.debug("_build_toolbar: non-critical failure, continuing", exc_info=True)
         self.addToolBar(tb)
         self._main_toolbar = tb
 
@@ -797,7 +801,7 @@ class PhotoLab(QMainWindow):
             else:
                 self._append_log_line(str(message), str(level))
         except Exception:
-            pass
+            log.debug("log: non-critical failure, continuing", exc_info=True)
 
     # ------------------------------------------------------------------
     def _build_layout(self):
@@ -1400,20 +1404,13 @@ class PhotoLab(QMainWindow):
         self._add_slider(v, "vibrance", "Vibrancy", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "saturation", "Saturation", -100.0, 100.0, 1, 0, 0.0)
 
-        # HSL with color wheel
+        # HSL — Hue / Saturation / Luminance / All tabs, 8 color bands each
         box, v = collapsible_group("HSL", layout)
-        self.color_wheel = ColorWheelWidget()
-        self.color_wheel.channelChanged.connect(self._on_hsl_channel)
-        v.addWidget(self.color_wheel)
-        self.hsl_channel_label = QLabel("Channel: Red")
-        self.hsl_channel_label.setStyleSheet("color:#aaa; font-size:11px;")
-        v.addWidget(self.hsl_channel_label)
-        self._add_slider(v, "_hsl_hue", "Hue", -100.0, 100.0, 1, 0, 0.0)
-        self._add_slider(v, "_hsl_sat", "Saturation", -100.0, 100.0, 1, 0, 0.0)
-        self._add_slider(v, "_hsl_lum", "Luminance", -100.0, 100.0, 1, 0, 0.0)
-        self.sliders["_hsl_hue"].valueChanged.connect(lambda val: self._on_hsl_slider("hue", val))
-        self.sliders["_hsl_sat"].valueChanged.connect(lambda val: self._on_hsl_slider("sat", val))
-        self.sliders["_hsl_lum"].valueChanged.connect(lambda val: self._on_hsl_slider("lum", val))
+        self.hsl_panel = HSLPanelWidget()
+        self.hsl_panel.hueChanged.connect(lambda idx, val: self._on_hsl_row("hue", idx, val))
+        self.hsl_panel.satChanged.connect(lambda idx, val: self._on_hsl_row("sat", idx, val))
+        self.hsl_panel.lumChanged.connect(lambda idx, val: self._on_hsl_row("lum", idx, val))
+        v.addWidget(self.hsl_panel)
 
         # Split Toning
         box, v = collapsible_group("Split Toning", layout, checked=False)
@@ -2196,7 +2193,7 @@ class PhotoLab(QMainWindow):
             try:
                 self._refresh_collections_combo()
             except Exception:
-                pass
+                log.debug("refresh_library_tree: non-critical failure, continuing", exc_info=True)
 
         if not hasattr(self, "_lib_tree_model"):
             return
@@ -2405,7 +2402,7 @@ class PhotoLab(QMainWindow):
                 try:
                     self.catalog.remove_image(path)
                 except Exception:
-                    pass
+                    log.debug("_lib_move_to_trash: non-critical failure, continuing", exc_info=True)
                 # drop from develop state if open
                 if path in self.recipes:
                     del self.recipes[path]
@@ -2444,7 +2441,7 @@ class PhotoLab(QMainWindow):
         except ImportError:
             pass
         except Exception:
-            pass
+            log.debug("_trash_file: non-critical failure, continuing", exc_info=True)
         # Qt6 may not have a portable trash API; Windows recycle via PowerShell is heavy.
         # Fallback: move into sibling .photolab_trash directory
         trash_dir = os.path.join(os.path.dirname(path), ".photolab_trash")
@@ -2464,7 +2461,7 @@ class PhotoLab(QMainWindow):
             try:
                 os.rename(side, dest + ".photolab.json")
             except Exception:
-                pass
+                log.debug("_trash_file: non-critical failure, continuing", exc_info=True)
 
     def _lib_toggle_reject(self):
         paths = self._lib_selected_paths()
@@ -2515,7 +2512,7 @@ class PhotoLab(QMainWindow):
             with open(self._recent_path_file(), "w", encoding="utf-8") as f:
                 json.dump(self._recent_folders[:12], f)
         except Exception:
-            pass
+            log.debug("_save_recent_folders: non-critical failure, continuing", exc_info=True)
 
     def _add_recent_folder(self, folder: str):
         folder = os.path.normpath(folder)
@@ -2612,7 +2609,7 @@ class PhotoLab(QMainWindow):
                 if lst:
                     self._snapshots[self.current_path] = lst
             except Exception:
-                pass
+                log.debug("restore_snapshot: non-critical failure, continuing", exc_info=True)
         if not lst:
             QMessageBox.information(
                 self, "Snapshots",
@@ -2700,7 +2697,7 @@ class PhotoLab(QMainWindow):
             try:
                 self._load_worker.terminate()
             except Exception:
-                pass
+                log.debug("load_image: non-critical failure, continuing", exc_info=True)
         self._load_worker = LoadImageWorker(path)
         self._load_worker.loaded.connect(self._on_image_loaded)
         self._load_worker.failed.connect(self._on_image_failed)
@@ -2801,12 +2798,9 @@ class PhotoLab(QMainWindow):
         self.tone_curve.set_point_curve("r", getattr(r, "curve_r_points", None) or [])
         self.tone_curve.set_point_curve("g", getattr(r, "curve_g_points", None) or [])
         self.tone_curve.set_point_curve("b", getattr(r, "curve_b_points", None) or [])
-        # HSL channel sliders
-        idx = r.hsl_active_channel
-        if "_hsl_hue" in self.sliders:
-            self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx])
-            self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx])
-            self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx])
+        # HSL panel — all 8 bands, all three channels
+        if hasattr(self, "hsl_panel"):
+            self.hsl_panel.set_values(r.hsl_hue, r.hsl_sat, r.hsl_lum)
         if hasattr(self, "soft_proof_cb"):
             self.soft_proof_cb.blockSignals(True)
             self.soft_proof_cb.setChecked(r.soft_proof)
@@ -2951,14 +2945,14 @@ class PhotoLab(QMainWindow):
             if isinstance(rec, dict) and primary not in self._reject_flags:
                 currently = bool(rec.get("reject"))
         except Exception:
-            pass
+            log.debug("toggle_reject_current: non-critical failure, continuing", exc_info=True)
         new_val = not currently
         for path in paths:
             self._reject_flags[path] = new_val
             try:
                 self.catalog.set_reject(path, new_val)
             except Exception:
-                pass
+                log.debug("toggle_reject_current: non-critical failure, continuing", exc_info=True)
             self._refresh_filmstrip_item(path)
         n = len(paths)
         msg = "Rejected" if new_val else "Un-rejected"
@@ -3032,27 +3026,18 @@ class PhotoLab(QMainWindow):
         layout.addLayout(btns)
         dlg.exec()
 
-    def _on_hsl_channel(self, idx: int):
+    def _on_hsl_row(self, which: str, idx: int, value: float):
+        """One HSL band slider (Red..Magenta) moved in the Hue/Saturation/
+        Luminance/All panel. `idx` is the color band (0=Red..7=Magenta)."""
         if self.current_path is None:
             return
         r = self.recipes[self.current_path]
-        r.hsl_active_channel = idx
-        names = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
-        self.hsl_channel_label.setText(f"Channel: {names[idx]}")
-        # Load channel values into sliders
-        self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx])
-        self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx])
-        self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx])
 
-    def _on_hsl_slider(self, which: str, value: float):
-        if self.current_path is None:
-            return
-        r = self.recipes[self.current_path]
-        idx = r.hsl_active_channel
         def replace(tup, i, v):
             lst = list(tup)
             lst[i] = v
             return tuple(lst)
+
         if which == "hue":
             r.hsl_hue = replace(r.hsl_hue, idx, value)
         elif which == "sat":
@@ -3684,12 +3669,12 @@ class PhotoLab(QMainWindow):
             try:
                 self._refresh_filmstrip_item(p)
             except Exception:
-                pass
+                log.debug("start_culling_mode: non-critical failure, continuing", exc_info=True)
         if dlg.current_path():
             try:
                 self._select_filmstrip_path(dlg.current_path())
             except Exception:
-                pass
+                log.debug("start_culling_mode: non-critical failure, continuing", exc_info=True)
 
     def show_metadata(self):
         if self.current_path is None:
@@ -3702,7 +3687,7 @@ class PhotoLab(QMainWindow):
             for k, v in more.items():
                 meta.setdefault(k, v)
         except Exception:
-            pass
+            log.debug("show_metadata: non-critical failure, continuing", exc_info=True)
         lines = [f"Path: {self.current_path}", ""]
         for key in (
             "camera", "make", "lens", "focal", "aperture", "iso", "shutter",
@@ -3820,7 +3805,7 @@ class PhotoLab(QMainWindow):
                     if rec and rec.get("rating"):
                         stars = max(stars, int(rec.get("rating") or 0))
             except Exception:
-                pass
+                log.debug("_apply_filmstrip_filter: non-critical failure, continuing", exc_info=True)
             hide = min_r > 0 and stars < min_r
             if not hide and color_f:
                 cl = self._color_labels.get(path)
@@ -3871,7 +3856,7 @@ class PhotoLab(QMainWindow):
                 if hasattr(self, "catalog") and self.catalog is not None:
                     self.catalog.set_rating(path, stars)
             except Exception:
-                pass
+                log.debug("rate_current: non-critical failure, continuing", exc_info=True)
             self._refresh_filmstrip_item(path)
         n = len(paths)
         msg = f"Rating: {stars} star(s)" if stars else "Rating cleared"
@@ -4240,7 +4225,7 @@ class PhotoLab(QMainWindow):
                     if side is not None:
                         recipe = side
                 except Exception:
-                    pass
+                    log.debug("_lib_export_selected: non-critical failure, continuing", exc_info=True)
             meta = self.meta_cache.get(path, {})
             jobs.append({
                 "path": path,
@@ -5069,7 +5054,7 @@ class PhotoLab(QMainWindow):
             for c in self.catalog.list_collections():
                 self.lib_collections.addItem(f"{c['name']} ({c.get('count', 0)})", c["id"])
         except Exception:
-            pass
+            log.debug("_refresh_collections_combo: non-critical failure, continuing", exc_info=True)
         if cur_id is not None:
             for i in range(self.lib_collections.count()):
                 if self.lib_collections.itemData(i) == cur_id:
@@ -5832,7 +5817,7 @@ class PhotoLab(QMainWindow):
         try:
             self.catalog.close()
         except Exception:
-            pass
+            log.debug("closeEvent: non-critical failure, continuing", exc_info=True)
         super().closeEvent(event)
 
 
@@ -5931,7 +5916,7 @@ class _CullingDialog(QDialog):
                 if rec and rec.get("rating") is not None:
                     rating = int(rec.get("rating") or rating)
         except Exception:
-            pass
+            log.debug("_update_info: non-critical failure, continuing", exc_info=True)
         rejected = False
         try:
             if hasattr(parent, "catalog"):
@@ -5942,7 +5927,7 @@ class _CullingDialog(QDialog):
             if r is not None and getattr(r, "reject", False):
                 rejected = True
         except Exception:
-            pass
+            log.debug("_update_info: non-critical failure, continuing", exc_info=True)
         picked = bool(getattr(parent, "_pick_flags", {}).get(path, False))
         stars = "★" * rating + "☆" * (5 - rating)
         flags = []
@@ -5970,7 +5955,7 @@ class _CullingDialog(QDialog):
                 if hasattr(self._parent, "_image_ratings"):
                     self._parent._image_ratings[path] = stars
             except Exception:
-                pass
+                log.debug("_rate: non-critical failure, continuing", exc_info=True)
         self._update_info()
 
     def _toggle_reject(self):
@@ -5983,7 +5968,7 @@ class _CullingDialog(QDialog):
                 # set without full load if possible
                 self._parent.current_path = path
         except Exception:
-            pass
+            log.debug("_toggle_reject: non-critical failure, continuing", exc_info=True)
         try:
             self._parent.toggle_reject_current()
         except Exception:
@@ -5992,7 +5977,7 @@ class _CullingDialog(QDialog):
                 new_r = not bool(rec.get("reject"))
                 self._parent.catalog.set_reject(path, new_r)
             except Exception:
-                pass
+                log.debug("_toggle_reject: non-critical failure, continuing", exc_info=True)
         self._update_info()
 
     def _toggle_pick(self):

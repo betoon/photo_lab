@@ -1,6 +1,8 @@
 """
 Panorama to Video - Brian E. Toon, 2026, V2.6
 """
+from imaging import safe_pil_open
+
 import os
 import time
 import json
@@ -13,7 +15,9 @@ from tkinter import filedialog, messagebox, ttk
 import cv2
 import numpy as np
 from PIL import Image, ImageTk, ImageDraw
-Image.MAX_IMAGE_PIXELS = None
+import logging
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Feature #1: detect available hardware-accelerated encoders at startup so the
@@ -46,7 +50,7 @@ def _probe_available_encoders() -> list[tuple[str, str]]:
             if codec_id in out:
                 available.append((codec_id, label))
     except Exception:
-        pass
+        log.debug("_probe_available_encoders: non-critical failure, continuing", exc_info=True)
     return available
 
 AVAILABLE_ENCODERS: list[tuple[str, str]] = _probe_available_encoders()
@@ -668,7 +672,8 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
             writer.release()
             if os.path.exists(temp_master_path):
                 try: os.remove(temp_master_path)
-                except Exception: pass  # Fix #3
+                except Exception:
+                    log.debug("non-critical failure, continuing", exc_info=True)
             raise RenderCancelled("Render cancelled by user.")
 
     def _apply_fade(frame, fc):
@@ -794,10 +799,12 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
             except Exception:
                 tail = "(log unavailable)"
             try: os.remove(stderr_log_path)
-            except Exception: pass  # Fix #3
+            except Exception:
+                log.debug("non-critical failure, continuing", exc_info=True)
             raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=tail)
         try: os.remove(stderr_log_path)
-        except Exception: pass  # Fix #3
+        except Exception:
+            log.debug("non-critical failure, continuing", exc_info=True)
         if progress_callback: progress_callback(1.0)
     except RenderCancelled:
         raise
@@ -809,7 +816,8 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
     finally:
         if os.path.exists(temp_master_path):
             try: os.remove(temp_master_path)
-            except Exception: pass  # Fix #3
+            except Exception:
+                log.debug("non-critical failure, continuing", exc_info=True)
     return output_path
 
 class PanoramaToVideoApp:
@@ -1009,7 +1017,7 @@ class PanoramaToVideoApp:
             with open(SETTINGS_PATH, "w") as f:
                 json.dump(self._collect_settings(include_paths=True), f, indent=2)
         except Exception as e:
-            print(f"Could not save session settings: {e}")
+            log.warning("Could not save session settings: %s", e)
         self.root.destroy()
 
     def _load_session_settings(self):
@@ -1019,7 +1027,7 @@ class PanoramaToVideoApp:
                     d = json.load(f)
                 self._apply_settings(d)
             except Exception as e:
-                print(f"Could not restore last session: {e}")
+                log.warning("Could not restore last session: %s", e)
 
     def _on_canvas_configure(self, event):
         self.canvas.itemconfig(self.canvas_window, width=event.width)
@@ -1296,15 +1304,15 @@ class PanoramaToVideoApp:
         if not path or not os.path.isfile(path):
             return
         try:
-            img = Image.open(path)
-            img.thumbnail((720, 180))
-            self.preview_display_size = img.size
+            with safe_pil_open(path) as img:
+                img.thumbnail((720, 180))
+                self.preview_display_size = img.size
             # Fix #2: draw overlay only once; previously it was applied twice,
             # causing circles and lines to be rendered on top of each other.
-            self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-            self.preview_label.config(image=self._preview_thumb_img, text="")
+                self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+                self.preview_label.config(image=self._preview_thumb_img, text="")
         except Exception:
-            pass
+            log.debug("_refresh_still_preview: non-critical failure, continuing", exc_info=True)
 
     def clear_focus_points(self):
         self.start_focus = None
@@ -1444,13 +1452,13 @@ class PanoramaToVideoApp:
         self.image_path.set(path)
         self.stop_live_preview()
         try:
-            img = Image.open(path)
-            img.thumbnail((720, 180))
-            self.preview_display_size = img.size
-            self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-            self.preview_label.config(image=self._preview_thumb_img, text="")
+            with safe_pil_open(path) as img:
+                img.thumbnail((720, 180))
+                self.preview_display_size = img.size
+                self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+                self.preview_label.config(image=self._preview_thumb_img, text="")
         except Exception:
-            pass
+            log.debug("load_image_path: non-critical failure, continuing", exc_info=True)
         if output_folder and os.path.isdir(output_folder):
             self.output_folder.set(output_folder)
         else:
@@ -1536,12 +1544,13 @@ class PanoramaToVideoApp:
         path = self.image_path.get().strip()
         if path and os.path.isfile(path):
             try:
-                img = Image.open(path)
-                img.thumbnail((720, 180))
-                self.preview_display_size = img.size
-                self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-                self.preview_label.config(image=self._preview_thumb_img, text="")
-            except Exception: pass  # Fix #3
+                with safe_pil_open(path) as img:
+                    img.thumbnail((720, 180))
+                    self.preview_display_size = img.size
+                    self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+                    self.preview_label.config(image=self._preview_thumb_img, text="")
+            except Exception:
+                log.debug("non-critical failure, continuing", exc_info=True)
 
     def _live_preview_next_frame(self):
         if not self.preview_running or self.preview_img_cache is None:
@@ -1608,7 +1617,7 @@ class PanoramaToVideoApp:
             self.root.after(33, self._live_preview_next_frame)
         except Exception as e:
             self.stop_live_preview()
-            print(f"Preview clock cycle recovery exception: {e}")
+            log.debug("Preview clock cycle recovery exception: %s", e)
 
     def export_preview_frame(self):
         path = self.image_path.get().strip()
@@ -1801,13 +1810,13 @@ class PanoramaToVideoApp:
             if "image_path" in d and d["image_path"] and os.path.isfile(d["image_path"]):
                 self.image_path.set(d["image_path"])
                 try:
-                    img = Image.open(d["image_path"])
-                    img.thumbnail((720, 180))
-                    self.preview_display_size = img.size
-                    self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-                    self.preview_label.config(image=self._preview_thumb_img, text="")
+                    with safe_pil_open(d["image_path"]) as img:
+                        img.thumbnail((720, 180))
+                        self.preview_display_size = img.size
+                        self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+                        self.preview_label.config(image=self._preview_thumb_img, text="")
                 except Exception:
-                    pass
+                    log.debug("_apply_settings: non-critical failure, continuing", exc_info=True)
             if "output_folder" in d and d["output_folder"] and os.path.isdir(d["output_folder"]):
                 self.output_folder.set(d["output_folder"])
             if "audio_path" in d and d["audio_path"] and os.path.isfile(d["audio_path"]):
@@ -1830,7 +1839,7 @@ class PanoramaToVideoApp:
 
             self._on_resolution_change()
         except Exception as e:
-            print(f"Settings apply warning: {e}")
+            log.warning("Settings apply warning: %s", e)
 
     def save_preset(self):
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("Preset JSON", "*.json"), ("All Files", "*.*")], initialfile="pano_preset.json")
@@ -2062,7 +2071,7 @@ def main(argv=None):
                 app._apply_settings(json.load(f))
             app.status_label.config(text=f"Preset loaded: {os.path.basename(args.preset)}")
         except Exception as e:
-            print(f"Preset load failed: {e}")
+            log.warning("Preset load failed: %s", e)
     root.mainloop()
 
 if __name__ == "__main__":

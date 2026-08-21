@@ -10,6 +10,9 @@ from PyQt6.QtGui import QPixmap
 
 from imaging import apply_recipe, load_image, is_raw, _silent_imread, extract_embedded_preview
 from qt_utils import cv_to_qpixmap
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class ThumbnailWorker(QThread):
@@ -181,7 +184,7 @@ class CatalogThumbWorker(QThread):
                 try:
                     pix.save(cache, "JPEG", 85)
                 except Exception:
-                    pass
+                    log.debug("run: non-critical failure, continuing", exc_info=True)
                 self.thumb_ready.emit(path, pix)
             except Exception:
                 continue

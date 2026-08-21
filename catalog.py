@@ -13,7 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from imaging import IMAGE_EXTS, is_raw, extract_exif
+from imaging import IMAGE_EXTS, is_raw, extract_exif, safe_pil_open
+import logging
+
+log = logging.getLogger(__name__)
 
 # Default DB location
 def default_db_path() -> str:
@@ -178,7 +181,7 @@ class Catalog:
                 try:
                     self._conn.execute(f"ALTER TABLE images ADD COLUMN {name} {decl}")
                 except Exception:
-                    pass
+                    log.debug("_migrate: non-critical failure, continuing", exc_info=True)
         # Indexes that may depend on migrated columns
         for sql in (
             "CREATE INDEX IF NOT EXISTS idx_images_keywords ON images(keywords)",
@@ -215,14 +218,14 @@ class Catalog:
             try:
                 self._conn.execute(sql)
             except Exception:
-                pass
+                log.debug("_migrate: non-critical failure, continuing", exc_info=True)
         self._conn.commit()
 
     def close(self):
         try:
             self._conn.close()
         except Exception:
-            pass
+            log.debug("close: non-critical failure, continuing", exc_info=True)
 
     def connection(self) -> sqlite3.Connection:
         return self._conn
@@ -311,11 +314,10 @@ class Catalog:
         date_key = dt.strftime("%Y-%m-%d")
         width = height = None
         try:
-            from PIL import Image
-            with Image.open(path) as im:
+            with safe_pil_open(path) as im:
                 width, height = im.size
         except Exception:
-            pass
+            log.debug("build_record: non-critical failure, continuing", exc_info=True)
         return {
             "path": path,
             "folder": os.path.dirname(path),
@@ -410,8 +412,9 @@ class Catalog:
                     self.commit()
                 if progress_cb:
                     progress_cb(stats, path)
-            except Exception:
+            except Exception as exc:
                 stats["skipped"] += 1
+                stats.setdefault("errors", []).append({"path": path, "error": str(exc)})
                 if progress_cb:
                     progress_cb(stats, path)
         self.commit()
@@ -592,7 +595,7 @@ class Catalog:
                     (collection_id, p),
                 )
             except Exception:
-                pass
+                log.debug("add_to_collection: non-critical failure, continuing", exc_info=True)
         self._conn.commit()
 
     def remove_from_collection(self, collection_id: int, paths: Iterable[str]):
@@ -764,7 +767,7 @@ def import_photos(
             try:
                 progress_cb(i, len(sources), src)
             except Exception:
-                pass
+                log.debug("import_photos: non-critical failure, continuing", exc_info=True)
         try:
             if not os.path.isfile(src):
                 stats["skipped"] += 1

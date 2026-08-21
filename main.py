@@ -2,17 +2,31 @@
 
 import sys
 import os
+import logging
 import traceback
+
+from logging_setup import configure_logging, current_log_path
+
+log = logging.getLogger(__name__)
 
 
 def _excepthook(exc_type, exc, tb):
+    # Keep printing to stderr for anyone running from a console, but also
+    # make sure crashes land in the rotating log file — previously an
+    # unhandled exception was only ever visible if the user happened to be
+    # watching the terminal at the time.
     traceback.print_exception(exc_type, exc, tb)
+    log.critical(
+        "Unhandled exception", exc_info=(exc_type, exc, tb),
+    )
 
 
 sys.excepthook = _excepthook
 
 
 def main():
+    configure_logging()
+    log.info("PhotoLab starting (log file: %s)", current_log_path())
     os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
     os.environ.setdefault("QT_FONT_DPI", "96")
     try:
@@ -20,7 +34,7 @@ def main():
         if hasattr(cv2, "setLogLevel"):
             cv2.setLogLevel(3)
     except Exception:
-        pass
+        log.debug("Could not set OpenCV log level", exc_info=True)
 
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QFont
@@ -32,7 +46,7 @@ def main():
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
         )
     except Exception:
-        pass
+        log.debug("Could not set HiDPI rounding policy", exc_info=True)
 
     app = QApplication(sys.argv)
     app.setApplicationName("PhotoLab")

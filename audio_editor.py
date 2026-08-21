@@ -25,6 +25,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+import logging
+
+log = logging.getLogger(__name__)
+
 
 class AudioEditor(QMainWindow):
     def __init__(self):
@@ -327,7 +331,7 @@ class AudioEditor(QMainWindow):
                     self.update_progress_line(self.playback_offset + time.time() - start_time)
                     time.sleep(0.05)
             except Exception as e:
-                print("Playback error:", e)
+                log.warning("Playback error: %s", e)
             finally:
                 self.is_playing = False
                 self.playback_offset = 0.0
@@ -353,26 +357,26 @@ class AudioEditor(QMainWindow):
                 self.progress_line.set_xdata([pos_sec])
             self.canvas.draw_idle()
         except Exception:
-            pass
+            log.debug("update_progress_line: non-critical failure, continuing", exc_info=True)
 
     def remove_progress_line(self):
         if self.progress_line:
             try:
                 self.progress_line.remove()
             except Exception:
-                pass
+                log.debug("remove_progress_line: non-critical failure, continuing", exc_info=True)
             self.progress_line = None
             try:
                 self.canvas.draw_idle()
             except Exception:
-                pass
+                log.debug("remove_progress_line: non-critical failure, continuing", exc_info=True)
 
     def stop_playback(self):
         self.is_playing = False
         try:
             pygame.mixer.music.stop()
         except Exception:
-            pass
+            log.debug("stop_playback: non-critical failure, continuing", exc_info=True)
         self.btn_play.setText("Play")
         self.remove_progress_line()
         self.cleanup_temp_file()
@@ -382,7 +386,7 @@ class AudioEditor(QMainWindow):
             try:
                 os.remove(self.temp_file)
             except Exception:
-                pass
+                log.debug("cleanup_temp_file: non-critical failure, continuing", exc_info=True)
         self.temp_file = None
 
     def on_canvas_click(self, event):

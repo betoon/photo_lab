@@ -11,6 +11,9 @@ from __future__ import annotations
 import os
 import sys
 from typing import List, Optional
+import logging
+
+log = logging.getLogger(__name__)
 
 
 def app_root() -> str:
@@ -58,7 +61,7 @@ def plugin_dir() -> str:
     try:
         os.makedirs(user, exist_ok=True)
     except Exception:
-        pass
+        log.debug("plugin_dir: non-critical failure, continuing", exc_info=True)
     return user if os.path.isdir(user) else candidates[0]
 
 
@@ -68,7 +71,7 @@ def ensure_plugin_dir() -> str:
     try:
         os.makedirs(d, exist_ok=True)
     except Exception:
-        pass
+        log.debug("ensure_plugin_dir: non-critical failure, continuing", exc_info=True)
     return d
 
 
@@ -117,7 +120,7 @@ def _looks_like_lensfun_db(path: str) -> bool:
                 if any(f.lower().endswith(".xml") for f in os.listdir(sub)):
                     return True
             except Exception:
-                pass
+                log.debug("_looks_like_lensfun_db: non-critical failure, continuing", exc_info=True)
     return False
 
 
@@ -181,3 +184,23 @@ def primary_lensfun_db() -> Optional[str]:
     """First discoverable Lensfun DB path, or None."""
     paths = lensfun_db_paths()
     return paths[0] if paths else None
+
+
+def user_data_dir() -> str:
+    """Per-user PhotoLab data dir (catalog DB, logs, cache). Created if missing."""
+    d = os.path.join(os.path.expanduser("~"), ".photolab")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        log.debug("user_data_dir: non-critical failure, continuing", exc_info=True)
+    return d
+
+
+def log_dir() -> str:
+    """Directory for PhotoLab's rotating log files. Created if missing."""
+    d = os.path.join(user_data_dir(), "logs")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        log.debug("log_dir: non-critical failure, continuing", exc_info=True)
+    return d

@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import math
 import cv2
+from typing import Optional
+
 from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QWheelEvent, QMouseEvent, QPainterPath
-from PyQt6.QtWidgets import QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy
+from PyQt6.QtWidgets import (
+    QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy,
+    QVBoxLayout, QHBoxLayout, QPushButton, QButtonGroup, QStackedWidget,
+)
+
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class HistogramWidget(QWidget):
@@ -296,7 +305,7 @@ class ToneCurveWidget(QWidget):
             try:
                 pts.append([float(p[0]), float(p[1])])
             except Exception:
-                pass
+                log.debug("set_point_curve: non-critical failure, continuing", exc_info=True)
         if len(pts) < 2:
             pts = [[0.0, 0.0], [1.0, 1.0]]
         pts = sorted(pts, key=lambda t: t[0])
@@ -1700,3 +1709,181 @@ class HistoryWidget(QWidget):
         if 0 <= row < len(self._entries) - 1:
             return row + 1
         return None
+
+
+# ---------------------------------------------------------------------------
+# Lightroom-style HSL panel: Hue / Saturation / Luminance / All tabs, each
+# showing all 8 color-band rows (Red..Magenta) at once.
+# ---------------------------------------------------------------------------
+
+class HSLRow(QWidget):
+    """One color-band row: colored label, slider (-100..100), numeric value.
+    Double-click the slider to reset that band to 0."""
+    valueChanged = pyqtSignal(int, float)  # color_index, value
+
+    NAMES = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
+    COLORS = [
+        QColor(220, 70, 70), QColor(224, 140, 50), QColor(210, 190, 50),
+        QColor(90, 185, 90), QColor(60, 190, 190), QColor(90, 130, 224),
+        QColor(150, 100, 214), QColor(214, 90, 160),
+    ]
+
+    def __init__(self, color_index: int, value: float = 0.0):
+        super().__init__()
+        self.color_index = color_index
+        color = self.COLORS[color_index]
+        c = f"rgb({color.red()},{color.green()},{color.blue()})"
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 1, 0, 1)
+        layout.setSpacing(6)
+
+        name_lbl = QLabel(self.NAMES[color_index])
+        name_lbl.setFixedWidth(56)
+        name_lbl.setStyleSheet(f"color: {c}; font-size: 11px;")
+        layout.addWidget(name_lbl)
+
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(-100, 100)
+        self.slider.setValue(int(round(value)))
+        self.slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 3px; background: #3a3a3a; border-radius: 1px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {c}; width: 12px; height: 12px; margin: -5px 0;
+                border-radius: 6px; border: 1px solid #1a1a1a;
+            }}
+            QSlider::sub-page:horizontal {{ background: {c}; border-radius: 1px; }}
+            QSlider::add-page:horizontal {{ background: #3a3a3a; border-radius: 1px; }}
+        """)
+        self.slider.valueChanged.connect(self._on_slide)
+        self.slider.mouseDoubleClickEvent = self._reset
+        layout.addWidget(self.slider, 1)
+
+        self.value_lbl = QLabel(self._fmt(value))
+        self.value_lbl.setFixedWidth(30)
+        self.value_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.value_lbl.setStyleSheet("color:#ccc; font-size: 11px;")
+        layout.addWidget(self.value_lbl)
+
+    @staticmethod
+    def _fmt(v) -> str:
+        v = int(round(v))
+        return f"+{v}" if v > 0 else str(v)
+
+    def _on_slide(self, val):
+        self.value_lbl.setText(self._fmt(val))
+        self.valueChanged.emit(self.color_index, float(val))
+
+    def _reset(self, event):
+        self.slider.setValue(0)
+
+    def set_value(self, value):
+        self.slider.blockSignals(True)
+        self.slider.setValue(int(round(value)))
+        self.slider.blockSignals(False)
+        self.value_lbl.setText(self._fmt(value))
+
+
+class HSLGroup(QWidget):
+    """8 stacked HSLRows (Red..Magenta) for one channel type."""
+    valueChanged = pyqtSignal(int, float)  # color_index, value
+
+    def __init__(self, title: Optional[str] = None):
+        super().__init__()
+        v = QVBoxLayout(self)
+        v.setContentsMargins(4, 4, 4, 6)
+        v.setSpacing(3)
+        if title:
+            head = QLabel(title)
+            head.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            head.setStyleSheet(
+                "color:#ddd; font-size:12px; font-weight:600; padding-bottom:2px;"
+            )
+            v.addWidget(head)
+        self.rows = []
+        for i in range(8):
+            row = HSLRow(i, 0.0)
+            row.valueChanged.connect(self.valueChanged)
+            v.addWidget(row)
+            self.rows.append(row)
+
+    def set_values(self, values):
+        for i, row in enumerate(self.rows):
+            row.set_value(values[i] if i < len(values) else 0.0)
+
+
+class HSLPanelWidget(QWidget):
+    """Lightroom-style HSL / Color panel: Hue | Saturation | Luminance | All
+    tabs, each showing all 8 color-band rows. Matches the classic ACR/LR HSL
+    panel layout."""
+    hueChanged = pyqtSignal(int, float)  # color_index, value
+    satChanged = pyqtSignal(int, float)
+    lumChanged = pyqtSignal(int, float)
+
+    def __init__(self):
+        super().__init__()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+
+        tab_row = QHBoxLayout()
+        tab_row.setSpacing(2)
+        self._btn_group = QButtonGroup(self)
+        self._btn_group.setExclusive(True)
+        for i, name in enumerate(["Hue", "Saturation", "Luminance", "All"]):
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent; color:#999; border:none;
+                    border-bottom: 2px solid transparent; padding: 5px 8px; font-size: 11px;
+                }
+                QPushButton:checked { color:#fff; border-bottom: 2px solid #2a6ad4; font-weight:600; }
+                QPushButton:hover:!checked { color:#ccc; }
+            """)
+            self._btn_group.addButton(btn, i)
+            tab_row.addWidget(btn)
+            if i == 0:
+                btn.setChecked(True)
+        tab_row.addStretch(1)
+        outer.addLayout(tab_row)
+
+        self.stack = QStackedWidget()
+        outer.addWidget(self.stack)
+
+        self.hue_group = HSLGroup()
+        self.sat_group = HSLGroup()
+        self.lum_group = HSLGroup()
+        self.hue_group.valueChanged.connect(self.hueChanged)
+        self.sat_group.valueChanged.connect(self.satChanged)
+        self.lum_group.valueChanged.connect(self.lumChanged)
+        self.stack.addWidget(self.hue_group)
+        self.stack.addWidget(self.sat_group)
+        self.stack.addWidget(self.lum_group)
+
+        all_page = QWidget()
+        all_v = QVBoxLayout(all_page)
+        all_v.setContentsMargins(0, 0, 0, 0)
+        all_v.setSpacing(10)
+        self.hue_group_all = HSLGroup("Hue")
+        self.sat_group_all = HSLGroup("Saturation")
+        self.lum_group_all = HSLGroup("Luminance")
+        self.hue_group_all.valueChanged.connect(self.hueChanged)
+        self.sat_group_all.valueChanged.connect(self.satChanged)
+        self.lum_group_all.valueChanged.connect(self.lumChanged)
+        all_v.addWidget(self.hue_group_all)
+        all_v.addWidget(self.sat_group_all)
+        all_v.addWidget(self.lum_group_all)
+        self.stack.addWidget(all_page)
+
+        self._btn_group.idClicked.connect(self.stack.setCurrentIndex)
+
+    def set_values(self, hue, sat, lum):
+        self.hue_group.set_values(hue)
+        self.sat_group.set_values(sat)
+        self.lum_group.set_values(lum)
+        self.hue_group_all.set_values(hue)
+        self.sat_group_all.set_values(sat)
+        self.lum_group_all.set_values(lum)

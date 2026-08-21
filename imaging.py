@@ -11,18 +11,22 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field, fields
 from typing import Optional, Tuple
 
 import numpy as np
 import cv2
+import logging
+
+log = logging.getLogger(__name__)
 
 # Suppress OpenCV's noisy TIFF tag warnings (NEF/CR2 false probes)
 try:
     if hasattr(cv2, 'setLogLevel'):
         cv2.setLogLevel(3)  # ERROR only
 except Exception:
-    pass
+    log.debug("<module>: non-critical failure, continuing", exc_info=True)
 
 # rawpy/LibRaw is not thread-safe. ThumbnailWorker and LoadImageWorker (and
 # any other background threads) can call into it concurrently, which
@@ -30,6 +34,55 @@ except Exception:
 # "Out of order call of libraw function". Serialize all RAW decodes through
 # this lock so only one thread touches rawpy at a time.
 _rawpy_lock = threading.Lock()
+# Pillow raises DecompressionBombError for extremely large pixel dimensions.
+# PhotoLab is a trusted local photo application and must support panoramas,
+# scans, and very-high-resolution camera files, so use a narrowly-scoped
+# override while opening images rather than changing Pillow globally.
+_pillow_open_lock = threading.RLock()
+
+
+@contextmanager
+def _pillow_large_image_context():
+    """Temporarily disable Pillow's pixel-count bomb protection.
+
+    The setting is process-global in Pillow, therefore it is changed only for
+    the short duration of an Image.open()/metadata operation and restored even
+    when Pillow raises. This prevents large trusted local photographs from
+    being rejected while avoiding a permanent global configuration change.
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        yield
+        return
+
+    with _pillow_open_lock:
+        previous = getattr(Image, "MAX_IMAGE_PIXELS", None)
+        try:
+            Image.MAX_IMAGE_PIXELS = None
+            yield
+        finally:
+            Image.MAX_IMAGE_PIXELS = previous
+
+
+@contextmanager
+def safe_pil_open(path: str, *args, **kwargs):
+    """Open a trusted local image without Pillow's decompression-bomb limit.
+
+    This is intended for PhotoLab's own local-photo workflow. The image is
+    fully opened inside the protected context; callers that need lazy data
+    should call load()/thumbnail()/copy() before leaving the context.
+    """
+    from PIL import Image
+    with _pillow_large_image_context():
+        img = Image.open(path, *args, **kwargs)
+        try:
+            yield img
+        finally:
+            try:
+                img.close()
+            except Exception:
+                log.debug("safe_pil_open: non-critical failure, continuing", exc_info=True)
 
 IMAGE_EXTS = (
     # RGB
@@ -220,7 +273,7 @@ def _silent_imread(path: str, flags=None):
             try:
                 devnull.close()
             except Exception:
-                pass
+                log.debug("_silent_imread: non-critical failure, continuing", exc_info=True)
 
 
 def safe_imread(path: str):
@@ -234,9 +287,8 @@ def safe_imread(path: str):
 def extract_exif(path: str) -> dict:
     meta = {}
     try:
-        from PIL import Image
         from PIL.ExifTags import TAGS
-        with Image.open(path) as img:
+        with safe_pil_open(path) as img:
             exif = img._getexif()
             if exif:
                 for tag, value in exif.items():
@@ -266,7 +318,7 @@ def extract_exif(path: str) -> dict:
                     elif decoded == "DateTime":
                         meta.setdefault("datetime", str(value))
     except Exception:
-        pass
+        log.debug("extract_exif: non-critical failure, continuing", exc_info=True)
     return meta
 
 
@@ -304,17 +356,17 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                     try:
                         meta["wb_multipliers"] = list(raw.camera_whitebalance)
                     except Exception:
-                        pass
+                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
                     try:
                         meta["camera"] = str(getattr(raw, "camera", "") or "")
                     except Exception:
-                        pass
+                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
                     # Optics fields for Lensfun (best-effort across rawpy versions)
                     try:
                         if hasattr(raw, "lens") and raw.lens:
                             meta["lens"] = str(raw.lens)
                     except Exception:
-                        pass
+                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
                     try:
                         ed = getattr(raw, "exif_dict", None) or {}
                         flat = {}
@@ -328,12 +380,12 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                                 try:
                                     meta["focal"] = f"{float(v)}mm"
                                 except Exception:
-                                    pass
+                                    log.debug("load_image: non-critical failure, continuing", exc_info=True)
                             if ks in ("fnumber", "aperturevalue") and "aperture" not in meta:
                                 try:
                                     meta["aperture"] = f"f/{float(v)}"
                                 except Exception:
-                                    pass
+                                    log.debug("load_image: non-critical failure, continuing", exc_info=True)
                             if "lensmodel" in ks and "lens" not in meta:
                                 meta["lens"] = str(v)
                             if ks == "make":
@@ -341,10 +393,10 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                             if ks == "model" and not meta.get("camera"):
                                 meta["camera"] = str(v)
                     except Exception:
-                        pass
+                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
         except Exception as e:
             err = str(e)
-            print(f"rawpy failed for {path}: {e}")
+            log.warning("rawpy failed for %s: %s", path, e)
             # Retry only for libraw ordering / transient errors — not for true unsupported files
             if "Out of order" in err or "out of order" in err.lower():
                 try:
@@ -363,9 +415,9 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                             try:
                                 meta["wb_multipliers"] = list(raw.camera_whitebalance)
                             except Exception:
-                                pass
+                                log.debug("load_image: non-critical failure, continuing", exc_info=True)
                 except Exception as e2:
-                    print(f"rawpy retry failed for {path}: {e2}")
+                    log.warning("rawpy retry failed for %s: %s", path, e2)
     if img_bgr is None:
         if is_raw(path):
             # Don't fall back to cv2.imread() for RAW files — OpenCV's TIFF
@@ -610,7 +662,7 @@ def apply_white_balance(
             gains /= (gains[1] + 1e-6)
             return np.clip(img * gains[None, None, :], 0, 1)
         except Exception:
-            pass
+            log.debug("apply_white_balance: non-critical failure, continuing", exc_info=True)
 
     g1 = _wb_gains(temperature, tint)
     if dual and float(mix) > 0.5:
@@ -1236,7 +1288,7 @@ def extract_embedded_preview(path: str, max_side: int = 160):
                                         img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
                                     return img
                     except Exception:
-                        pass
+                        log.debug("extract_embedded_preview: non-critical failure, continuing", exc_info=True)
                     # Fallback: half-size quick postprocess
                     try:
                         rgb = raw.postprocess(
@@ -1494,7 +1546,7 @@ def apply_brush_masks(img, masks):
                         arr = cv2.resize(arr, (w, h), interpolation=cv2.INTER_LINEAR)
                     mask = np.clip(arr, 0, 1)
             except Exception:
-                pass
+                log.debug("apply_brush_masks: non-critical failure, continuing", exc_info=True)
 
         for s in strokes:
             cx = float(s.get("x", 0.5)) * (w - 1)
@@ -1718,12 +1770,12 @@ def try_lensfun_correct(img, meta, strength=1.0):
         try:
             focal = float(str(meta.get("focal", "50")).replace("mm", "").strip())
         except Exception:
-            pass
+            log.debug("try_lensfun_correct: non-critical failure, continuing", exc_info=True)
         aperture = 4.0
         try:
             aperture = float(str(meta.get("aperture", "4")).replace("f/", "").strip())
         except Exception:
-            pass
+            log.debug("try_lensfun_correct: non-critical failure, continuing", exc_info=True)
         cams = db.find_cameras(cam_maker, cam_model) if cam_maker else []
         if not cams and cam_maker:
             cams = db.find_cameras(cam_maker, None)
@@ -1987,7 +2039,7 @@ def merge_hdr_mertens(paths, align=True, max_dim=0,
             align_mtb = cv2.createAlignMTB()
             align_mtb.process(images, images)
         except Exception as e:
-            print(f"HDR align skipped: {e}")
+            log.debug("HDR align skipped: %s", e)
     merger = cv2.createMergeMertens(
         contrast_weight=contrast_weight,
         saturation_weight=saturation_weight,
@@ -2026,7 +2078,7 @@ def recipe_from_dict(d: dict):
             try:
                 setattr(r, k, v)
             except Exception:
-                pass
+                log.debug("recipe_from_dict: non-critical failure, continuing", exc_info=True)
     return r
 
 
@@ -2045,7 +2097,7 @@ def load_sidecar_data(image_path: str) -> dict:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except Exception as e:
-        print(f"sidecar load failed: {e}")
+        log.warning("sidecar load failed: %s", e)
         return {}
 
 
@@ -2087,7 +2139,7 @@ def load_recipe_sidecar(image_path: str):
     try:
         return recipe_from_dict(data.get("recipe") or data)
     except Exception as e:
-        print(f"sidecar recipe parse failed: {e}")
+        log.warning("sidecar recipe parse failed: %s", e)
         return None
 
 
