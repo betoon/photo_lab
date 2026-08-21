@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local PhotoLab catalog/cache
+.photolab/
+*.db
+*.db-wal
+*.db-shm
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Editor autosave backups (Notepad++, etc.)
+nppBackup/
+*.bak
+
+# Test run logs (generated, not source)
+test_logs/
+
+# Scratch/working copies — never commit a second copy of the project
+photo_lab_work/
+
+# Vendored lensfun: only data/db is needed at runtime (see lensfun/README-VENDORED.md).
+# Everything else (C++ source, docs, tests, build system) is intentionally excluded.
+lensfun/apps/
+lensfun/cmake/
+lensfun/docs/
+lensfun/include/
+lensfun/libs/
+lensfun/sourceforge-archive/
+lensfun/tests/
+lensfun/tools/
+lensfun/CMakeLists.txt
+lensfun/ChangeLog
