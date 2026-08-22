@@ -42,3 +42,4 @@ lensfun/tests/
 lensfun/tools/
 lensfun/CMakeLists.txt
 lensfun/ChangeLog
+*.zip

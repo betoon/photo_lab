@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import logging
 import threading
 from dataclasses import dataclass, asdict, field, fields
 from typing import Optional, Tuple
@@ -17,12 +18,14 @@ from typing import Optional, Tuple
 import numpy as np
 import cv2
 
+log = logging.getLogger(__name__)
+
 # Suppress OpenCV's noisy TIFF tag warnings (NEF/CR2 false probes)
 try:
     if hasattr(cv2, 'setLogLevel'):
         cv2.setLogLevel(3)  # ERROR only
 except Exception:
-    pass
+    log.debug("Could not set OpenCV log level", exc_info=True)
 
 # rawpy/LibRaw is not thread-safe. ThumbnailWorker and LoadImageWorker (and
 # any other background threads) can call into it concurrently, which
@@ -133,6 +136,13 @@ class Recipe:
     vignette: float = 0.0
     film_grain: float = 0.0
     black_and_white: bool = False
+    # Ansel Adams zone system (B&W)
+    zone_enabled: bool = False          # apply zone mapping when B&W (or force gray)
+    zone_placement: float = 5.0         # which zone mid-gray lands on (0..10)
+    zone_expansion: float = 0.0         # −100 compress … +100 expand tonal scale
+    zone_filter: str = "none"           # none|yellow|orange|red|green|blue (B&W contrast filters)
+    zone_snap: float = 0.0              # 0..100 pull tones toward zone centers
+    zone_overlay: bool = False          # false-color zone map in preview
     rotate_90: int = 0  # 0,1,2,3 quarter turns
     hdr_look: float = 0.0  # 0..100 single-image HDR-style tone mapping
 
@@ -432,7 +442,30 @@ def kelvin_to_rgb(kelvin):
     return rgb
 
 
+# Reference point apply_white_balance() normalizes against. Kept equal to
+# Recipe.temperature's own default (see imaging.Recipe) so that a Recipe
+# nobody has touched the WB fields on is always color-neutral. If you ever
+# change Recipe.temperature's default, update this to match.
+_WB_NEUTRAL_KELVIN = 5500.0
+
+
 def apply_white_balance(img, temperature, tint, as_shot=False, multipliers=None):
+    """White balance via a Kelvin/tint gain, anchored so the *default*
+    Recipe (temperature=5500, tint=0) is always a true no-op.
+
+    kelvin_to_rgb(5500) is NOT neutral RGB on its own — it's a warm color
+    (~R 1.0 / G 0.93 / B 0.87), since it approximates real blackbody
+    radiation rather than a white-balance correction curve. Using it
+    directly as a multiplicative gain (the previous implementation) meant
+    every Recipe that didn't explicitly set temperature/tint — which is
+    effectively every plugin/preset, and every freshly opened non-RAW
+    image — got a visible orange cast purely from this stage, with no way
+    to avoid it. Dividing by kelvin_to_rgb() at the Recipe's own default
+    temperature anchors the gain to exactly (1, 1, 1) at that default, so
+    moving the Temperature/Tint sliders away from their defaults still
+    warms/cools the image as expected, but leaving them untouched no
+    longer shifts color at all.
+    """
     if as_shot and multipliers is not None:
         try:
             r_m, g_m, b_m = float(multipliers[0]), float(multipliers[1]), float(multipliers[2])
@@ -440,8 +473,9 @@ def apply_white_balance(img, temperature, tint, as_shot=False, multipliers=None)
             gains /= (gains[1] + 1e-6)
             return np.clip(img * gains[None, None, :], 0, 1)
         except Exception:
-            pass
-    rgb = kelvin_to_rgb(temperature)
+            log.debug("apply_white_balance: non-critical failure, continuing", exc_info=True)
+    neutral_rgb = kelvin_to_rgb(_WB_NEUTRAL_KELVIN)
+    rgb = kelvin_to_rgb(temperature) / (neutral_rgb + 1e-6)
     tf = tint / 150.0
     rgb[0] *= (1.0 + tf * 0.4)
     rgb[1] *= (1.0 - tf * 0.6)
@@ -1181,10 +1215,30 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         d = np.clip(d, 0, 1.4) / 1.4
         img *= (1.0 - (r.vignette / 100.0) * (d ** 2))[..., None]
 
-    # Black and white
-    if getattr(r, "black_and_white", False):
-        gray = cv2.cvtColor(np.clip(img, 0, 1), cv2.COLOR_BGR2GRAY)
-        img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    # Black and white + Ansel Adams zone system
+    if getattr(r, "black_and_white", False) or getattr(r, "zone_enabled", False):
+        img = apply_zone_system(
+            img,
+            enabled=True,
+            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
+            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
+            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
+            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
+            overlay=bool(getattr(r, "zone_overlay", False)),
+            force_bw=True,
+        )
+    elif getattr(r, "zone_overlay", False):
+        # Overlay only without forcing B&W conversion of the edit stack
+        img = apply_zone_system(
+            img,
+            enabled=True,
+            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
+            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
+            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
+            snap=0.0,
+            overlay=True,
+            force_bw=False,
+        )
 
     # Film grain
     if abs(getattr(r, "film_grain", 0.0)) > 1e-4:
@@ -1193,6 +1247,106 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         img = np.clip(img + noise[..., None], 0, 1)
 
     return (np.clip(img, 0, 1) * 255.0).astype(np.uint8)
+
+
+# Spectral weights for classic B&W contrast filters (approx on sRGB primaries)
+_ZONE_FILTERS = {
+    "none": (0.299, 0.587, 0.114),
+    "yellow": (0.35, 0.55, 0.10),
+    "orange": (0.45, 0.45, 0.10),
+    "red": (0.65, 0.25, 0.10),
+    "green": (0.15, 0.70, 0.15),
+    "blue": (0.15, 0.25, 0.60),
+}
+
+# False-color palette for zone overlay (Zone 0..X)
+_ZONE_COLORS = np.array([
+    [0, 0, 0],        # 0 black
+    [20, 20, 40],     # I
+    [40, 50, 90],     # II
+    [30, 90, 120],    # III
+    [40, 140, 80],    # IV
+    [180, 180, 60],   # V mid
+    [200, 140, 40],   # VI
+    [220, 90, 40],    # VII
+    [230, 50, 50],    # VIII
+    [240, 200, 200],  # IX
+    [255, 255, 255],  # X white
+], dtype=np.float32) / 255.0
+
+
+def apply_zone_system(
+    img,
+    enabled: bool = True,
+    placement: float = 5.0,
+    expansion: float = 0.0,
+    filter_name: str = "none",
+    snap: float = 0.0,
+    overlay: bool = False,
+    force_bw: bool = True,
+):
+    """Ansel Adams–inspired zone mapping on float BGR [0,1].
+
+    placement: which zone (0..10) middle-gray (~18% / zone V) is mapped to.
+    expansion: −100 compresses dynamic range, +100 expands (N− / N+ feel).
+    filter_name: spectral B&W contrast filter.
+    snap: 0..100 pull luminance toward discrete zone centers.
+    overlay: paint false-color zones (preview aid).
+    """
+    if not enabled and not overlay:
+        return img
+    img = np.clip(img, 0, 1).astype(np.float32)
+    filt = _ZONE_FILTERS.get((filter_name or "none").lower(), _ZONE_FILTERS["none"])
+    # OpenCV BGR order
+    b, g, rch = img[..., 0], img[..., 1], img[..., 2]
+    # filt is RGB weights
+    lum = np.clip(filt[2] * b + filt[1] * g + filt[0] * rch, 0.0, 1.0)
+
+    # Map: log-ish zone scale. Zone V ≈ 0.18 reflectance → ~0.5 display gamma-ish.
+    # Work in linear-ish zone index 0..10
+    # Convert luminance to zone via log2 relative to mid-gray 0.18
+    mid_ref = 0.18
+    # Avoid log0
+    safe = np.maximum(lum, 1e-5)
+    # Stops relative to mid-gray; zone V = 5
+    stops = np.log2(safe / mid_ref)
+    zone = 5.0 + stops  # approximately
+
+    place = float(np.clip(placement if placement is not None else 5.0, 0.0, 10.0))
+    # Shift so mid-gray lands on placement
+    zone = zone + (place - 5.0)
+
+    # Expansion around placement (N+/N−)
+    exp = float(expansion or 0.0) / 100.0
+    scale = 1.0 + exp * 0.85
+    zone = place + (zone - place) * scale
+    zone = np.clip(zone, 0.0, 10.0)
+
+    snap_amt = float(np.clip(snap or 0.0, 0.0, 100.0)) / 100.0
+    if snap_amt > 0.01:
+        centers = np.round(zone)
+        zone = zone * (1.0 - snap_amt) + centers * snap_amt
+
+    # Zone → display luminance (approx Adams print scale)
+    # Zone 0→0, V→0.18 linear-ish, X→1 with soft shoulder
+    out_lin = mid_ref * (2.0 ** (zone - 5.0))
+    out_lin = np.clip(out_lin, 0.0, 1.0)
+    # Mild display gamma for screen
+    out = np.power(out_lin, 1.0 / 2.2)
+
+    if overlay:
+        idx = np.clip(np.round(zone).astype(np.int32), 0, 10)
+        colors = _ZONE_COLORS[idx]
+        if force_bw:
+            base = np.stack([out, out, out], axis=-1)
+            img = base * 0.35 + colors * 0.65
+        else:
+            img = img * 0.35 + colors * 0.65
+        return np.clip(img, 0, 1)
+
+    if force_bw:
+        img = np.stack([out, out, out], axis=-1)
+    return np.clip(img, 0, 1)
 
 
 def apply_hdr_look(img, amount):
