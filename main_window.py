@@ -1498,6 +1498,27 @@ class PhotoLab(QMainWindow):
         self.bw_cb.toggled.connect(self._on_bw)
         v.addWidget(self.bw_cb)
 
+        # Ansel Adams zone system — only takes effect on B&W images (see
+        # apply_recipe / apply_zone_system in imaging.py), so it's grouped
+        # right under Black & White.
+        box, v = collapsible_group("Zone System", layout, checked=False)
+        self.zone_enabled_cb = QCheckBox("Enable zone mapping")
+        self.zone_enabled_cb.toggled.connect(self._on_zone_toggle)
+        v.addWidget(self.zone_enabled_cb)
+        self._add_slider(v, "zone_placement", "Placement", 0.0, 10.0, 1, 1, 5.0)
+        self._add_slider(v, "zone_expansion", "Expansion", -100.0, 100.0, 1, 0, 0.0)
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Contrast filter"))
+        self.zone_filter_combo = QComboBox()
+        self.zone_filter_combo.addItems(["none", "yellow", "orange", "red", "green", "blue"])
+        self.zone_filter_combo.currentTextChanged.connect(self._on_zone_filter)
+        filter_row.addWidget(self.zone_filter_combo, 1)
+        v.addLayout(filter_row)
+        self._add_slider(v, "zone_snap", "Snap", 0.0, 100.0, 1, 0, 0.0)
+        self.zone_overlay_cb = QCheckBox("Show zone map overlay")
+        self.zone_overlay_cb.toggled.connect(self._on_zone_overlay)
+        v.addWidget(self.zone_overlay_cb)
+
         box, v = collapsible_group("Rotate", layout, checked=False)
         row = QHBoxLayout()
         rot_l = QPushButton("⟲ 90° CCW")
@@ -1692,6 +1713,27 @@ class PhotoLab(QMainWindow):
             return
         self.recipes[self.current_path].black_and_white = checked
         self._schedule_history("B&W")
+        self.render_timer.start()
+
+    def _on_zone_toggle(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].zone_enabled = checked
+        self._schedule_history("Zone System")
+        self.render_timer.start()
+
+    def _on_zone_filter(self, name):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].zone_filter = name
+        self._schedule_history("Zone filter")
+        self.render_timer.start()
+
+    def _on_zone_overlay(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].zone_overlay = checked
+        self._schedule_history("Zone overlay")
         self.render_timer.start()
 
     def _rotate(self, direction):
@@ -2404,7 +2446,17 @@ class PhotoLab(QMainWindow):
             self.bw_cb.blockSignals(True)
             self.bw_cb.setChecked(bool(r.black_and_white))
             self.bw_cb.blockSignals(False)
-            
+        if hasattr(self, "zone_enabled_cb"):
+            self.zone_enabled_cb.blockSignals(True)
+            self.zone_enabled_cb.setChecked(bool(getattr(r, "zone_enabled", False)))
+            self.zone_enabled_cb.blockSignals(False)
+            self.zone_filter_combo.blockSignals(True)
+            self.zone_filter_combo.setCurrentText(getattr(r, "zone_filter", "none") or "none")
+            self.zone_filter_combo.blockSignals(False)
+            self.zone_overlay_cb.blockSignals(True)
+            self.zone_overlay_cb.setChecked(bool(getattr(r, "zone_overlay", False)))
+            self.zone_overlay_cb.blockSignals(False)
+
         # Control points sync
         self.selected_local_index = -1
         self._update_local_points_list()

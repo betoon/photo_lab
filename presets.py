@@ -134,9 +134,19 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
         r.saturation = max(-100.0, min(100.0, sat))
 
     # White balance
+    #
+    # Real Lightroom/ACR exports never put a Temperature below 2000 here —
+    # 2000K is the floor LR's own Temperature slider enforces, so anything
+    # smaller is not a deliberate absolute-Kelvin value. These bundled
+    # plugin/*.xmp files contain small values like "4" or "8" for
+    # crs:Temperature (evidently meant as a minor relative nudge, not
+    # degrees Kelvin) — treating those as absolute Kelvin and clamping to
+    # the 2000K floor produced a strong, unintended orange cast on nearly
+    # every bundled plugin. Skip implausible values instead of clamping
+    # them, leaving Recipe.temperature at its neutral default.
     temp = _f(g("Temperature"))
-    if temp is not None:
-        r.temperature = max(2000.0, min(12000.0, temp))
+    if temp is not None and temp >= 2000.0:
+        r.temperature = min(12000.0, temp)
         r.wb_as_shot = False
     tint = _f(g("Tint"))
     if tint is not None:
