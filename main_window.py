@@ -18,30 +18,18 @@ from PyQt6.QtWidgets import (
     QGroupBox, QPushButton, QSplitter, QStatusBar, QComboBox, QTabWidget,
     QCheckBox, QFrame, QLineEdit, QToolButton, QSizePolicy, QMessageBox, QStackedWidget, QButtonGroup, QMenu,
     QTreeView, QTextEdit, QTextBrowser, QDockWidget, QPlainTextEdit, QApplication,
-    QDialog, QDialogButtonBox, QFormLayout, QInputDialog, QProgressDialog,QDoubleSpinBox,
+    QDialog, QDialogButtonBox, QFormLayout, QInputDialog, QProgressDialog,
 )
 
 from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
-                     load_recipe_sidecar, save_recipe_sidecar, apply_watermark,
-                     recipe_to_dict, load_snapshots_sidecar, save_snapshots_sidecar)
-
-import logging
-
-log = logging.getLogger(__name__)
+                     load_recipe_sidecar, save_recipe_sidecar, apply_watermark)
 from presets import load_preset_file, list_preset_files
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
-from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, HistoryWidget, NavigatorWidget, HSLPanelWidget
+from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
 from catalog import Catalog
-from app_paths import plugin_dir, ensure_plugin_dir, list_bundled_presets, manual_file, docs_dir
 import sys
-import hashlib
-import json
 from datetime import datetime
-
-# Interactive preview works on a persistent proxy so slider drags stay responsive.
-PROXY_MAX_DIM = 1800
-PREVIEW_CACHE_MAX = 8
 
 
 def collapsible_group(title: str, parent_layout, checked=True):
@@ -86,7 +74,7 @@ class PhotoLab(QMainWindow):
                 _f.setPointSize(10)
                 self.setFont(_f)
         except Exception:
-            log.debug("__init__: non-critical failure, continuing", exc_info=True)
+            pass
         self.resize(1600, 1000)
         self.setStyleSheet(self._stylesheet())
 
@@ -96,10 +84,6 @@ class PhotoLab(QMainWindow):
         self.meta_cache: dict[str, dict] = {}
         self.current_path: str | None = None
         self.original_bgr: np.ndarray | None = None
-        self.proxy_bgr: np.ndarray | None = None
-        self._proxy_scale: float = 1.0
-        self._preview_cache: dict[str, tuple] = {}
-        self._preview_cache_order: list[str] = []
 
         self.render_timer = QTimer()
         self.render_timer.setSingleShot(True)
@@ -113,26 +97,14 @@ class PhotoLab(QMainWindow):
         self._copied_recipe = None
         self.autosave_sidecars = False
         self._recent_folders = []
-        self._snapshots = {}  # path -> list[{name, recipe_dict, ts?}]
+        self._snapshots = {}  # path -> list[{name, recipe_dict}]
         self._load_recent_folders()
         self._image_ratings = {}  # path -> 0..5 for develop filmstrip
-        self._reject_flags = {}   # path -> bool
-        self._pick_flags = {}     # path -> bool
-        # Color labels: None | red | yellow | green | blue | purple
-        self._color_labels = {}
-        self.COLOR_LABELS = {
-            "red": ("🔴", "#e11d48"),
-            "yellow": ("🟡", "#eab308"),
-            "green": ("🟢", "#22c55e"),
-            "blue": ("🔵", "#3b82f6"),
-            "purple": ("🟣", "#a855f7"),
-        }
         self.catalog = Catalog()
         self._library_mode = False
         self._scan_worker = None
         self._lib_thumb_worker = None
         self._lib_records = []
-        ensure_plugin_dir()
 
         self._build_menu_bar()
         self._build_toolbar()
@@ -292,7 +264,6 @@ class PhotoLab(QMainWindow):
         self.recent_menu = file_m.addMenu("Recent Folders")
         self._rebuild_recent_menu()
         file_m.addSeparator()
-        add_action(file_m, "Import Photos…", self.import_photos_dialog, "Ctrl+Shift+I")
         add_action(file_m, "Export to Disk…", self.export_current, "Ctrl+E")
         add_action(file_m, "Batch Export Selected…", self.batch_export_selected, "Ctrl+Shift+E")
         file_m.addSeparator()
@@ -356,7 +327,6 @@ class PhotoLab(QMainWindow):
         self.act_debug = add_action(view_m, "Debug Console", self.toggle_debug_console, "Ctrl+Shift+D", checkable=True)
         view_m.addSeparator()
         add_action(view_m, "Full Screen", self.toggle_fullscreen, "F11")
-        add_action(view_m, "Culling Mode (full screen)", self.start_culling_mode, "F7")
         add_action(view_m, "Image Metadata…", self.show_metadata, "I")
 
         # ----- Image -----
@@ -370,22 +340,11 @@ class PhotoLab(QMainWindow):
         image_m.addSeparator()
         add_action(image_m, "Reject / Unreject", self.toggle_reject_current, "X")
         add_action(image_m, "Pick / Unpick", self.toggle_pick_current, "U")
-        color_m = image_m.addMenu("Color Label")
-        add_action(color_m, "None (clear)", lambda: self.set_color_label(None), "Ctrl+Shift+0")
-        add_action(color_m, "Red", lambda: self.set_color_label("red"), "Ctrl+Shift+1")
-        add_action(color_m, "Yellow", lambda: self.set_color_label("yellow"), "Ctrl+Shift+2")
-        add_action(color_m, "Green", lambda: self.set_color_label("green"), "Ctrl+Shift+3")
-        add_action(color_m, "Blue", lambda: self.set_color_label("blue"), "Ctrl+Shift+4")
-        add_action(color_m, "Purple", lambda: self.set_color_label("purple"), "Ctrl+Shift+5")
-        image_m.addSeparator()
-        add_action(image_m, "Compare Selected…", self.compare_selected_images, "Ctrl+Shift+B")
         image_m.addSeparator()
         add_action(image_m, "Local Adjustments (Control Point)", self._toggle_local_mode)
         image_m.addSeparator()
         add_action(image_m, "Auto Exposure", self.auto_exposure)
         add_action(image_m, "Auto White Balance", self.auto_wb)
-        add_action(image_m, "Match Exposure to Current", self.match_exposure_selected)
-        add_action(image_m, "Match White Balance to Current", self.match_wb_selected)
         add_action(image_m, "White Balance Picker", self.toggle_wb_picker, "W")
         image_m.addSeparator()
         add_action(image_m, "Graduated Filter", self.toggle_gradient_mode, "G")
@@ -414,27 +373,28 @@ class PhotoLab(QMainWindow):
             "Ctrl+E\tExport\n"
             "Ctrl+R\tReset image\n"
             "Ctrl+Q\tExit\n"
-            "C\tSplit compare (before/after)\n"
+            "C\tSplit compare\n"
             "\\ or `\tHold for temporary before view\n"
-            "B\tSide-by-side before/after\n"
-            "Ctrl+Shift+B\tCompare selected filmstrip images\n"
+            "B\tSide-by-side compare\n"
             "F\tFit to window\n"
             "1\tActual size 1:1\n"
-            "Left/Right\tPrev / Next (skips filtered)\n"
-            "0–5\tRate selected / current\n"
-            "X / U\tReject / Pick selected\n"
-            "Ctrl+Shift+0–5\tColor label (clear / R Y G B Purple)\n"
+            "Left/Right\tPrev / Next image\n"
             "Wheel\tZoom\n"
             "Space+drag\tPan",
         )
 
 
     def _manual_path(self, name: str) -> str:
-        """Resolve docs/*.md for source runs and frozen executables."""
-        found = manual_file(name)
-        if found:
-            return found
-        return os.path.join(docs_dir(), name)
+        """Resolve docs/*.md next to the app or cwd."""
+        candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", name),
+            os.path.join(os.getcwd(), "docs", name),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), name),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+        return candidates[0]
 
     def _show_markdown_manual(self, title: str, filename: str):
         path = self._manual_path(filename)
@@ -456,9 +416,7 @@ class PhotoLab(QMainWindow):
         else:
             browser.setPlainText(
                 f"Manual not found:\n{path}\n\n"
-                "Help always loads from the docs/ folder next to the app "
-                "(or inside the frozen bundle). Place USER_MANUAL.md and "
-                "DEVELOPER_MANUAL.md there."
+                "Place USER_MANUAL.md and DEVELOPER_MANUAL.md in a docs/ folder next to the app."
             )
         layout.addWidget(browser)
         close_btn = QPushButton("Close")
@@ -573,7 +531,7 @@ class PhotoLab(QMainWindow):
         try:
             tb.setIconSize(QSize(16, 16))
         except Exception:
-            log.debug("_build_toolbar: non-critical failure, continuing", exc_info=True)
+            pass
         self.addToolBar(tb)
         self._main_toolbar = tb
 
@@ -801,7 +759,7 @@ class PhotoLab(QMainWindow):
             else:
                 self._append_log_line(str(message), str(level))
         except Exception:
-            log.debug("log: non-critical failure, continuing", exc_info=True)
+            pass
 
     # ------------------------------------------------------------------
     def _build_layout(self):
@@ -905,8 +863,6 @@ class PhotoLab(QMainWindow):
         hb2.setContentsMargins(6, 10, 6, 6)
         self.history_widget = HistoryWidget()
         self.history_widget.restoreRequested.connect(self._on_history_restore)
-        self.history_widget.previewRequested.connect(self._on_history_preview)
-        self.history_widget.copySettingsRequested.connect(self._on_history_copy_settings)
         self.history_widget.setMinimumHeight(100)
         hb2.addWidget(self.history_widget)
         ll.addWidget(hist_box2, stretch=1)
@@ -943,7 +899,6 @@ class PhotoLab(QMainWindow):
         self.preview.brushStrokeFinished.connect(self._on_brush_stroke_finished)
         self.preview.brushMaskChanged.connect(self._on_brush_changed)
         self.preview.horizonLineFinished.connect(self._on_horizon_line)
-        self.preview.keystoneChanged.connect(self._on_keystone_changed)
         splitter.addWidget(self.preview)
 
         # RIGHT: DxO-style tool panel
@@ -1055,33 +1010,6 @@ class PhotoLab(QMainWindow):
             self.film_rating_filter.addItem(f"{i}+", i)
         self.film_rating_filter.currentIndexChanged.connect(self._apply_filmstrip_filter)
         fr.addWidget(self.film_rating_filter)
-        fr.addSpacing(8)
-        fr.addWidget(QLabel("Color"))
-        self.film_color_filter = QComboBox()
-        self.film_color_filter.addItem("All", "")
-        self.film_color_filter.addItem("None", "none")
-        for key, (emoji, _hex) in self.COLOR_LABELS.items():
-            self.film_color_filter.addItem(f"{emoji} {key.title()}", key)
-        self.film_color_filter.currentIndexChanged.connect(self._apply_filmstrip_filter)
-        fr.addWidget(self.film_color_filter)
-        fr.addSpacing(8)
-        # Quick multi-select actions on the filmstrip bar
-        btn_rate = QPushButton("★ Rate")
-        btn_rate.setToolTip("Apply rating to selected (or current) — use keys 0–5")
-        btn_rate.clicked.connect(lambda: self._prompt_rate_selected())
-        fr.addWidget(btn_rate)
-        btn_pick = QPushButton("✓ Pick")
-        btn_pick.setToolTip("Toggle pick on selected filmstrip images (U)")
-        btn_pick.clicked.connect(self.toggle_pick_current)
-        fr.addWidget(btn_pick)
-        btn_rej = QPushButton("⛔ Reject")
-        btn_rej.setToolTip("Toggle reject on selected filmstrip images (X)")
-        btn_rej.clicked.connect(self.toggle_reject_current)
-        fr.addWidget(btn_rej)
-        btn_cmp = QPushButton("Compare")
-        btn_cmp.setToolTip("Side-by-side compare of selected images (Ctrl+Shift+B)")
-        btn_cmp.clicked.connect(self.compare_selected_images)
-        fr.addWidget(btn_cmp)
         fr.addStretch(1)
         fb.addLayout(fr)
         fb.addWidget(self.filmstrip)
@@ -1153,45 +1081,6 @@ class PhotoLab(QMainWindow):
         kw_save.clicked.connect(self._on_lib_save_keywords)
         kw_row.addWidget(kw_save)
         ll.addLayout(kw_row)
-        people_row = QHBoxLayout()
-        self.lib_people_edit = QLineEdit()
-        self.lib_people_edit.setPlaceholderText("People / faces (comma-separated)")
-        people_row.addWidget(self.lib_people_edit, 1)
-        people_save = QPushButton("Save people")
-        people_save.clicked.connect(self._on_lib_save_people)
-        people_row.addWidget(people_save)
-        ll.addLayout(people_row)
-
-        coll_box = QLabel("Collections")
-        coll_box.setStyleSheet("color:#aaa; font-size:11px; margin-top:6px;")
-        ll.addWidget(coll_box)
-        self.lib_collections = QComboBox()
-        self.lib_collections.setToolTip("Select a collection to view its members")
-        self.lib_collections.currentIndexChanged.connect(self._on_lib_collection_changed)
-        ll.addWidget(self.lib_collections)
-        coll_row = QHBoxLayout()
-        new_coll = QPushButton("New")
-        new_coll.clicked.connect(self._lib_new_collection)
-        coll_row.addWidget(new_coll)
-        add_coll = QPushButton("Add selected")
-        add_coll.setToolTip("Add selected library thumbs to the current collection")
-        add_coll.clicked.connect(self._lib_add_to_collection)
-        coll_row.addWidget(add_coll)
-        del_coll = QPushButton("Delete coll.")
-        del_coll.clicked.connect(self._lib_delete_collection)
-        coll_row.addWidget(del_coll)
-        ll.addLayout(coll_row)
-
-        tools_row = QHBoxLayout()
-        dups_btn = QPushButton("Find duplicates")
-        dups_btn.setToolTip("Group images that share the same content fingerprint")
-        dups_btn.clicked.connect(self._lib_find_duplicates)
-        tools_row.addWidget(dups_btn)
-        vc_btn = QPushButton("Virtual copy")
-        vc_btn.setToolTip("Create a virtual copy of the current Develop image (sidecar recipe clone)")
-        vc_btn.clicked.connect(self._create_virtual_copy)
-        tools_row.addWidget(vc_btn)
-        ll.addLayout(tools_row)
 
         self.lib_date_tree = QTreeView()
         self.lib_date_tree.setHeaderHidden(True)
@@ -1320,37 +1209,11 @@ class PhotoLab(QMainWindow):
         self._add_slider(v, "microcontrast", "Microcontrast", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "clarity", "Clarity", -100.0, 100.0, 1, 0, 0.0)
 
-        # Tone Curve (parametric + point L/RGB)
+        # Tone Curve
         box, v = collapsible_group("Tone Curve", layout)
-        ch_row = QHBoxLayout()
-        self.curve_channel_group = []
-        for label, key in (
-            ("Param", "param"),
-            ("Luma", "luma"),
-            ("R", "r"),
-            ("G", "g"),
-            ("B", "b"),
-        ):
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setChecked(key == "param")
-            btn.setMaximumWidth(48)
-            btn.clicked.connect(lambda checked=False, k=key: self._on_curve_channel(k))
-            ch_row.addWidget(btn)
-            self.curve_channel_group.append((btn, key))
-        reset_curve_btn = QPushButton("Reset")
-        reset_curve_btn.setMaximumWidth(52)
-        reset_curve_btn.clicked.connect(lambda: self.tone_curve.reset_current())
-        ch_row.addWidget(reset_curve_btn)
-        v.addLayout(ch_row)
         self.tone_curve = ToneCurveWidget()
         self.tone_curve.curveChanged.connect(self.on_curve_changed)
-        self.tone_curve.pointCurveChanged.connect(self.on_point_curve_changed)
         v.addWidget(self.tone_curve)
-        tip_c = QLabel("Parametric: 5 region handles. Point curves: double-click to add/remove points.")
-        tip_c.setWordWrap(True)
-        tip_c.setStyleSheet("color:#777; font-size:11px;")
-        v.addWidget(tip_c)
         self._add_slider(v, "gamma", "Gamma", 0.3, 2.5, 0.05, 2, 1.0)
 
         # Vignetting
@@ -1384,45 +1247,15 @@ class PhotoLab(QMainWindow):
         v.addWidget(self.wb_as_shot_cb)
         self._add_slider(v, "temperature", "Temperature (K)", 2000, 12000, 50, 0, 5500)
         self._add_slider(v, "tint", "Tint", -150, 150, 1, 0, 0)
-        self.wb_dual_cb = QCheckBox("Dual illuminant (blend two WBs)")
-        self.wb_dual_cb.setToolTip(
-            "Mix a second temperature/tint — useful for mixed lighting "
-            "(e.g. tungsten + window daylight)."
-        )
-        self.wb_dual_cb.toggled.connect(self._on_wb_dual)
-        v.addWidget(self.wb_dual_cb)
-        self._add_slider(v, "temperature2", "Temp 2 (K)", 2000, 12000, 50, 0, 6500)
-        self._add_slider(v, "tint2", "Tint 2", -150, 150, 1, 0, 0)
-        self._add_slider(v, "wb_mix", "Mix toward Temp 2", 0.0, 100.0, 1, 0, 0.0)
-        dual_tip = QLabel("0% = primary only · 100% = secondary only. Disable As Shot when blending.")
-        dual_tip.setWordWrap(True)
-        dual_tip.setStyleSheet("color:#777; font-size:11px;")
-        v.addWidget(dual_tip)
 
         # Color Accentuation
         box, v = collapsible_group("Color Accentuation", layout)
         self._add_slider(v, "vibrance", "Vibrancy", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "saturation", "Saturation", -100.0, 100.0, 1, 0, 0.0)
 
-        # HSL — Hue / Saturation / Luminance / All tabs, 8 color bands each
-        box, v = collapsible_group("HSL", layout)
-        self.hsl_panel = HSLPanelWidget()
-        self.hsl_panel.hueChanged.connect(lambda idx, val: self._on_hsl_row("hue", idx, val))
-        self.hsl_panel.satChanged.connect(lambda idx, val: self._on_hsl_row("sat", idx, val))
-        self.hsl_panel.lumChanged.connect(lambda idx, val: self._on_hsl_row("lum", idx, val))
-        v.addWidget(self.hsl_panel)
-
-        # Split Toning
-        box, v = collapsible_group("Split Toning", layout, checked=False)
-        self._add_slider(v, "split_shadow_hue", "Shadows Hue", 0.0, 360.0, 1, 0, 0.0)
-        self._add_slider(v, "split_shadow_sat", "Shadows Sat", 0.0, 100.0, 1, 0, 0.0)
-        self._add_slider(v, "split_highlight_hue", "Highlights Hue", 0.0, 360.0, 1, 0, 0.0)
-        self._add_slider(v, "split_highlight_sat", "Highlights Sat", 0.0, 100.0, 1, 0, 0.0)
-        self._add_slider(v, "split_balance", "Balance", -100.0, 100.0, 1, 0, 0.0)
-        tip_st = QLabel("Tint shadows and highlights independently. Balance shifts the crossover.")
-        tip_st.setWordWrap(True)
-        tip_st.setStyleSheet("color:#777; font-size:11px;")
-        v.addWidget(tip_st)
+        # HSL / Color / B&W — full 8-channel panel (Lightroom-style)
+        box, v = collapsible_group("HSL / Color", layout)
+        self._build_hsl_panel(v)
 
         # Soft Proofing
         box, v = collapsible_group("Soft Proofing", layout, checked=False)
@@ -1437,44 +1270,11 @@ class PhotoLab(QMainWindow):
         self.proof_combo.currentTextChanged.connect(self._on_proof_profile)
         row.addWidget(self.proof_combo, 1)
         v.addLayout(row)
-        intent_row = QHBoxLayout()
-        intent_row.addWidget(QLabel("Intent"))
-        self.proof_intent_combo = QComboBox()
-        self.proof_intent_combo.addItem("Relative", "relative")
-        self.proof_intent_combo.addItem("Perceptual", "perceptual")
-        self.proof_intent_combo.addItem("Saturation", "saturation")
-        self.proof_intent_combo.addItem("Absolute", "absolute")
-        self.proof_intent_combo.currentIndexChanged.connect(self._on_proof_intent)
-        intent_row.addWidget(self.proof_intent_combo, 1)
-        v.addLayout(intent_row)
-        icc_row = QHBoxLayout()
-        self.proof_icc_label = QLabel("ICC: (built-in / system)")
-        self.proof_icc_label.setStyleSheet("color:#888; font-size:11px;")
-        self.proof_icc_label.setWordWrap(True)
-        icc_row.addWidget(self.proof_icc_label, 1)
-        icc_btn = QPushButton("Load ICC…")
-        icc_btn.setToolTip("Use a custom ICC/ICM profile for soft-proofing (Pillow ImageCms).")
-        icc_btn.clicked.connect(self._browse_proof_icc)
-        icc_row.addWidget(icc_btn)
-        icc_clear = QPushButton("Clear")
-        icc_clear.clicked.connect(self._clear_proof_icc)
-        icc_row.addWidget(icc_clear)
-        v.addLayout(icc_row)
         self.gamut_warn_cb = QCheckBox("Gamut warning (magenta)")
         self.gamut_warn_cb.setToolTip("Highlight colors that change a lot under the proof simulation.")
         self.gamut_warn_cb.toggled.connect(self._on_gamut_warning)
         v.addWidget(self.gamut_warn_cb)
-        self.paper_white_cb = QCheckBox("Simulate paper white")
-        self.paper_white_cb.setToolTip("Tint the proof toward a slightly warm paper white.")
-        self.paper_white_cb.toggled.connect(self._on_paper_white)
-        v.addWidget(self.paper_white_cb)
-        self.gamut_pct_label = QLabel("Gamut shift: —")
-        self.gamut_pct_label.setStyleSheet("color:#9cf; font-size:11px;")
-        v.addWidget(self.gamut_pct_label)
-        tip = QLabel(
-            "Uses a real ICC transform when Pillow ImageCms finds a profile "
-            "(custom file or system ICC). Otherwise falls back to an approximation."
-        )
+        tip = QLabel("Approximate soft-proof (no ICC file required). Use for a relative check, not press certification.")
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#777; font-size:11px;")
         v.addWidget(tip)
@@ -1527,59 +1327,11 @@ class PhotoLab(QMainWindow):
         self._add_slider(v, "sharpen_detail", "Detail", 0.0, 100.0, 1, 0, 0.0)
 
         box, v = collapsible_group("Output Sharpening", layout)
-        hint3 = QLabel(
-            "Applied last (before grain). Set PPI + media, then Apply suggestion, "
-            "or set amount manually."
-        )
+        hint3 = QLabel("Applied last (before grain). Use for screen or print output.")
         hint3.setWordWrap(True)
         hint3.setStyleSheet("color:#888; font-size:11px;")
         v.addWidget(hint3)
-        ppi_row = QHBoxLayout()
-        ppi_row.addWidget(QLabel("Output PPI"))
-        self.output_ppi_spin = QDoubleSpinBox()
-        self.output_ppi_spin.setRange(36, 600)
-        self.output_ppi_spin.setValue(300)
-        self.output_ppi_spin.setDecimals(0)
-        self.output_ppi_spin.setSingleStep(12)
-        self.output_ppi_spin.valueChanged.connect(self._on_output_ppi)
-        ppi_row.addWidget(self.output_ppi_spin, 1)
-        v.addLayout(ppi_row)
-        media_row = QHBoxLayout()
-        media_row.addWidget(QLabel("Media"))
-        self.output_media_combo = QComboBox()
-        self.output_media_combo.addItem("Screen", "screen")
-        self.output_media_combo.addItem("Matte print", "matte")
-        self.output_media_combo.addItem("Glossy print", "glossy")
-        self.output_media_combo.currentIndexChanged.connect(self._on_output_media)
-        media_row.addWidget(self.output_media_combo, 1)
-        v.addLayout(media_row)
-        sug_row = QHBoxLayout()
-        self.output_suggest_label = QLabel("Suggested: —")
-        self.output_suggest_label.setStyleSheet("color:#9cf; font-size:11px;")
-        sug_row.addWidget(self.output_suggest_label, 1)
-        apply_sug = QPushButton("Apply suggestion")
-        apply_sug.clicked.connect(self._apply_output_sharpen_suggestion)
-        sug_row.addWidget(apply_sug)
-        v.addLayout(sug_row)
         self._add_slider(v, "output_sharpen", "Output amount", 0.0, 100.0, 1, 0, 0.0)
-        quick = QHBoxLayout()
-        for label, ppi, media in (
-            ("Screen 96", 96, "screen"),
-            ("Print 240", 240, "matte"),
-            ("Print 300", 300, "glossy"),
-            ("Print 360", 360, "glossy"),
-        ):
-            b = QPushButton(label)
-            b.clicked.connect(lambda _=False, p=ppi, m=media: self._quick_output_sharpen(p, m))
-            quick.addWidget(b)
-        v.addLayout(quick)
-
-        box, v = collapsible_group("Skin protection", layout, checked=False)
-        self._add_slider(v, "protect_skin", "Protect skin tones", 0.0, 100.0, 1, 0, 0.0)
-        sk = QLabel("Reduces capture/output sharpening and vibrance/saturation on skin-like hues.")
-        sk.setWordWrap(True)
-        sk.setStyleSheet("color:#888; font-size:11px;")
-        v.addWidget(sk)
 
         box, v = collapsible_group("Presets", layout)
         prow = QHBoxLayout()
@@ -1608,16 +1360,10 @@ class PhotoLab(QMainWindow):
 
         box, v = collapsible_group("Horizon", layout)
         self._add_slider(v, "horizon", "Angle (°)", -45.0, 45.0, 0.1, 1, 0.0)
-        hz_row = QHBoxLayout()
-        self.level_horizon_btn = QPushButton("Draw level line")
+        self.level_horizon_btn = QPushButton("Level: draw line on image")
         self.level_horizon_btn.setToolTip("Drag a line along the horizon; angle is applied automatically.")
         self.level_horizon_btn.clicked.connect(self.start_horizon_line)
-        hz_row.addWidget(self.level_horizon_btn)
-        auto_lvl = QPushButton("Auto level")
-        auto_lvl.setToolTip("Detect dominant near-horizontal edges (Hough) and set horizon angle.")
-        auto_lvl.clicked.connect(self.auto_level_horizon)
-        hz_row.addWidget(auto_lvl)
-        v.addLayout(hz_row)
+        v.addWidget(self.level_horizon_btn)
         self.show_grid_cb = QCheckBox("Show grid (rule of thirds + center)")
         self.show_grid_cb.setToolTip("Overlay grid and center crosshair to help straighten the horizon.")
         self.show_grid_cb.toggled.connect(self._on_show_grid_toggled)
@@ -1664,24 +1410,10 @@ class PhotoLab(QMainWindow):
         v.addWidget(tip)
 
         box, v = collapsible_group("Optics / Lens", layout)
-        self.lens_auto_cb = QCheckBox("Apply Lensfun correction")
-        self.lens_auto_cb.setToolTip(
-            "Requires: pip install lensfunpy + Lensfun database.\n"
-            "Matches EXIF camera/lens when available."
-        )
+        self.lens_auto_cb = QCheckBox("Try Lensfun auto-correction (if installed)")
+        self.lens_auto_cb.setToolTip("Requires: pip install lensfunpy. Uses EXIF camera/lens when available.")
         self.lens_auto_cb.toggled.connect(self._on_lens_auto)
         v.addWidget(self.lens_auto_cb)
-        self._add_slider(v, "lens_strength", "Lensfun strength", 0.0, 100.0, 1, 0, 100.0)
-        lf_row = QHBoxLayout()
-        probe_btn = QPushButton("Test match…")
-        probe_btn.setToolTip("Show how Lensfun resolves the current file’s camera/lens EXIF.")
-        probe_btn.clicked.connect(self._probe_lensfun)
-        lf_row.addWidget(probe_btn)
-        v.addLayout(lf_row)
-        self.lensfun_status = QLabel("Lensfun: not tested")
-        self.lensfun_status.setWordWrap(True)
-        self.lensfun_status.setStyleSheet("color:#9cf; font-size:11px;")
-        v.addWidget(self.lensfun_status)
         self._add_slider(v, "ca_amount", "Chromatic aberration", -100.0, 100.0, 1, 0, 0.0)
         tip_o = QLabel("CA is a simple radial R/B shift. Lensfun needs lensfunpy + DB.")
         tip_o.setWordWrap(True)
@@ -1714,26 +1446,6 @@ class PhotoLab(QMainWindow):
 
         box, v = collapsible_group("Perspective", layout, checked=False)
         self._add_slider(v, "perspective", "Vertical", -100.0, 100.0, 1, 0, 0.0)
-        self._add_slider(v, "perspective_h", "Horizontal", -100.0, 100.0, 1, 0, 0.0)
-        tip_p = QLabel("Simple trapezoid correction. For freeform control use Keystone.")
-        tip_p.setWordWrap(True)
-        tip_p.setStyleSheet("color:#777; font-size:11px;")
-        v.addWidget(tip_p)
-
-        box, v = collapsible_group("Keystone (4 corners)", layout, checked=False)
-        ks_row = QHBoxLayout()
-        self.keystone_btn = QPushButton("Edit corners on image")
-        self.keystone_btn.setCheckable(True)
-        self.keystone_btn.toggled.connect(self.toggle_keystone_mode)
-        ks_row.addWidget(self.keystone_btn)
-        ks_reset = QPushButton("Reset")
-        ks_reset.clicked.connect(self.reset_keystone)
-        ks_row.addWidget(ks_reset)
-        v.addLayout(ks_row)
-        tip_k = QLabel("Drag TL / TR / BR / BL handles. Release to apply the warp.")
-        tip_k.setWordWrap(True)
-        tip_k.setStyleSheet("color:#777; font-size:11px;")
-        v.addWidget(tip_k)
 
         layout.addStretch(1)
         scroll.setWidget(inner)
@@ -1833,10 +1545,6 @@ class PhotoLab(QMainWindow):
 
         add_local_slider("local_radius", "Size (Radius %)", 1.0, 100.0, 1.0, 0, 15.0)
         add_local_slider("local_feather", "Feather %", 0.0, 100.0, 1.0, 0, 50.0)
-        add_local_slider("local_chroma", "Chroma range", 0.0, 100.0, 1.0, 0, 100.0)
-        add_local_slider("local_luma", "Luma similarity", 0.0, 100.0, 1.0, 0, 100.0)
-        add_local_slider("local_luma_min", "Luma min", 0.0, 100.0, 1.0, 0, 0.0)
-        add_local_slider("local_luma_max", "Luma max", 0.0, 100.0, 1.0, 0, 100.0)
         add_local_slider("local_exposure", "Exposure (EV)", -3.0, 3.0, 0.05, 2, 0.0)
         add_local_slider("local_contrast", "Contrast", -100.0, 100.0, 1, 0, 0.0)
         add_local_slider("local_saturation", "Saturation", -100.0, 100.0, 1, 0, 0.0)
@@ -1869,15 +1577,6 @@ class PhotoLab(QMainWindow):
         self.brush_erase_cb = QCheckBox("Eraser mode (or right-drag)")
         self.brush_erase_cb.toggled.connect(self._on_brush_erase)
         v.addWidget(self.brush_erase_cb)
-        mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Mask mode"))
-        self.brush_mode_combo = QComboBox()
-        self.brush_mode_combo.addItem("Add", "add")
-        self.brush_mode_combo.addItem("Subtract", "subtract")
-        self.brush_mode_combo.addItem("Intersect", "intersect")
-        self.brush_mode_combo.currentIndexChanged.connect(self._on_brush_paint_mode)
-        mode_row.addWidget(self.brush_mode_combo, 1)
-        v.addLayout(mode_row)
         self.brush_mask_only_cb = QCheckBox("Show mask only")
         self.brush_mask_only_cb.toggled.connect(self._on_brush_mask_only)
         v.addWidget(self.brush_mask_only_cb)
@@ -1886,10 +1585,6 @@ class PhotoLab(QMainWindow):
         self.brush_invert_btn.setToolTip("Apply brush adjustments outside the painted area instead.")
         self.brush_invert_btn.clicked.connect(self._on_brush_invert)
         inv_row.addWidget(self.brush_invert_btn)
-        subj_btn = QPushButton("Auto subject mask")
-        subj_btn.setToolTip("Offline GrabCut subject detection → new brush mask (no neural net).")
-        subj_btn.clicked.connect(self._on_auto_subject_mask)
-        inv_row.addWidget(subj_btn)
         v.addLayout(inv_row)
         size_row = QHBoxLayout()
         size_row.addWidget(QLabel("Size"))
@@ -1903,18 +1598,6 @@ class PhotoLab(QMainWindow):
             lambda val: self._on_brush_hard(val), 0)
         hard_row.addWidget(self.brush_hard_slider, 1)
         v.addLayout(hard_row)
-        flow_row = QHBoxLayout()
-        flow_row.addWidget(QLabel("Flow"))
-        self.brush_flow_slider = SliderRow("", 5.0, 100.0, 100.0, 1,
-            lambda val: self._on_brush_flow(val), 0)
-        flow_row.addWidget(self.brush_flow_slider, 1)
-        v.addLayout(flow_row)
-        opac_row = QHBoxLayout()
-        opac_row.addWidget(QLabel("Opacity"))
-        self.brush_opacity_slider = SliderRow("", 5.0, 100.0, 100.0, 1,
-            lambda val: self._on_brush_opacity(val), 0)
-        opac_row.addWidget(self.brush_opacity_slider, 1)
-        v.addLayout(opac_row)
         self.brush_sliders = {}
         self.brush_sliders_box = QWidget()
         bsl = QVBoxLayout(self.brush_sliders_box)
@@ -1925,10 +1608,8 @@ class PhotoLab(QMainWindow):
             ("saturation", "Saturation", -100.0, 100.0, 1, 0),
             ("clarity", "Clarity", -100.0, 100.0, 1, 0),
             ("temperature", "Temp shift", -100.0, 100.0, 1, 0),
-            ("flow", "Mask flow", 0.0, 100.0, 1, 0),
-            ("opacity", "Mask opacity", 0.0, 100.0, 1, 0),
         ):
-            row = SliderRow(label, lo, hi, 100.0 if key in ("flow", "opacity") else 0.0, step,
+            row = SliderRow(label, lo, hi, 0.0, step,
                             lambda val, k=key: self._on_brush_adj(k, val), dec)
             self.brush_sliders[key] = row
             bsl.addWidget(row)
@@ -2001,77 +1682,27 @@ class PhotoLab(QMainWindow):
     # Folder / load
     # ------------------------------------------------------------------
 
-    def _visible_filmstrip_paths(self) -> list:
-        """Paths of filmstrip items that are not hidden by the current filters."""
-        out = []
-        for i in range(self.filmstrip.count()):
-            item = self.filmstrip.item(i)
-            if item and not item.isHidden():
-                p = item.data(Qt.ItemDataRole.UserRole)
-                if p:
-                    out.append(p)
-        return out
-
     def prev_image(self):
-        """Previous image, skipping items hidden by filmstrip filters."""
-        visible = self._visible_filmstrip_paths()
-        if not visible:
+        if not self.image_paths or self.current_path is None:
             return
-        if self.current_path in visible:
-            idx = visible.index(self.current_path)
-        else:
-            # Current hidden — jump to last visible before current in full list
-            try:
-                full_idx = self.image_paths.index(self.current_path)
-            except ValueError:
-                full_idx = 0
-            idx = 0
-            for i, p in enumerate(visible):
-                try:
-                    if self.image_paths.index(p) < full_idx:
-                        idx = i + 1
-                except ValueError:
-                    pass
-            idx = min(idx, len(visible) - 1)
+        try:
+            idx = self.image_paths.index(self.current_path)
+        except ValueError:
+            return
         if idx > 0:
-            path = visible[idx - 1]
-            self.load_image(path)
-            self._select_filmstrip_path(path)
+            self.load_image(self.image_paths[idx - 1])
+            self.filmstrip.setCurrentRow(idx - 1)
 
     def next_image(self):
-        """Next image, skipping items hidden by filmstrip filters."""
-        visible = self._visible_filmstrip_paths()
-        if not visible:
+        if not self.image_paths or self.current_path is None:
             return
-        if self.current_path in visible:
-            idx = visible.index(self.current_path)
-        else:
-            try:
-                full_idx = self.image_paths.index(self.current_path)
-            except ValueError:
-                full_idx = -1
-            idx = -1
-            for i, p in enumerate(visible):
-                try:
-                    if self.image_paths.index(p) > full_idx:
-                        idx = i - 1
-                        break
-                except ValueError:
-                    pass
-            if idx < 0:
-                idx = -1
-        if idx < len(visible) - 1:
-            path = visible[idx + 1]
-            self.load_image(path)
-            self._select_filmstrip_path(path)
-
-    def _select_filmstrip_path(self, path: str):
-        for i in range(self.filmstrip.count()):
-            item = self.filmstrip.item(i)
-            if item and item.data(Qt.ItemDataRole.UserRole) == path:
-                self.filmstrip.setCurrentItem(item)
-                self.filmstrip.scrollToItem(item)
-                break
+        try:
+            idx = self.image_paths.index(self.current_path)
+        except ValueError:
+            return
+        if idx < len(self.image_paths) - 1:
+            self.load_image(self.image_paths[idx + 1])
+            self.filmstrip.setCurrentRow(idx + 1)
 
     def _update_navigator_viewport(self):
         """Reflect main canvas pan/zoom in the navigator rectangle."""
@@ -2189,12 +1820,6 @@ class PhotoLab(QMainWindow):
         self.refresh_library_tree()
 
     def refresh_library_tree(self):
-        if hasattr(self, "lib_collections"):
-            try:
-                self._refresh_collections_combo()
-            except Exception:
-                log.debug("refresh_library_tree: non-critical failure, continuing", exc_info=True)
-
         if not hasattr(self, "_lib_tree_model"):
             return
         from PyQt6.QtGui import QStandardItem
@@ -2402,7 +2027,7 @@ class PhotoLab(QMainWindow):
                 try:
                     self.catalog.remove_image(path)
                 except Exception:
-                    log.debug("_lib_move_to_trash: non-critical failure, continuing", exc_info=True)
+                    pass
                 # drop from develop state if open
                 if path in self.recipes:
                     del self.recipes[path]
@@ -2441,7 +2066,7 @@ class PhotoLab(QMainWindow):
         except ImportError:
             pass
         except Exception:
-            log.debug("_trash_file: non-critical failure, continuing", exc_info=True)
+            pass
         # Qt6 may not have a portable trash API; Windows recycle via PowerShell is heavy.
         # Fallback: move into sibling .photolab_trash directory
         trash_dir = os.path.join(os.path.dirname(path), ".photolab_trash")
@@ -2461,7 +2086,7 @@ class PhotoLab(QMainWindow):
             try:
                 os.rename(side, dest + ".photolab.json")
             except Exception:
-                log.debug("_trash_file: non-critical failure, continuing", exc_info=True)
+                pass
 
     def _lib_toggle_reject(self):
         paths = self._lib_selected_paths()
@@ -2512,7 +2137,7 @@ class PhotoLab(QMainWindow):
             with open(self._recent_path_file(), "w", encoding="utf-8") as f:
                 json.dump(self._recent_folders[:12], f)
         except Exception:
-            log.debug("_save_recent_folders: non-critical failure, continuing", exc_info=True)
+            pass
 
     def _add_recent_folder(self, folder: str):
         folder = os.path.normpath(folder)
@@ -2579,23 +2204,9 @@ class PhotoLab(QMainWindow):
         if not ok or not name.strip():
             return
         name = name.strip()
-        entry = {
-            "name": name,
-            "recipe": self.recipes[self.current_path].to_dict(),
-            "ts": datetime.now().isoformat(timespec="seconds"),
-        }
         lst = self._snapshots.setdefault(self.current_path, [])
-        # Replace same name if present
-        lst = [s for s in lst if s.get("name") != name]
-        lst.append(entry)
-        self._snapshots[self.current_path] = lst
-        try:
-            save_snapshots_sidecar(self.current_path, lst)
-            # Also keep the main recipe in the same sidecar
-            save_recipe_sidecar(self.current_path, self.recipes[self.current_path], snapshots=lst)
-        except Exception as e:
-            self.log(f"Snapshot sidecar save failed: {e}", level="ERR")
-        self.statusBar().showMessage(f"Snapshot saved: {name} (persisted to sidecar)")
+        lst.append({"name": name, "recipe": self.recipes[self.current_path].to_dict()})
+        self.statusBar().showMessage(f"Snapshot saved: {name}")
         self.log(f"Snapshot '{name}' for {os.path.basename(self.current_path)}")
 
     def restore_snapshot(self):
@@ -2603,19 +2214,7 @@ class PhotoLab(QMainWindow):
             return
         lst = self._snapshots.get(self.current_path) or []
         if not lst:
-            # Try loading from sidecar
-            try:
-                lst = load_snapshots_sidecar(self.current_path)
-                if lst:
-                    self._snapshots[self.current_path] = lst
-            except Exception:
-                log.debug("restore_snapshot: non-critical failure, continuing", exc_info=True)
-        if not lst:
-            QMessageBox.information(
-                self, "Snapshots",
-                "No snapshots for this image yet.\nUse Edit → Save Snapshot… first.\n"
-                "Snapshots are stored in the .photolab.json sidecar.",
-            )
+            QMessageBox.information(self, "Snapshots", "No snapshots for this image yet.\nUse Edit → Save Snapshot… first.")
             return
         from PyQt6.QtWidgets import QInputDialog
         names = [s["name"] for s in lst]
@@ -2652,8 +2251,6 @@ class PhotoLab(QMainWindow):
         self.filmstrip.clear()
         self.recipes = {}
         self.meta_cache = {}
-        # Keep ratings/labels across folder re-open only for paths still present;
-        # soft-reset flags for a clean filmstrip (paths from other folders remain in dicts).
         
         # Sync Folder Tree index
         if hasattr(self, "folder_tree"):
@@ -2697,7 +2294,7 @@ class PhotoLab(QMainWindow):
             try:
                 self._load_worker.terminate()
             except Exception:
-                log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                pass
         self._load_worker = LoadImageWorker(path)
         self._load_worker.loaded.connect(self._on_image_loaded)
         self._load_worker.failed.connect(self._on_image_failed)
@@ -2708,8 +2305,6 @@ class PhotoLab(QMainWindow):
             return
         self.original_bgr = img
         self.meta_cache[path] = meta
-        self._build_proxy(img)
-        self._clear_preview_cache()
         if path not in self.recipes:
             side = load_recipe_sidecar(path)
             self.recipes[path] = side if side is not None else Recipe()
@@ -2717,14 +2312,6 @@ class PhotoLab(QMainWindow):
                 self.log(f"Loaded sidecar for {os.path.basename(path)}")
             if meta.get("is_raw"):
                 self.recipes[path].wb_as_shot = True
-        # Named snapshots from sidecar (persisted)
-        try:
-            snaps = load_snapshots_sidecar(path)
-            if snaps:
-                self._snapshots[path] = snaps
-                self.log(f"Loaded {len(snaps)} snapshot(s) from sidecar")
-        except Exception as e:
-            self.log(f"Snapshot load failed: {e}", level="ERR")
         self.sync_sliders_to_recipe()
         self.history_widget.clear()
         self._push_history("Original")
@@ -2732,13 +2319,8 @@ class PhotoLab(QMainWindow):
         if path in self.image_paths:
             self.filmstrip.setCurrentRow(self.image_paths.index(path))
         kind = "RAW" if meta.get("is_raw") else "RGB"
-        ph, pw = img.shape[:2]
-        proxy_note = ""
-        if self.proxy_bgr is not None and self._proxy_scale < 0.99:
-            pph, ppw = self.proxy_bgr.shape[:2]
-            proxy_note = f"  •  preview {ppw}×{pph}"
         self.statusBar().showMessage(
-            f"{os.path.basename(path)}  •  {pw}×{ph}  •  {kind}{proxy_note}"
+            f"{os.path.basename(path)}  •  {img.shape[1]}×{img.shape[0]}  •  {kind}"
         )
         if hasattr(self, "path_label"):
             self.path_label.setText(path)
@@ -2770,37 +2352,19 @@ class PhotoLab(QMainWindow):
         self.wb_as_shot_cb.blockSignals(True)
         self.wb_as_shot_cb.setChecked(r.wb_as_shot)
         self.wb_as_shot_cb.blockSignals(False)
-        self.sliders["temperature"].setEnabled(not r.wb_as_shot or bool(getattr(r, "wb_dual", False)))
-        self.sliders["tint"].setEnabled(not r.wb_as_shot or bool(getattr(r, "wb_dual", False)))
-        if hasattr(self, "wb_dual_cb"):
-            self.wb_dual_cb.blockSignals(True)
-            self.wb_dual_cb.setChecked(bool(getattr(r, "wb_dual", False)))
-            self.wb_dual_cb.blockSignals(False)
-            self._set_dual_wb_enabled(bool(getattr(r, "wb_dual", False)))
-        if hasattr(self, "output_ppi_spin"):
-            self.output_ppi_spin.blockSignals(True)
-            self.output_ppi_spin.setValue(float(getattr(r, "output_ppi", 300.0) or 300.0))
-            self.output_ppi_spin.blockSignals(False)
-        if hasattr(self, "output_media_combo"):
-            media = getattr(r, "output_media", "screen") or "screen"
-            self.output_media_combo.blockSignals(True)
-            for i in range(self.output_media_combo.count()):
-                if self.output_media_combo.itemData(i) == media:
-                    self.output_media_combo.setCurrentIndex(i)
-                    break
-            self.output_media_combo.blockSignals(False)
-            self._refresh_output_suggest_label()
+        self.sliders["temperature"].setEnabled(not r.wb_as_shot)
+        self.sliders["tint"].setEnabled(not r.wb_as_shot)
         self.tone_curve.set_values(
             r.curve_shadows, r.curve_darks, r.curve_mids,
             r.curve_lights, r.curve_highlights,
         )
-        self.tone_curve.set_point_curve("luma", getattr(r, "curve_points", None) or [])
-        self.tone_curve.set_point_curve("r", getattr(r, "curve_r_points", None) or [])
-        self.tone_curve.set_point_curve("g", getattr(r, "curve_g_points", None) or [])
-        self.tone_curve.set_point_curve("b", getattr(r, "curve_b_points", None) or [])
-        # HSL panel — all 8 bands, all three channels
-        if hasattr(self, "hsl_panel"):
-            self.hsl_panel.set_values(r.hsl_hue, r.hsl_sat, r.hsl_lum)
+        # HSL channel sliders
+        self._sync_all_hsl_sliders_from_recipe(r)
+        idx = int(getattr(r, "hsl_active_channel", 0) or 0)
+        if "_hsl_hue" in self.sliders:
+            self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx] if r.hsl_hue else 0)
+            self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx] if r.hsl_sat else 0)
+            self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx] if r.hsl_lum else 0)
         if hasattr(self, "soft_proof_cb"):
             self.soft_proof_cb.blockSignals(True)
             self.soft_proof_cb.setChecked(r.soft_proof)
@@ -2809,27 +2373,9 @@ class PhotoLab(QMainWindow):
             self.gamut_warn_cb.blockSignals(True)
             self.gamut_warn_cb.setChecked(bool(getattr(r, "soft_proof_gamut", False)))
             self.gamut_warn_cb.blockSignals(False)
-        if hasattr(self, "proof_combo"):
             self.proof_combo.blockSignals(True)
             self.proof_combo.setCurrentText(r.soft_proof_profile)
             self.proof_combo.blockSignals(False)
-        if hasattr(self, "paper_white_cb"):
-            self.paper_white_cb.blockSignals(True)
-            self.paper_white_cb.setChecked(bool(getattr(r, "soft_proof_paper_white", False)))
-            self.paper_white_cb.blockSignals(False)
-        if hasattr(self, "proof_intent_combo"):
-            intent = getattr(r, "soft_proof_intent", "relative") or "relative"
-            self.proof_intent_combo.blockSignals(True)
-            for i in range(self.proof_intent_combo.count()):
-                if self.proof_intent_combo.itemData(i) == intent:
-                    self.proof_intent_combo.setCurrentIndex(i)
-                    break
-            self.proof_intent_combo.blockSignals(False)
-        if hasattr(self, "proof_icc_label"):
-            icc = getattr(r, "soft_proof_icc_path", "") or ""
-            self.proof_icc_label.setText(
-                f"ICC: {os.path.basename(icc)}" if icc else "ICC: (built-in / system)"
-            )
         if hasattr(self, "bw_cb"):
             self.bw_cb.blockSignals(True)
             self.bw_cb.setChecked(bool(r.black_and_white))
@@ -2887,77 +2433,39 @@ class PhotoLab(QMainWindow):
         self._on_history_restore(idx)
         self.statusBar().showMessage("Redo")
 
-    def _target_filmstrip_paths(self) -> list:
-        """Selected filmstrip paths, or [current] if nothing multi-selected."""
-        paths = self._selected_filmstrip_paths()
-        if not paths and self.current_path:
-            paths = [self.current_path]
-        # De-dupe preserve order
-        seen = set()
-        out = []
-        for p in paths:
-            if p and p not in seen:
-                seen.add(p)
-                out.append(p)
-        return out
-
-    def _filmstrip_label_text(self, path: str) -> str:
-        """Unified filmstrip caption: pick / reject / color / stars / name."""
-        base = os.path.basename(path)
-        parts = []
-        if self._pick_flags.get(path):
-            parts.append("✓")
-        if self._reject_flags.get(path):
-            parts.append("⛔")
-        color = self._color_labels.get(path)
-        if color and color in self.COLOR_LABELS:
-            parts.append(self.COLOR_LABELS[color][0])
-        stars = int(self._image_ratings.get(path, 0) or 0)
-        if stars:
-            parts.append("★" * stars + "☆" * (5 - stars))
-        prefix = (" ".join(parts) + "  ") if parts else ""
-        return f"{prefix}{base}"
-
-    def _refresh_filmstrip_item(self, path: str):
+    def toggle_reject_current(self):
+        if self.current_path is None:
+            return
+        path = self.current_path
+        rec = None
+        try:
+            rec = self.catalog.get(path) if hasattr(self.catalog, "get") else None
+        except Exception:
+            rec = None
+        currently = False
+        if isinstance(rec, dict):
+            currently = bool(rec.get("reject"))
+        elif path in getattr(self, "_reject_flags", {}):
+            currently = self._reject_flags[path]
+        new_val = not currently
+        if not hasattr(self, "_reject_flags"):
+            self._reject_flags = {}
+        self._reject_flags[path] = new_val
+        try:
+            self.catalog.set_reject(path, new_val)
+        except Exception:
+            pass
+        # filmstrip visual
         for i in range(self.filmstrip.count()):
             item = self.filmstrip.item(i)
             if item and item.data(Qt.ItemDataRole.UserRole) == path:
-                item.setText(self._filmstrip_label_text(path))
-                # Optional tint via foreground for color labels
-                color = self._color_labels.get(path)
-                if color and color in self.COLOR_LABELS:
-                    from PyQt6.QtGui import QColor, QBrush
-                    item.setForeground(QBrush(QColor(self.COLOR_LABELS[color][1])))
-                else:
-                    from PyQt6.QtGui import QBrush, QColor
-                    item.setForeground(QBrush(QColor("#ddd")))
+                base = os.path.basename(path)
+                stars = self._image_ratings.get(path, 0)
+                prefix = "⛔ " if new_val else ""
+                star = (("★" * stars + "☆" * (5 - stars) + "  ") if stars else "")
+                item.setText(f"{prefix}{star}{base}")
                 break
-
-    def toggle_reject_current(self):
-        paths = self._target_filmstrip_paths()
-        if not paths:
-            return
-        # Toggle based on the primary (current or first selected) state
-        primary = self.current_path if self.current_path in paths else paths[0]
-        currently = bool(self._reject_flags.get(primary, False))
-        try:
-            rec = self.catalog.get(primary) if hasattr(self.catalog, "get") else None
-            if isinstance(rec, dict) and primary not in self._reject_flags:
-                currently = bool(rec.get("reject"))
-        except Exception:
-            log.debug("toggle_reject_current: non-critical failure, continuing", exc_info=True)
-        new_val = not currently
-        for path in paths:
-            self._reject_flags[path] = new_val
-            try:
-                self.catalog.set_reject(path, new_val)
-            except Exception:
-                log.debug("toggle_reject_current: non-critical failure, continuing", exc_info=True)
-            self._refresh_filmstrip_item(path)
-        n = len(paths)
-        msg = "Rejected" if new_val else "Un-rejected"
-        self.statusBar().showMessage(f"{msg} ({n} image{'s' if n != 1 else ''})")
-        self._apply_filmstrip_filter()
+        self.statusBar().showMessage("Rejected" if new_val else "Un-rejected")
 
     def _on_history_restore(self, index: int):
         d = self.history_widget.get_recipe_dict(index)
@@ -2966,76 +2474,97 @@ class PhotoLab(QMainWindow):
         self.recipes[self.current_path] = Recipe.from_dict(d)
         self.sync_sliders_to_recipe()
         self.render_preview()
-        label = self.history_widget.get_label(index) or f"#{index + 1}"
-        self.statusBar().showMessage(f"Restored history: {label}")
+        self.statusBar().showMessage(f"Restored history #{index + 1}")
 
-    def _on_history_copy_settings(self, index: int):
-        d = self.history_widget.get_recipe_dict(index)
-        if d is None:
-            self.statusBar().showMessage("Nothing to copy from history")
-            return
-        self._copied_recipe = dict(d)
-        label = self.history_widget.get_label(index) or f"#{index + 1}"
-        self.statusBar().showMessage(f"Copied settings from history: {label}  (Ctrl+Shift+V to paste)")
 
-    def _on_history_preview(self, index: int):
-        """Visual before/after: history entry vs current recipe on the proxy."""
-        if self.current_path is None or self.original_bgr is None:
-            return
-        d = self.history_widget.get_recipe_dict(index)
-        if d is None:
-            return
-        label = self.history_widget.get_label(index) or f"#{index + 1}"
-        hist_recipe = Recipe.from_dict(d)
-        cur_recipe = self.recipes[self.current_path]
-        meta = self.meta_cache.get(self.current_path, {})
-        multipliers = meta.get("wb_multipliers")
-        src = self.proxy_bgr if self.proxy_bgr is not None else self.original_bgr
+    def _build_hsl_panel(self, parent_layout):
+        """Lightroom-style HSL: Hue / Saturation / Luminance / All for 8 channels."""
+        from PyQt6.QtWidgets import QTabWidget, QWidget, QVBoxLayout, QLabel
+
+        self._HSL_NAMES = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
+        # Accent colors for channel labels (approx)
+        self._HSL_COLORS = [
+            "#e74c3c", "#e67e22", "#f1c40f", "#27ae60",
+            "#1abc9c", "#3498db", "#9b59b6", "#e84393",
+        ]
+        self.hsl_sliders = {"hue": [], "sat": [], "lum": []}  # list of SliderRow per channel
+
+        tabs = QTabWidget()
+        tabs.setStyleSheet(
+            "QTabWidget::pane { border: 1px solid #333; background:#1a1a1a; }"
+            "QTabBar::tab { background:#222; color:#ccc; padding:6px 12px; margin-right:2px; }"
+            "QTabBar::tab:selected { background:#2a5080; color:#fff; }"
+        )
+
+        def _make_channel_page(which: str) -> QWidget:
+            page = QWidget()
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(4, 8, 4, 4)
+            lay.setSpacing(2)
+            for i, name in enumerate(self._HSL_NAMES):
+                row = SliderRow(name, -100.0, 100.0, 0.0, 1.0, decimals=0)
+                # Tint label
+                for child in row.findChildren(QLabel):
+                    if child.text() == name:
+                        child.setStyleSheet(f"color: {self._HSL_COLORS[i]}; font-size: 12px; font-weight: 600;")
+                row.valueChanged.connect(
+                    lambda val, w=which, idx=i: self._on_hsl_channel_value(w, idx, val)
+                )
+                self.hsl_sliders[which].append(row)
+                lay.addWidget(row)
+            lay.addStretch(1)
+            return page
+
+        tabs.addTab(_make_channel_page("hue"), "Hue")
+        tabs.addTab(_make_channel_page("sat"), "Saturation")
+        tabs.addTab(_make_channel_page("lum"), "Luminance")
+
+        # All: compact grid of all three for each channel
+        all_page = QWidget()
+        all_lay = QVBoxLayout(all_page)
+        all_lay.setContentsMargins(4, 8, 4, 4)
+        all_lay.setSpacing(6)
+        self.hsl_all_sliders = []  # [(hue_row, sat_row, lum_row), ...]
+        for i, name in enumerate(self._HSL_NAMES):
+            hdr = QLabel(name)
+            hdr.setStyleSheet(f"color: {self._HSL_COLORS[i]}; font-weight: 600; font-size: 11px;")
+            all_lay.addWidget(hdr)
+            trio = []
+            for which, label in (("hue", "H"), ("sat", "S"), ("lum", "L")):
+                row = SliderRow(label, -100.0, 100.0, 0.0, 1.0, decimals=0)
+                row.valueChanged.connect(
+                    lambda val, w=which, idx=i: self._on_hsl_channel_value(w, idx, val)
+                )
+                trio.append(row)
+                all_lay.addWidget(row)
+            self.hsl_all_sliders.append(tuple(trio))
+        all_lay.addStretch(1)
+        tabs.addTab(all_page, "All")
+
+        parent_layout.addWidget(tabs)
+        self.hsl_tabs = tabs
+
+        # Optional color wheel for quick channel pick (still useful)
         try:
-            before = apply_recipe(src, hist_recipe, wb_multipliers=multipliers, meta=meta)
-            after = apply_recipe(src, cur_recipe, wb_multipliers=multipliers, meta=meta)
-        except Exception as e:
-            QMessageBox.warning(self, "History preview", str(e))
-            return
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"History preview — {label}  vs  current")
-        dlg.resize(960, 520)
-        layout = QVBoxLayout(dlg)
-        row = QHBoxLayout()
-        layout.addLayout(row)
-        for title, img in ((f"History: {label}", before), ("Current", after)):
-            col = QVBoxLayout()
-            cap = QLabel(title)
-            cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            cap.setStyleSheet("color:#ccc; font-weight:600;")
-            lbl = QLabel()
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet("background:#111; border:1px solid #333;")
-            lbl.setPixmap(cv_to_qpixmap(img))
-            col.addWidget(cap)
-            col.addWidget(lbl)
-            row.addLayout(col)
-        btns = QHBoxLayout()
-        restore_btn = QPushButton("Restore history state")
-        restore_btn.clicked.connect(lambda: (self._on_history_restore(index), dlg.accept()))
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dlg.accept)
-        btns.addWidget(restore_btn)
-        btns.addStretch(1)
-        btns.addWidget(close_btn)
-        layout.addLayout(btns)
-        dlg.exec()
+            self.color_wheel = ColorWheelWidget()
+            self.color_wheel.channelChanged.connect(self._on_hsl_channel)
+            parent_layout.addWidget(self.color_wheel)
+            self.hsl_channel_label = QLabel("Wheel selects channel on All tab")
+            self.hsl_channel_label.setStyleSheet("color:#666; font-size:10px;")
+            parent_layout.addWidget(self.hsl_channel_label)
+        except Exception:
+            self.color_wheel = None
 
-    def _on_hsl_row(self, which: str, idx: int, value: float):
-        """One HSL band slider (Red..Magenta) moved in the Hue/Saturation/
-        Luminance/All panel. `idx` is the color band (0=Red..7=Magenta)."""
+    def _on_hsl_channel_value(self, which: str, idx: int, value: float):
         if self.current_path is None:
             return
         r = self.recipes[self.current_path]
 
         def replace(tup, i, v):
-            lst = list(tup)
-            lst[i] = v
+            lst = list(tup if tup is not None else (0.0,) * 8)
+            while len(lst) < 8:
+                lst.append(0.0)
+            lst[i] = float(value)
             return tuple(lst)
 
         if which == "hue":
@@ -3044,8 +2573,68 @@ class PhotoLab(QMainWindow):
             r.hsl_sat = replace(r.hsl_sat, idx, value)
         else:
             r.hsl_lum = replace(r.hsl_lum, idx, value)
-        self._schedule_history(f"HSL {which}")
+        r.hsl_active_channel = idx
+        self._sync_hsl_slider_group(which, idx, value)
+        self._schedule_history(f"HSL {which} {self._HSL_NAMES[idx]}")
         self.render_timer.start()
+
+    def _sync_hsl_slider_group(self, which: str, idx: int, value: float):
+        """Keep tab sliders and All-tab trio in sync without feedback loops."""
+        rows = getattr(self, "hsl_sliders", {}).get(which) or []
+        if idx < len(rows):
+            row = rows[idx]
+            if abs(row.spin.value() - value) > 1e-6:
+                row.blockSignals(True)
+                row.set_value(value)
+                row.blockSignals(False)
+        if hasattr(self, "hsl_all_sliders") and idx < len(self.hsl_all_sliders):
+            map_i = {"hue": 0, "sat": 1, "lum": 2}[which]
+            row = self.hsl_all_sliders[idx][map_i]
+            if abs(row.spin.value() - value) > 1e-6:
+                row.blockSignals(True)
+                row.set_value(value)
+                row.blockSignals(False)
+
+    def _sync_all_hsl_sliders_from_recipe(self, r):
+        if not hasattr(self, "hsl_sliders"):
+            return
+        for which, attr in (("hue", "hsl_hue"), ("sat", "hsl_sat"), ("lum", "hsl_lum")):
+            vals = list(getattr(r, attr, (0.0,) * 8) or (0.0,) * 8)
+            while len(vals) < 8:
+                vals.append(0.0)
+            for i, row in enumerate(self.hsl_sliders.get(which) or []):
+                row.blockSignals(True)
+                row.set_value(float(vals[i]))
+                row.blockSignals(False)
+            if hasattr(self, "hsl_all_sliders"):
+                map_i = {"hue": 0, "sat": 1, "lum": 2}[which]
+                for i, trio in enumerate(self.hsl_all_sliders):
+                    trio[map_i].blockSignals(True)
+                    trio[map_i].set_value(float(vals[i]))
+                    trio[map_i].blockSignals(False)
+
+    def _on_hsl_channel(self, idx: int):
+        """Color wheel selected a channel — jump All tab focus / status."""
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.hsl_active_channel = idx
+        names = getattr(self, "_HSL_NAMES", None) or [
+            "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"
+        ]
+        if hasattr(self, "hsl_channel_label"):
+            self.hsl_channel_label.setText(f"Channel: {names[idx]}")
+        if hasattr(self, "hsl_tabs"):
+            self.hsl_tabs.setCurrentIndex(3)  # All
+        self.statusBar().showMessage(f"HSL channel: {names[idx]}")
+
+    def _on_hsl_slider(self, which: str, value: float):
+        # Legacy single-slider path (if old keys still present)
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        idx = int(getattr(r, "hsl_active_channel", 0) or 0)
+        self._on_hsl_channel_value(which, idx, value)
 
     def _on_soft_proof(self, checked: bool):
         if self.current_path is None:
@@ -3059,46 +2648,6 @@ class PhotoLab(QMainWindow):
         self.recipes[self.current_path].soft_proof_profile = name
         self.render_timer.start()
 
-    def _on_proof_intent(self, _idx=None):
-        if self.current_path is None or not hasattr(self, "proof_intent_combo"):
-            return
-        intent = self.proof_intent_combo.currentData() or "relative"
-        self.recipes[self.current_path].soft_proof_intent = intent
-        self.render_timer.start()
-
-    def _on_paper_white(self, checked: bool):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].soft_proof_paper_white = bool(checked)
-        self.render_timer.start()
-
-    def _browse_proof_icc(self):
-        if self.current_path is None:
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Soft-proof ICC profile", "",
-            "ICC profiles (*.icc *.icm);;All (*.*)",
-        )
-        if not path:
-            return
-        self.recipes[self.current_path].soft_proof_icc_path = path
-        if hasattr(self, "proof_icc_label"):
-            self.proof_icc_label.setText(f"ICC: {os.path.basename(path)}")
-        self.recipes[self.current_path].soft_proof = True
-        if hasattr(self, "soft_proof_cb"):
-            self.soft_proof_cb.blockSignals(True)
-            self.soft_proof_cb.setChecked(True)
-            self.soft_proof_cb.blockSignals(False)
-        self.render_timer.start()
-
-    def _clear_proof_icc(self):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].soft_proof_icc_path = ""
-        if hasattr(self, "proof_icc_label"):
-            self.proof_icc_label.setText("ICC: (built-in / system)")
-        self.render_timer.start()
-
     def on_curve_changed(self, shadows, darks, mids, lights, highlights):
         if self.current_path is None:
             return
@@ -3108,33 +2657,6 @@ class PhotoLab(QMainWindow):
         r.curve_mids = mids
         r.curve_lights = lights
         r.curve_highlights = highlights
-        self._schedule_history("Tone curve")
-        self.render_timer.start()
-
-    def _on_curve_channel(self, key: str):
-        if hasattr(self, "curve_channel_group"):
-            for btn, k in self.curve_channel_group:
-                btn.blockSignals(True)
-                btn.setChecked(k == key)
-                btn.blockSignals(False)
-        if hasattr(self, "tone_curve"):
-            self.tone_curve.set_channel(key)
-
-    def on_point_curve_changed(self, channel: str, points: list):
-        if self.current_path is None:
-            return
-        r = self.recipes[self.current_path]
-        key_map = {
-            "luma": "curve_points",
-            "r": "curve_r_points",
-            "g": "curve_g_points",
-            "b": "curve_b_points",
-        }
-        attr = key_map.get(channel)
-        if not attr:
-            return
-        setattr(r, attr, [list(p) for p in points])
-        self._schedule_history(f"Point curve {channel}")
         self.render_timer.start()
 
     def on_wb_as_shot(self, checked):
@@ -3143,150 +2665,7 @@ class PhotoLab(QMainWindow):
         self.recipes[self.current_path].wb_as_shot = checked
         self.sliders["temperature"].setEnabled(not checked)
         self.sliders["tint"].setEnabled(not checked)
-        dual = bool(getattr(self.recipes[self.current_path], "wb_dual", False))
-        self._set_dual_wb_enabled(not checked or dual)
         self.render_timer.start()
-
-    def _set_dual_wb_enabled(self, enabled: bool):
-        for k in ("temperature2", "tint2", "wb_mix"):
-            if k in self.sliders:
-                self.sliders[k].setEnabled(enabled)
-
-    def _on_wb_dual(self, checked):
-        if self.current_path is None:
-            return
-        r = self.recipes[self.current_path]
-        r.wb_dual = bool(checked)
-        if checked:
-            r.wb_as_shot = False
-            if hasattr(self, "wb_as_shot_cb"):
-                self.wb_as_shot_cb.blockSignals(True)
-                self.wb_as_shot_cb.setChecked(False)
-                self.wb_as_shot_cb.blockSignals(False)
-            self.sliders["temperature"].setEnabled(True)
-            self.sliders["tint"].setEnabled(True)
-        self._set_dual_wb_enabled(bool(checked))
-        self._schedule_history("Dual WB")
-        self.render_timer.start()
-
-    def _on_output_ppi(self, val):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].output_ppi = float(val)
-        self._refresh_output_suggest_label()
-
-    def _on_output_media(self, _idx=None):
-        if self.current_path is None or not hasattr(self, "output_media_combo"):
-            return
-        media = self.output_media_combo.currentData() or "screen"
-        self.recipes[self.current_path].output_media = media
-        self._refresh_output_suggest_label()
-
-    def _refresh_output_suggest_label(self):
-        if not hasattr(self, "output_suggest_label"):
-            return
-        try:
-            from imaging import output_sharpen_params
-            ppi = float(self.output_ppi_spin.value()) if hasattr(self, "output_ppi_spin") else 300.0
-            media = "screen"
-            if hasattr(self, "output_media_combo"):
-                media = self.output_media_combo.currentData() or "screen"
-            amt, rad = output_sharpen_params(ppi, media)
-            self.output_suggest_label.setText(f"Suggested: amount {amt:.0f}, radius {rad:.2f}")
-        except Exception:
-            self.output_suggest_label.setText("Suggested: —")
-
-    def _apply_output_sharpen_suggestion(self):
-        if self.current_path is None:
-            return
-        from imaging import output_sharpen_params
-        r = self.recipes[self.current_path]
-        ppi = float(getattr(r, "output_ppi", 300.0) or 300.0)
-        media = getattr(r, "output_media", "screen") or "screen"
-        if hasattr(self, "output_ppi_spin"):
-            ppi = float(self.output_ppi_spin.value())
-            r.output_ppi = ppi
-        if hasattr(self, "output_media_combo"):
-            media = self.output_media_combo.currentData() or media
-            r.output_media = media
-        amt, _rad = output_sharpen_params(ppi, media)
-        r.output_sharpen = amt
-        self.sync_sliders_to_recipe()
-        self._push_history("Output sharpen (PPI)")
-        self.render_preview()
-        self.statusBar().showMessage(f"Output sharpen → {amt:.0f} ({media}, {ppi:.0f} PPI)")
-
-    def _quick_output_sharpen(self, ppi, media):
-        if self.current_path is None:
-            return
-        r = self.recipes[self.current_path]
-        r.output_ppi = float(ppi)
-        r.output_media = media
-        if hasattr(self, "output_ppi_spin"):
-            self.output_ppi_spin.blockSignals(True)
-            self.output_ppi_spin.setValue(float(ppi))
-            self.output_ppi_spin.blockSignals(False)
-        if hasattr(self, "output_media_combo"):
-            self.output_media_combo.blockSignals(True)
-            for i in range(self.output_media_combo.count()):
-                if self.output_media_combo.itemData(i) == media:
-                    self.output_media_combo.setCurrentIndex(i)
-                    break
-            self.output_media_combo.blockSignals(False)
-        self._refresh_output_suggest_label()
-        self._apply_output_sharpen_suggestion()
-
-    def _build_proxy(self, img: np.ndarray):
-        if img is None:
-            self.proxy_bgr = None
-            self._proxy_scale = 1.0
-            return
-        h, w = img.shape[:2]
-        long_edge = max(h, w)
-        if long_edge > PROXY_MAX_DIM:
-            scale = PROXY_MAX_DIM / long_edge
-            self.proxy_bgr = cv2.resize(
-                img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA
-            )
-            self._proxy_scale = scale
-        else:
-            self.proxy_bgr = img
-            self._proxy_scale = 1.0
-
-    def _clear_preview_cache(self):
-        self._preview_cache.clear()
-        self._preview_cache_order.clear()
-
-    def _recipe_fingerprint(self, recipe: Recipe) -> str:
-        try:
-            d = recipe_to_dict(recipe)
-            payload = json.dumps(d, sort_keys=True, default=str)
-        except Exception:
-            payload = repr(recipe)
-        return hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()
-
-    def _preview_cache_get(self, key: str):
-        hit = self._preview_cache.get(key)
-        if hit is None:
-            return None
-        try:
-            self._preview_cache_order.remove(key)
-        except ValueError:
-            pass
-        self._preview_cache_order.append(key)
-        return hit
-
-    def _preview_cache_put(self, key: str, result_bgr, src_bgr):
-        if key in self._preview_cache:
-            try:
-                self._preview_cache_order.remove(key)
-            except ValueError:
-                pass
-        self._preview_cache[key] = (result_bgr, src_bgr)
-        self._preview_cache_order.append(key)
-        while len(self._preview_cache_order) > PREVIEW_CACHE_MAX:
-            old = self._preview_cache_order.pop(0)
-            self._preview_cache.pop(old, None)
 
     def render_preview(self):
         if self.original_bgr is None or self.current_path is None:
@@ -3294,37 +2673,24 @@ class PhotoLab(QMainWindow):
         recipe = self.recipes[self.current_path]
         meta = self.meta_cache.get(self.current_path, {})
         multipliers = meta.get("wb_multipliers")
-
-        preview_src = self.proxy_bgr
-        if preview_src is None:
-            h, w = self.original_bgr.shape[:2]
-            if max(h, w) > PROXY_MAX_DIM:
-                scale = PROXY_MAX_DIM / max(h, w)
-                preview_src = cv2.resize(
-                    self.original_bgr, (int(w * scale), int(h * scale)),
-                    interpolation=cv2.INTER_AREA,
-                )
-            else:
-                preview_src = self.original_bgr
-
-        cache_key = f"{self.current_path}|{self._recipe_fingerprint(recipe)}"
-        cached = self._preview_cache_get(cache_key)
-        if cached is not None:
-            result, preview_src = cached
+        h, w = self.original_bgr.shape[:2]
+        max_dim = 1600
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            preview_src = cv2.resize(self.original_bgr, (int(w * scale), int(h * scale)),
+                                     interpolation=cv2.INTER_AREA)
         else:
-            result = apply_recipe(
-                preview_src, recipe, wb_multipliers=multipliers, meta=meta,
-            )
-            self._preview_cache_put(cache_key, result, preview_src)
-
+            preview_src = self.original_bgr
+        result = apply_recipe(preview_src, recipe, wb_multipliers=multipliers, meta=self.meta_cache.get(self.current_path))
         self.histogram.set_image(result)
         pix = cv_to_qpixmap(result)
         orig_pix = cv_to_qpixmap(preview_src)
         self.preview.set_image(pix, original=orig_pix)
+        # Update navigator with a small thumb of the result
         if hasattr(self, "navigator"):
             self.navigator.set_image(pix)
+            # Approximate full-frame viewport when fitted
             self.navigator.set_viewport(0.0, 0.0, 1.0, 1.0)
-        self._update_gamut_percent_label()
         if getattr(self, "_pending_history_label", None):
             self._push_history(self._pending_history_label)
             self._pending_history_label = None
@@ -3481,201 +2847,6 @@ class PhotoLab(QMainWindow):
             self.showFullScreen()
             self.statusBar().showMessage("Full screen — press F11 to exit")
 
-    def import_photos_dialog(self):
-        """Import dialog: copy/move, rename pattern, date folders, optional catalog scan."""
-        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QFileDialog
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Import Photos")
-        dlg.setMinimumWidth(480)
-        form = QFormLayout(dlg)
-
-        src_edit = QLineEdit()
-        src_btn = QPushButton("Browse…")
-        src_row = QHBoxLayout()
-        src_row.addWidget(src_edit, 1)
-        src_row.addWidget(src_btn)
-        form.addRow("Source folder", src_row)
-
-        dest_edit = QLineEdit()
-        dest_edit.setText(self.folder or os.path.expanduser("~"))
-        dest_btn = QPushButton("Browse…")
-        dest_row = QHBoxLayout()
-        dest_row.addWidget(dest_edit, 1)
-        dest_row.addWidget(dest_btn)
-        form.addRow("Destination", dest_row)
-
-        mode_combo = QComboBox()
-        mode_combo.addItem("Copy files", "copy")
-        mode_combo.addItem("Move files", "move")
-        form.addRow("Mode", mode_combo)
-
-        rename_combo = QComboBox()
-        rename_combo.addItem("Keep original names", "keep")
-        rename_combo.addItem("Date + sequence (YYYYMMDD_0001)", "date_seq")
-        rename_combo.addItem("Date + original (YYYYMMDD_name)", "date_orig")
-        form.addRow("Rename", rename_combo)
-
-        subfolder_cb = QCheckBox("Organize into Year / YYYY-MM-DD folders")
-        subfolder_cb.setChecked(True)
-        form.addRow(subfolder_cb)
-
-        recursive_cb = QCheckBox("Include subfolders of source")
-        recursive_cb.setChecked(True)
-        form.addRow(recursive_cb)
-
-        scan_cb = QCheckBox("Scan destination into Library after import")
-        scan_cb.setChecked(True)
-        form.addRow(scan_cb)
-
-        open_cb = QCheckBox("Open destination folder when done")
-        open_cb.setChecked(True)
-        form.addRow(open_cb)
-
-        count_lbl = QLabel("Choose a source folder to count images.")
-        count_lbl.setStyleSheet("color:#9cf; font-size:11px;")
-        form.addRow(count_lbl)
-
-        def browse_src():
-            d = QFileDialog.getExistingDirectory(dlg, "Source folder", src_edit.text() or "")
-            if d:
-                src_edit.setText(d)
-                refresh_count()
-
-        def browse_dest():
-            d = QFileDialog.getExistingDirectory(dlg, "Destination folder", dest_edit.text() or "")
-            if d:
-                dest_edit.setText(d)
-
-        def refresh_count():
-            d = src_edit.text().strip()
-            if not d or not os.path.isdir(d):
-                count_lbl.setText("Choose a source folder to count images.")
-                return
-            try:
-                from catalog import list_importable_files
-                n = len(list_importable_files(d, recursive=recursive_cb.isChecked()))
-                count_lbl.setText(f"{n} image(s) found in source.")
-            except Exception as e:
-                count_lbl.setText(f"Count failed: {e}")
-
-        src_btn.clicked.connect(browse_src)
-        dest_btn.clicked.connect(browse_dest)
-        recursive_cb.toggled.connect(lambda _=False: refresh_count())
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        form.addRow(buttons)
-
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        src = src_edit.text().strip()
-        dest = dest_edit.text().strip()
-        if not src or not os.path.isdir(src):
-            QMessageBox.warning(self, "Import", "Valid source folder required.")
-            return
-        if not dest:
-            QMessageBox.warning(self, "Import", "Destination folder required.")
-            return
-        from catalog import list_importable_files
-        sources = list_importable_files(src, recursive=recursive_cb.isChecked())
-        if not sources:
-            QMessageBox.information(self, "Import", "No images found in source.")
-            return
-        mode = mode_combo.currentData() or "copy"
-        if mode == "move":
-            if QMessageBox.question(
-                self, "Move files",
-                f"Move {len(sources)} file(s) from\n{src}\nto\n{dest}?\n\n"
-                "Originals will leave the source folder.",
-            ) != QMessageBox.StandardButton.Yes:
-                return
-
-        prog = self._make_progress("Importing photos…", maximum=len(sources))
-        from workers import ImportWorker
-        self._import_worker = ImportWorker(
-            sources, dest,
-            mode=mode,
-            rename_pattern=rename_combo.currentData() or "keep",
-            subfolder_by_date=subfolder_cb.isChecked(),
-        )
-
-        def on_prog(i, n, p):
-            if prog:
-                prog.setMaximum(n)
-                prog.setValue(i + 1)
-                prog.setLabelText(f"Importing {i + 1}/{n}\n{os.path.basename(p)}")
-
-        def on_done(stats):
-            if prog:
-                prog.close()
-            msg = (
-                f"Imported {stats.get('ok', 0)} file(s). "
-                f"Failed: {stats.get('failed', 0)}. Skipped: {stats.get('skipped', 0)}."
-            )
-            self.statusBar().showMessage(msg)
-            self.log(f"Import: {msg}")
-            if scan_cb.isChecked():
-                try:
-                    self.catalog.scan_folder(dest, recursive=True)
-                    self.refresh_library_tree()
-                except Exception as e:
-                    self.log(f"Post-import scan: {e}", level="ERR")
-            if open_cb.isChecked():
-                self.open_folder_path(dest)
-            QMessageBox.information(self, "Import complete", msg)
-
-        def on_fail(err):
-            if prog:
-                prog.close()
-            QMessageBox.warning(self, "Import failed", err)
-
-        self._import_worker.progress.connect(on_prog)
-        self._import_worker.finished_ok.connect(on_done)
-        self._import_worker.failed.connect(on_fail)
-        if prog:
-            prog.canceled.connect(self._import_worker.cancel)
-            prog.show()
-        self._import_worker.start()
-
-    def start_culling_mode(self):
-        """Full-screen culling: rate / reject / next with minimal chrome."""
-        paths = self._visible_filmstrip_paths()
-        if not paths and self.current_path:
-            paths = [self.current_path]
-        if not paths:
-            # Try library selection
-            try:
-                paths = self._lib_selected_paths()
-            except Exception:
-                paths = []
-        if not paths:
-            QMessageBox.information(
-                self, "Culling",
-                "Open a folder (filmstrip) or select library photos first.",
-            )
-            return
-        start = 0
-        if self.current_path and self.current_path in paths:
-            start = paths.index(self.current_path)
-        dlg = _CullingDialog(self, paths, start_index=start)
-        dlg.exec()
-        # Refresh filmstrip badges after culling
-        for p in paths:
-            try:
-                self._refresh_filmstrip_item(p)
-            except Exception:
-                log.debug("start_culling_mode: non-critical failure, continuing", exc_info=True)
-        if dlg.current_path():
-            try:
-                self._select_filmstrip_path(dlg.current_path())
-            except Exception:
-                log.debug("start_culling_mode: non-critical failure, continuing", exc_info=True)
-
     def show_metadata(self):
         if self.current_path is None:
             QMessageBox.information(self, "Metadata", "Open an image first.")
@@ -3687,7 +2858,7 @@ class PhotoLab(QMainWindow):
             for k, v in more.items():
                 meta.setdefault(k, v)
         except Exception:
-            log.debug("show_metadata: non-critical failure, continuing", exc_info=True)
+            pass
         lines = [f"Path: {self.current_path}", ""]
         for key in (
             "camera", "make", "lens", "focal", "aperture", "iso", "shutter",
@@ -3738,61 +2909,10 @@ class PhotoLab(QMainWindow):
         self.statusBar().showMessage(f"Horizon set to {angle:.2f}°")
         self.log(f"Horizon from line: {angle:.2f}°")
 
-    def auto_level_horizon(self):
-        if self.current_path is None or self.original_bgr is None:
-            return
-        from imaging import detect_horizon_angle
-        src = self.proxy_bgr if self.proxy_bgr is not None else self.original_bgr
-        ang = detect_horizon_angle(src)
-        # Apply opposite rotation to level the detected tilt
-        level = -float(ang)
-        level = max(-15.0, min(15.0, level))
-        self.recipes[self.current_path].horizon = round(level, 2)
-        self.sync_sliders_to_recipe()
-        self._push_history("Auto level")
-        self.render_preview()
-        self.statusBar().showMessage(f"Auto level → horizon {level:.2f}° (detected tilt {ang:.2f}°)")
-        self.log(f"Auto level: detected {ang:.2f}°, applied {level:.2f}°")
-
-    def toggle_keystone_mode(self, checked=False):
-        on = bool(checked) if isinstance(checked, bool) else not self.preview.keystone_mode
-        if hasattr(self, "keystone_btn") and not isinstance(checked, bool):
-            self.keystone_btn.setChecked(on)
-        corners = None
-        if self.current_path is not None:
-            corners = getattr(self.recipes[self.current_path], "keystone", None)
-        self.preview.set_keystone_mode(on, corners)
-        if on:
-            self.statusBar().showMessage("Keystone: drag the four corner handles, release to apply")
-        else:
-            self.statusBar().showMessage("Keystone off")
-
-    def reset_keystone(self):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].keystone = None
-        self.preview.set_keystone_corners(None)
-        if hasattr(self, "keystone_btn"):
-            self.keystone_btn.setChecked(False)
-        self.preview.set_keystone_mode(False)
-        self._push_history("Reset keystone")
-        self.render_preview()
-
-    def _on_keystone_changed(self, corners: list):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].keystone = [list(c) for c in corners]
-        self._push_history("Keystone")
-        self.render_preview()
-        self.statusBar().showMessage("Keystone corners updated")
-
     def _apply_filmstrip_filter(self, _idx=None):
         min_r = 0
         if hasattr(self, "film_rating_filter"):
             min_r = int(self.film_rating_filter.currentData() or 0)
-        color_f = ""
-        if hasattr(self, "film_color_filter"):
-            color_f = self.film_color_filter.currentData() or ""
         for i in range(self.filmstrip.count()):
             item = self.filmstrip.item(i)
             if not item:
@@ -3805,15 +2925,8 @@ class PhotoLab(QMainWindow):
                     if rec and rec.get("rating"):
                         stars = max(stars, int(rec.get("rating") or 0))
             except Exception:
-                log.debug("_apply_filmstrip_filter: non-critical failure, continuing", exc_info=True)
-            hide = min_r > 0 and stars < min_r
-            if not hide and color_f:
-                cl = self._color_labels.get(path)
-                if color_f == "none":
-                    hide = cl is not None
-                else:
-                    hide = cl != color_f
-            item.setHidden(hide)
+                pass
+            item.setHidden(min_r > 0 and stars < min_r)
 
     def toggle_clipping(self, checked=False):
         on = checked if isinstance(checked, bool) else (not self.preview.show_clipping)
@@ -3845,54 +2958,24 @@ class PhotoLab(QMainWindow):
                 self.log(f"Autosave failed: {e}", level="ERR")
 
     def rate_current(self, stars: int):
-        """Rate selected filmstrip images (or current) 0–5."""
-        paths = self._target_filmstrip_paths()
-        if not paths:
+        """Rate current image 0–5 (stored in memory + library catalog if present)."""
+        if self.current_path is None:
             return
         stars = int(max(0, min(5, stars)))
-        for path in paths:
-            self._image_ratings[path] = stars
-            try:
-                if hasattr(self, "catalog") and self.catalog is not None:
-                    self.catalog.set_rating(path, stars)
-            except Exception:
-                log.debug("rate_current: non-critical failure, continuing", exc_info=True)
-            self._refresh_filmstrip_item(path)
-        n = len(paths)
-        msg = f"Rating: {stars} star(s)" if stars else "Rating cleared"
-        if n > 1:
-            msg += f" × {n}"
-        self.statusBar().showMessage(msg)
-        self._apply_filmstrip_filter()
-
-    def _prompt_rate_selected(self):
-        from PyQt6.QtWidgets import QInputDialog
-        stars, ok = QInputDialog.getInt(self, "Rate selected", "Stars (0–5):", 3, 0, 5, 1)
-        if ok:
-            self.rate_current(stars)
-
-    def set_color_label(self, color: str | None):
-        """Apply color label to selected (or current) filmstrip images.
-
-        color: None to clear, or one of red|yellow|green|blue|purple.
-        """
-        paths = self._target_filmstrip_paths()
-        if not paths:
-            return
-        if color is not None:
-            color = str(color).lower().strip()
-            if color not in self.COLOR_LABELS:
-                self.statusBar().showMessage(f"Unknown color label: {color}")
-                return
-        for path in paths:
-            if color is None:
-                self._color_labels.pop(path, None)
-            else:
-                self._color_labels[path] = color
-            self._refresh_filmstrip_item(path)
-        n = len(paths)
-        label = "cleared" if color is None else color
-        self.statusBar().showMessage(f"Color label {label} ({n} image{'s' if n != 1 else ''})")
+        self._image_ratings[self.current_path] = stars
+        try:
+            if hasattr(self, "catalog") and self.catalog is not None:
+                self.catalog.set_rating(self.current_path, stars)
+        except Exception:
+            pass
+        # Update filmstrip label
+        for i in range(self.filmstrip.count()):
+            item = self.filmstrip.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole) == self.current_path:
+                base = os.path.basename(self.current_path)
+                item.setText(("★" * stars + "☆" * (5 - stars) + "  " + base) if stars else base)
+                break
+        self.statusBar().showMessage(f"Rating: {stars} star(s)" if stars else "Rating cleared")
         self._apply_filmstrip_filter()
 
     def copy_settings(self):
@@ -3949,8 +3032,7 @@ class PhotoLab(QMainWindow):
             detail_keys = ["denoise_luminance", "denoise_chroma", "denoise_strength",
                            "denoise_detail", "denoise_method", "sharpen_intensity",
                            "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen"]
-            geo_keys = ["horizon", "distortion", "perspective", "perspective_h", "crop",
-                        "ca_amount", "lens_auto", "lens_strength", "keystone"]
+            geo_keys = ["horizon", "distortion", "perspective", "crop", "ca_amount", "lens_auto"]
             local_keys = ["local_points", "gradients", "brush_masks"]
             fx_keys = ["clearview", "microcontrast", "vignette", "film_grain", "black_and_white",
                        "rotate_90", "hdr_look"]
@@ -3997,73 +3079,24 @@ class PhotoLab(QMainWindow):
     def auto_wb(self):
         if self.original_bgr is None or self.current_path is None:
             return
-        from imaging import estimate_wb_temp_tint
-        temp, tint = estimate_wb_temp_tint(self.original_bgr)
+        import numpy as np
+        img = self.original_bgr.astype("float32")
+        b, g, r = img[:,:,0].mean(), img[:,:,1].mean(), img[:,:,2].mean()
+        avg = (r + g + b) / 3.0 + 1e-6
+        # crude temp from R/B ratio
+        rb = r / (b + 1e-6)
+        # map ratio to temp-ish
+        temp = 5500 + (rb - 1.0) * 1500
+        temp = max(2500, min(9000, temp))
+        tint = (g / avg - 1.0) * 80
         rcp = self.recipes[self.current_path]
         rcp.wb_as_shot = False
         rcp.temperature = round(temp, 0)
-        rcp.tint = round(tint, 0)
+        rcp.tint = round(max(-150, min(150, tint)), 0)
         self.sync_sliders_to_recipe()
         self._push_history("Auto WB")
         self.render_preview()
 
-    def match_exposure_selected(self):
-        """Match selected filmstrip images' exposure to the current image's median luminance."""
-        if self.current_path is None or self.original_bgr is None:
-            return
-        from imaging import estimate_exposure_stops, load_image
-        paths = self._target_filmstrip_paths() if hasattr(self, "_target_filmstrip_paths") else []
-        paths = [p for p in paths if p != self.current_path]
-        if not paths:
-            QMessageBox.information(
-                self, "Match Exposure",
-                "Select other filmstrip images (Ctrl/Shift+click), then match their exposure to the current image.",
-            )
-            return
-        ref_stops = estimate_exposure_stops(self.original_bgr)
-        # Current recipe already has an exposure; target absolute mid-gray relative to ref
-        ref_exp = float(self.recipes[self.current_path].exposure)
-        n = 0
-        for p in paths:
-            try:
-                img, _meta = load_image(p)
-                if img is None:
-                    continue
-                other_stops = estimate_exposure_stops(img)
-                # Align other median to ref median: delta in stops
-                delta = ref_stops - other_stops
-                r = self.recipes.setdefault(p, Recipe())
-                r.exposure = round(ref_exp + delta, 2)
-                n += 1
-            except Exception as e:
-                self.log(f"Match exposure failed for {p}: {e}", level="ERR")
-        self.statusBar().showMessage(f"Matched exposure on {n} image(s) to current")
-        self.log(f"Match exposure → {n} images")
-
-    def match_wb_selected(self):
-        """Copy temperature/tint from current onto selected filmstrip images (or gray-world match)."""
-        if self.current_path is None:
-            return
-        paths = self._target_filmstrip_paths() if hasattr(self, "_target_filmstrip_paths") else []
-        paths = [p for p in paths if p != self.current_path]
-        if not paths:
-            QMessageBox.information(
-                self, "Match White Balance",
-                "Select other filmstrip images (Ctrl/Shift+click), then match WB to the current image.",
-            )
-            return
-        src = self.recipes[self.current_path]
-        temp, tint = float(src.temperature), float(src.tint)
-        as_shot = bool(src.wb_as_shot)
-        n = 0
-        for p in paths:
-            r = self.recipes.setdefault(p, Recipe())
-            r.wb_as_shot = as_shot
-            r.temperature = temp
-            r.tint = tint
-            n += 1
-        self.statusBar().showMessage(f"Matched white balance on {n} image(s) to current")
-        self.log(f"Match WB → {n} images")
 
     def reset_module(self, which: str):
         if self.current_path is None:
@@ -4073,21 +3106,14 @@ class PhotoLab(QMainWindow):
         groups = {
             "tone": ["exposure", "smart_light", "contrast", "highlights", "shadows",
                      "whites", "blacks", "clarity", "gamma", "curve_shadows", "curve_darks",
-                     "curve_mids", "curve_lights", "curve_highlights",
-                     "curve_points", "curve_r_points", "curve_g_points", "curve_b_points"],
+                     "curve_mids", "curve_lights", "curve_highlights"],
             "color": ["temperature", "tint", "wb_as_shot", "vibrance", "saturation",
-                      "wb_dual", "temperature2", "tint2", "wb_mix",
-                      "split_shadow_hue", "split_shadow_sat", "split_highlight_hue",
-                      "split_highlight_sat", "split_balance",
                       "hsl_hue", "hsl_sat", "hsl_lum", "soft_proof", "soft_proof_profile",
-                      "soft_proof_gamut", "soft_proof_paper_white", "soft_proof_icc_path",
-                      "soft_proof_intent"],
+                      "soft_proof_gamut"],
             "detail": ["denoise_luminance", "denoise_chroma", "denoise_strength",
                        "denoise_detail", "denoise_method", "sharpen_intensity",
-                       "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen",
-                       "output_ppi", "output_media", "protect_skin"],
-            "geometry": ["horizon", "distortion", "perspective", "perspective_h", "crop",
-                         "ca_amount", "lens_auto", "lens_strength", "keystone"],
+                       "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen"],
+            "geometry": ["horizon", "distortion", "perspective", "crop", "ca_amount", "lens_auto"],
             "local": ["local_points", "gradients", "brush_masks"],
             "effects": ["clearview", "microcontrast", "vignette", "film_grain",
                         "black_and_white", "rotate_90", "hdr_look"],
@@ -4101,90 +3127,29 @@ class PhotoLab(QMainWindow):
         self.statusBar().showMessage(f"Reset {which}")
 
     def toggle_pick_current(self):
-        paths = self._target_filmstrip_paths()
-        if not paths:
+        if self.current_path is None:
             return
-        primary = self.current_path if self.current_path in paths else paths[0]
-        new_val = not self._pick_flags.get(primary, False)
-        for path in paths:
-            self._pick_flags[path] = new_val
-            self._refresh_filmstrip_item(path)
-        n = len(paths)
-        msg = "Picked" if new_val else "Unpicked"
-        self.statusBar().showMessage(f"{msg} ({n} image{'s' if n != 1 else ''})")
-
-    def compare_selected_images(self):
-        """Side-by-side compare of 2–4 selected filmstrip images."""
-        paths = self._selected_filmstrip_paths()
-        if len(paths) < 2:
-            QMessageBox.information(
-                self, "Compare Selected",
-                "Select 2–4 images in the filmstrip (Ctrl/Shift+click), then try again.",
-            )
-            return
-        paths = paths[:4]
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Compare — {len(paths)} images")
-        dlg.resize(min(1400, 360 * len(paths) + 40), 520)
-        layout = QVBoxLayout(dlg)
-        row = QHBoxLayout()
-        layout.addLayout(row)
-        from imaging import load_image as _load
-        max_side = 480
-        for path in paths:
-            col = QVBoxLayout()
-            label = QLabel(os.path.basename(path))
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("color:#ccc; font-size:11px;")
-            img_lbl = QLabel()
-            img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            img_lbl.setMinimumSize(280, 320)
-            img_lbl.setStyleSheet("background:#111; border:1px solid #333;")
-            try:
-                img, _meta = _load(path, use_camera_wb=True)
-                # Apply recipe if we have one in memory
-                r = self.recipes.get(path)
-                if r is not None:
-                    meta = self.meta_cache.get(path, _meta or {})
-                    img = apply_recipe(
-                        img, r,
-                        wb_multipliers=meta.get("wb_multipliers"),
-                        meta=meta,
-                    )
-                h, w = img.shape[:2]
-                if max(h, w) > max_side:
-                    scale = max_side / max(h, w)
-                    img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-                pix = cv_to_qpixmap(img)
-                img_lbl.setPixmap(pix)
-            except Exception as e:
-                img_lbl.setText(f"Could not load\n{e}")
-            col.addWidget(img_lbl)
-            col.addWidget(label)
-            # Stars / flags summary
-            stars = self._image_ratings.get(path, 0)
-            flags = []
-            if self._pick_flags.get(path):
-                flags.append("✓")
-            if self._reject_flags.get(path):
-                flags.append("⛔")
-            cl = self._color_labels.get(path)
-            if cl and cl in self.COLOR_LABELS:
-                flags.append(self.COLOR_LABELS[cl][0])
-            if stars:
-                flags.append("★" * stars)
-            meta_l = QLabel(" ".join(flags) if flags else "—")
-            meta_l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            meta_l.setStyleSheet("color:#888; font-size:11px;")
-            col.addWidget(meta_l)
-            open_btn = QPushButton("Open in Develop")
-            open_btn.clicked.connect(lambda _=False, p=path: (dlg.accept(), self.load_image(p)))
-            col.addWidget(open_btn)
-            row.addLayout(col)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dlg.accept)
-        layout.addWidget(close_btn)
-        dlg.exec()
+        path = self.current_path
+        if not hasattr(self, "_pick_flags"):
+            self._pick_flags = {}
+        new_val = not self._pick_flags.get(path, False)
+        self._pick_flags[path] = new_val
+        # visual on filmstrip
+        for i in range(self.filmstrip.count()):
+            item = self.filmstrip.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole) == path:
+                base = os.path.basename(path)
+                stars = self._image_ratings.get(path, 0)
+                rej = getattr(self, "_reject_flags", {}).get(path, False)
+                prefix = ""
+                if new_val:
+                    prefix += "✓ "
+                if rej:
+                    prefix += "⛔ "
+                star = (("★" * stars + "☆" * (5 - stars) + "  ") if stars else "")
+                item.setText(f"{prefix}{star}{base}")
+                break
+        self.statusBar().showMessage("Picked" if new_val else "Unpicked")
 
     def _lib_focus_stack(self):
         paths = self._lib_selected_paths()
@@ -4225,7 +3190,7 @@ class PhotoLab(QMainWindow):
                     if side is not None:
                         recipe = side
                 except Exception:
-                    log.debug("_lib_export_selected: non-critical failure, continuing", exc_info=True)
+                    pass
             meta = self.meta_cache.get(path, {})
             jobs.append({
                 "path": path,
@@ -4719,39 +3684,6 @@ class PhotoLab(QMainWindow):
         self.recipes[self.current_path].soft_proof_gamut = bool(checked)
         self.render_timer.start()
 
-    def _update_gamut_percent_label(self):
-        """Refresh the Color panel gamut % readout after a soft-proof render."""
-        if not hasattr(self, "gamut_pct_label"):
-            return
-        if self.current_path is None or self.proxy_bgr is None:
-            self.gamut_pct_label.setText("Gamut shift: —")
-            return
-        r = self.recipes.get(self.current_path)
-        if not r or not r.soft_proof:
-            self.gamut_pct_label.setText("Gamut shift: — (soft proof off)")
-            return
-        try:
-            from imaging import apply_soft_proof
-            meta = self.meta_cache.get(self.current_path, {})
-            # Compare unproofed baseline (recipe with soft_proof forced off) is expensive;
-            # instead measure proof vs current proxy as stored in last render path.
-            src = self.proxy_bgr.astype(np.float32) / 255.0
-            # Apply non-proof parts lightly: use apply_soft_proof only on source
-            _out, stats = apply_soft_proof(
-                src,
-                r.soft_proof_profile,
-                gamut_warning=False,
-                paper_white=getattr(r, "soft_proof_paper_white", False),
-                icc_path=getattr(r, "soft_proof_icc_path", "") or "",
-                intent=getattr(r, "soft_proof_intent", "relative") or "relative",
-                return_stats=True,
-            )
-            pct = float(stats.get("gamut_percent") or 0.0)
-            method = stats.get("method") or "?"
-            self.gamut_pct_label.setText(f"Gamut shift: {pct:.1f}%  ·  {method}")
-        except Exception as e:
-            self.gamut_pct_label.setText(f"Gamut shift: (error: {e})")
-
     def _on_brush_invert(self):
         if self.current_path is None or getattr(self, "selected_brush_index", -1) < 0:
             return
@@ -4849,10 +3781,7 @@ class PhotoLab(QMainWindow):
         m = masks[self.selected_brush_index]
         for key, row in self.brush_sliders.items():
             row.blockSignals(True)
-            if key in ("flow", "opacity"):
-                row.set_value(float(m.get(key, 1.0)) * 100.0)
-            else:
-                row.set_value(float(m.get(key, 0.0)))
+            row.set_value(float(m.get(key, 0.0)))
             row.blockSignals(False)
 
     def _on_brush_adj(self, key, val):
@@ -4861,11 +3790,7 @@ class PhotoLab(QMainWindow):
         masks = self.recipes[self.current_path].brush_masks
         if not masks or self.selected_brush_index >= len(masks):
             return
-        # flow / opacity stored 0..1 internally
-        if key in ("flow", "opacity"):
-            masks[self.selected_brush_index][key] = float(val) / 100.0
-        else:
-            masks[self.selected_brush_index][key] = float(val)
+        masks[self.selected_brush_index][key] = float(val)
         self.preview.set_brush_masks(masks, self.selected_brush_index)
         self._update_brush_list()
         self.render_timer.start()
@@ -4876,64 +3801,6 @@ class PhotoLab(QMainWindow):
 
     def _on_brush_hard(self, val):
         self.preview.brush_hardness = float(val) / 100.0
-
-    def _on_brush_flow(self, val):
-        self.preview.brush_flow = max(0.05, float(val) / 100.0)
-
-    def _on_brush_opacity(self, val):
-        self.preview.brush_opacity = max(0.05, float(val) / 100.0)
-
-    def _on_brush_paint_mode(self, _idx=None):
-        if not hasattr(self, "brush_mode_combo"):
-            return
-        mode = self.brush_mode_combo.currentData() or "add"
-        self.preview.brush_paint_mode = mode
-        # Eraser checkbox mirrors subtract
-        if hasattr(self, "brush_erase_cb") and mode == "subtract":
-            self.brush_erase_cb.blockSignals(True)
-            self.brush_erase_cb.setChecked(True)
-            self.brush_erase_cb.blockSignals(False)
-            self.preview.brush_erase = True
-        elif hasattr(self, "brush_erase_cb") and mode == "add":
-            self.brush_erase_cb.blockSignals(True)
-            self.brush_erase_cb.setChecked(False)
-            self.brush_erase_cb.blockSignals(False)
-            self.preview.brush_erase = False
-
-    def _on_auto_subject_mask(self):
-        """Create a new brush mask from offline GrabCut subject detection."""
-        if self.current_path is None or self.original_bgr is None:
-            QMessageBox.information(self, "Subject mask", "Open an image first.")
-            return
-        try:
-            from imaging import generate_subject_mask
-            src = self.proxy_bgr if self.proxy_bgr is not None else self.original_bgr
-            mask = generate_subject_mask(src)
-            if mask is None or float(mask.max()) < 0.01:
-                QMessageBox.warning(self, "Subject mask", "Could not detect a subject.")
-                return
-            entry = {
-                "strokes": [],
-                "raster": mask,  # float 0..1 at proxy size; apply_brush resizes as needed
-                "hardness": 0.8,
-                "flow": 1.0,
-                "opacity": float(getattr(self.preview, "brush_opacity", 1.0)),
-                "mode": "add",
-                "exposure": 0.0, "contrast": 0.0, "saturation": 0.0,
-                "clarity": 0.0, "temperature": 0.0,
-            }
-            masks = list(self.recipes[self.current_path].brush_masks or [])
-            masks.append(entry)
-            self.recipes[self.current_path].brush_masks = masks
-            self.selected_brush_index = len(masks) - 1
-            self.preview.set_brush_masks(masks, self.selected_brush_index)
-            self._update_brush_list()
-            self._sync_brush_sliders()
-            self._push_history("Auto subject mask")
-            self.render_preview()
-            self.statusBar().showMessage("Subject mask added — adjust exposure/etc. on the new brush entry")
-        except Exception as e:
-            QMessageBox.warning(self, "Subject mask", str(e))
 
     def _on_delete_brush(self):
         if self.current_path is None or getattr(self, "selected_brush_index", -1) < 0:
@@ -4960,34 +3827,8 @@ class PhotoLab(QMainWindow):
         if self.current_path is None:
             return
         self.recipes[self.current_path].lens_auto = bool(checked)
-        if checked:
-            self._probe_lensfun(silent=True)
         self._schedule_history("Lensfun")
         self.render_timer.start()
-
-    def _probe_lensfun(self, silent=False):
-        meta = self.meta_cache.get(self.current_path, {}) if self.current_path else {}
-        from imaging import probe_lensfun
-        info = probe_lensfun(meta)
-        msg = info.get("message") or "—"
-        if hasattr(self, "lensfun_status"):
-            color = "#6d6" if info.get("lens_match") else ("#fc6" if info.get("installed") else "#c88")
-            self.lensfun_status.setStyleSheet(f"color:{color}; font-size:11px;")
-            self.lensfun_status.setText(msg)
-        if not silent:
-            QMessageBox.information(
-                self, "Lensfun match",
-                f"{msg}\n\n"
-                f"EXIF camera: {info.get('camera_query') or '—'}\n"
-                f"EXIF lens: {info.get('lens_query') or '—'}\n"
-                f"Matched camera: {info.get('camera_match') or '—'}\n"
-                f"Matched lens: {info.get('lens_match') or '—'}\n"
-                f"Database: {info.get('db_path') or '—'}\n\n"
-                "Install: pip install lensfunpy.\n"
-                "Place the Lensfun XML DB in photo_lab/lensfun/ "
-                "(or lensfun/data/db/) next to the app.",
-            )
-        return info
 
     def _on_lib_search(self):
         q = self.lib_search.text().strip() if hasattr(self, "lib_search") else ""
@@ -5030,151 +3871,6 @@ class PhotoLab(QMainWindow):
             self.catalog.set_keywords(path, kw)
         self.statusBar().showMessage(f"Keywords saved on {len(paths)} photo(s)")
         self._on_lib_search()
-
-    def _on_lib_save_people(self):
-        paths = self._lib_selected_paths()
-        if not paths:
-            self.statusBar().showMessage("Select library photo(s) to tag people")
-            return
-        people = self.lib_people_edit.text().strip() if hasattr(self, "lib_people_edit") else ""
-        for path in paths:
-            self.catalog.set_people(path, people)
-        self.statusBar().showMessage(f"People tags saved on {len(paths)} photo(s)")
-        if hasattr(self, "lib_search") and self.lib_search.text().strip():
-            self._on_lib_search()
-
-    def _refresh_collections_combo(self):
-        if not hasattr(self, "lib_collections"):
-            return
-        cur_id = self.lib_collections.currentData()
-        self.lib_collections.blockSignals(True)
-        self.lib_collections.clear()
-        self.lib_collections.addItem("— Collections —", None)
-        try:
-            for c in self.catalog.list_collections():
-                self.lib_collections.addItem(f"{c['name']} ({c.get('count', 0)})", c["id"])
-        except Exception:
-            log.debug("_refresh_collections_combo: non-critical failure, continuing", exc_info=True)
-        if cur_id is not None:
-            for i in range(self.lib_collections.count()):
-                if self.lib_collections.itemData(i) == cur_id:
-                    self.lib_collections.setCurrentIndex(i)
-                    break
-        self.lib_collections.blockSignals(False)
-
-    def _lib_new_collection(self):
-        name, ok = QInputDialog.getText(self, "New collection", "Collection name:")
-        if not ok or not (name or "").strip():
-            return
-        cid = self.catalog.create_collection(name.strip())
-        self._refresh_collections_combo()
-        for i in range(self.lib_collections.count()):
-            if self.lib_collections.itemData(i) == cid:
-                self.lib_collections.setCurrentIndex(i)
-                break
-        self.statusBar().showMessage(f"Collection “{name.strip()}” created")
-
-    def _lib_delete_collection(self):
-        cid = self.lib_collections.currentData() if hasattr(self, "lib_collections") else None
-        if cid is None:
-            self.statusBar().showMessage("Select a collection to delete")
-            return
-        name = self.lib_collections.currentText()
-        if QMessageBox.question(
-            self, "Delete collection",
-            f"Delete collection “{name}”? (Photos stay in the catalog.)",
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        self.catalog.delete_collection(int(cid))
-        self._refresh_collections_combo()
-        self.statusBar().showMessage("Collection deleted")
-
-    def _lib_add_to_collection(self):
-        cid = self.lib_collections.currentData() if hasattr(self, "lib_collections") else None
-        if cid is None:
-            self.statusBar().showMessage("Select or create a collection first")
-            return
-        paths = self._lib_selected_paths()
-        if not paths and self.current_path:
-            paths = [self.current_path]
-        if not paths:
-            self.statusBar().showMessage("Select photo(s) to add")
-            return
-        self.catalog.add_to_collection(int(cid), paths)
-        self._refresh_collections_combo()
-        self.statusBar().showMessage(f"Added {len(paths)} photo(s) to collection")
-
-    def _on_lib_collection_changed(self, _idx=None):
-        cid = self.lib_collections.currentData() if hasattr(self, "lib_collections") else None
-        if cid is None:
-            return
-        include_rej = bool(self.lib_filter_rejected.isChecked())
-        recs = self.catalog.images_in_collection(int(cid), include_rejected=include_rej)
-        self.lib_heading.setText(f"Collection — {len(recs)} photo(s)")
-        self._lib_records = recs
-        self.lib_grid.clear()
-        for rec in recs:
-            label = rec.get("filename") or os.path.basename(rec["path"])
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, rec["path"])
-            item.setToolTip(rec["path"])
-            item.setSizeHint(QSize(150, 170))
-            self.lib_grid.addItem(item)
-        if self._lib_thumb_worker and self._lib_thumb_worker.isRunning():
-            self._lib_thumb_worker.cancel()
-        from workers import CatalogThumbWorker
-        self._lib_thumb_worker = CatalogThumbWorker(recs, size=140)
-        self._lib_thumb_worker.thumb_ready.connect(self._on_lib_thumb_ready)
-        self._lib_thumb_worker.start()
-
-    def _lib_find_duplicates(self):
-        groups = self.catalog.find_duplicate_groups()
-        if not groups:
-            QMessageBox.information(self, "Duplicates", "No duplicate groups found.\n\n"
-                                    "Duplicates use a content fingerprint built at scan time. "
-                                    "Re-scan folders if hashes are missing.")
-            return
-        # Flatten first groups into grid for review
-        flat = []
-        for g in groups[:50]:
-            flat.extend(g)
-        self.lib_heading.setText(f"Duplicates — {len(groups)} group(s), showing {len(flat)} file(s)")
-        self._lib_records = flat
-        self.lib_grid.clear()
-        for rec in flat:
-            label = rec.get("filename") or os.path.basename(rec["path"])
-            item = QListWidgetItem(f"⧉ {label}")
-            item.setData(Qt.ItemDataRole.UserRole, rec["path"])
-            item.setToolTip(f"{rec['path']}\nhash={rec.get('content_hash')}")
-            item.setSizeHint(QSize(150, 170))
-            self.lib_grid.addItem(item)
-        if self._lib_thumb_worker and self._lib_thumb_worker.isRunning():
-            self._lib_thumb_worker.cancel()
-        from workers import CatalogThumbWorker
-        self._lib_thumb_worker = CatalogThumbWorker(flat, size=140)
-        self._lib_thumb_worker.thumb_ready.connect(self._on_lib_thumb_ready)
-        self._lib_thumb_worker.start()
-        self.statusBar().showMessage(f"Found {len(groups)} duplicate group(s)")
-
-    def _create_virtual_copy(self):
-        if self.current_path is None:
-            self.statusBar().showMessage("Open an image in Develop first")
-            return
-        from imaging import recipe_to_dict
-        import json
-        r = self.recipes.get(self.current_path)
-        recipe_json = ""
-        try:
-            recipe_json = json.dumps(recipe_to_dict(r) if r else {})
-        except Exception:
-            recipe_json = "{}"
-        n = len(self.catalog.list_virtual_copies(self.current_path)) + 1
-        name = f"Copy {n}"
-        vc_id = self.catalog.create_virtual_copy(self.current_path, name=name, recipe_json=recipe_json)
-        # Also write a sidecar variant path marker in catalog only — edits stay on master
-        # until a dedicated VC editor path is built; store recipe for later restore.
-        self.statusBar().showMessage(f"Virtual copy “{name}” (id {vc_id}) created from current recipe")
-        self.log(f"Virtual copy {vc_id} for {self.current_path}")
 
     def toggle_wb_picker(self, checked=False):
         on = checked if isinstance(checked, bool) else (not getattr(self.preview, "wb_picker_mode", False))
@@ -5427,7 +4123,7 @@ class PhotoLab(QMainWindow):
             denoise_luminance=40, denoise_chroma=55, denoise_strength=40,
             denoise_detail=55, denoise_method="auto",
             sharpen_intensity=30, sharpen_radius=0.7, sharpen_threshold=30,
-            sharpen_detail=15, output_sharpen=5, protect_skin=55,
+            sharpen_detail=15, output_sharpen=5,
         )
 
     def _detail_preset_landscape(self):
@@ -5523,11 +4219,7 @@ class PhotoLab(QMainWindow):
     def save_preset(self):
         if self.current_path is None:
             return
-        start = ensure_plugin_dir()
-        suggested = os.path.join(start, "preset.json")
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Preset", suggested, "JSON (*.json)"
-        )
+        path, _ = QFileDialog.getSaveFileName(self, "Save Preset", "preset.json", "JSON (*.json)")
         if path:
             try:
                 self.recipes[self.current_path].save_json(path)
@@ -5539,18 +4231,16 @@ class PhotoLab(QMainWindow):
         if self.current_path is None:
             QMessageBox.information(self, "Load Preset", "Open an image first.")
             return
-        start_dir = plugin_dir()
-        if not os.path.isdir(start_dir):
-            start_dir = ""
         path, selected_filter = QFileDialog.getOpenFileName(
             self,
             "Load Preset",
-            start_dir,
+            "",
             "All Presets (*.xmp *.json);;Lightroom XMP (*.xmp);;PhotoLab JSON (*.json);;All (*.*)",
         )
         if not path:
             return
         try:
+            base = self.recipes.get(self.current_path)
             r = load_preset_file(path, base=None)
             self.recipes[self.current_path] = r
             self.sync_sliders_to_recipe()
@@ -5565,14 +4255,14 @@ class PhotoLab(QMainWindow):
         if self.current_path is None:
             QMessageBox.information(self, "Import Presets", "Open an image first.")
             return
-        start = plugin_dir() if os.path.isdir(plugin_dir()) else ""
-        folder = QFileDialog.getExistingDirectory(self, "Choose preset folder (XMP/JSON)", start)
+        folder = QFileDialog.getExistingDirectory(self, "Choose preset folder (XMP/JSON)")
         if not folder:
             return
         files = list_preset_files(folder)
         if not files:
             QMessageBox.information(self, "Import Presets", "No .xmp or .json presets found in that folder.")
             return
+        # Apply first; report count
         try:
             r = load_preset_file(files[0])
             self.recipes[self.current_path] = r
@@ -5586,8 +4276,7 @@ class PhotoLab(QMainWindow):
                 self,
                 "Presets Found",
                 f"Found {len(files)} preset(s) in:\n{folder}\n\nApplied:\n{os.path.basename(files[0])}\n\n"
-                "Use File → Load Preset… to apply others individually.\n\n"
-                f"Bundled plugin folder:\n{plugin_dir()}",
+                "Use File → Load Preset… to apply others individually.",
             )
         except Exception as e:
             QMessageBox.warning(self, "Import Presets", str(e))
@@ -5709,14 +4398,6 @@ class PhotoLab(QMainWindow):
             pt["radius"] = val / 100.0
         elif name == "local_feather":
             pt["feather"] = val / 100.0
-        elif name == "local_chroma":
-            pt["chroma"] = val
-        elif name == "local_luma":
-            pt["luma"] = val
-        elif name == "local_luma_min":
-            pt["luma_min"] = val
-        elif name == "local_luma_max":
-            pt["luma_max"] = val
         elif name == "local_exposure":
             pt["exposure"] = val
         elif name == "local_contrast":
@@ -5756,14 +4437,6 @@ class PhotoLab(QMainWindow):
                 
             self.local_sliders["local_radius"].set_value(pt.get("radius", 0.15) * 100.0)
             self.local_sliders["local_feather"].set_value(pt.get("feather", 0.5) * 100.0)
-            if "local_chroma" in self.local_sliders:
-                self.local_sliders["local_chroma"].set_value(pt.get("chroma", 100.0))
-            if "local_luma" in self.local_sliders:
-                self.local_sliders["local_luma"].set_value(pt.get("luma", 100.0))
-            if "local_luma_min" in self.local_sliders:
-                self.local_sliders["local_luma_min"].set_value(pt.get("luma_min", 0.0))
-            if "local_luma_max" in self.local_sliders:
-                self.local_sliders["local_luma_max"].set_value(pt.get("luma_max", 100.0))
             self.local_sliders["local_exposure"].set_value(pt.get("exposure", 0.0))
             self.local_sliders["local_contrast"].set_value(pt.get("contrast", 0.0))
             self.local_sliders["local_saturation"].set_value(pt.get("saturation", 0.0))
@@ -5817,208 +4490,8 @@ class PhotoLab(QMainWindow):
         try:
             self.catalog.close()
         except Exception:
-            log.debug("closeEvent: non-critical failure, continuing", exc_info=True)
+            pass
         super().closeEvent(event)
-
-
-class _CullingDialog(QDialog):
-    """Full-screen-ish culling: navigate, rate, reject, pick with keyboard."""
-
-    def __init__(self, parent, paths, start_index=0):
-        super().__init__(parent)
-        self.setWindowTitle("Culling Mode — Esc to exit")
-        self.setWindowFlag(Qt.WindowType.Window)
-        self._paths = list(paths)
-        self._index = max(0, min(int(start_index), len(self._paths) - 1))
-        self._parent = parent
-        self._pix = None
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        self.hint = QLabel(
-            "← → navigate   0–5 rate   X reject   U pick   Space next   Esc exit"
-        )
-        self.hint.setStyleSheet("color:#aaa; font-size:12px;")
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.hint)
-
-        self.img_label = QLabel()
-        self.img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.img_label.setStyleSheet("background:#0a0a0a;")
-        self.img_label.setMinimumSize(640, 400)
-        layout.addWidget(self.img_label, stretch=1)
-
-        self.info = QLabel("")
-        self.info.setStyleSheet("color:#ddd; font-size:13px;")
-        self.info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.info)
-
-        self.setStyleSheet("background:#111;")
-        self.showMaximized()
-        self._load_current()
-
-    def current_path(self):
-        if 0 <= self._index < len(self._paths):
-            return self._paths[self._index]
-        return None
-
-    def _load_current(self):
-        path = self.current_path()
-        if not path:
-            self.img_label.setText("No images")
-            return
-        try:
-            from imaging import extract_embedded_preview, _silent_imread
-            img = extract_embedded_preview(path, max_side=1600)
-            if img is None:
-                img = _silent_imread(path)
-                if img is not None:
-                    h, w = img.shape[:2]
-                    scale = min(1.0, 1600 / max(h, w))
-                    if scale < 0.999:
-                        img = cv2.resize(img, (int(w * scale), int(h * scale)))
-            if img is None:
-                self.img_label.setText(f"Could not load\n{path}")
-                return
-            from qt_utils import cv_to_qpixmap
-            pm = cv_to_qpixmap(img)
-            self._pix = pm
-            self._fit_pixmap()
-        except Exception as e:
-            self.img_label.setText(str(e))
-        self._update_info()
-
-    def _fit_pixmap(self):
-        if self._pix is None:
-            return
-        scaled = self._pix.scaled(
-            self.img_label.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.img_label.setPixmap(scaled)
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._fit_pixmap()
-
-    def _update_info(self):
-        path = self.current_path()
-        if not path:
-            self.info.setText("")
-            return
-        parent = self._parent
-        rating = 0
-        try:
-            rating = int(getattr(parent, "_image_ratings", {}).get(path, 0) or 0)
-            if hasattr(parent, "catalog"):
-                rec = parent.catalog.get_image(path)
-                if rec and rec.get("rating") is not None:
-                    rating = int(rec.get("rating") or rating)
-        except Exception:
-            log.debug("_update_info: non-critical failure, continuing", exc_info=True)
-        rejected = False
-        try:
-            if hasattr(parent, "catalog"):
-                rec = parent.catalog.get_image(path) or {}
-                rejected = bool(rec.get("reject"))
-            # develop-side reject may be on recipe
-            r = getattr(parent, "recipes", {}).get(path)
-            if r is not None and getattr(r, "reject", False):
-                rejected = True
-        except Exception:
-            log.debug("_update_info: non-critical failure, continuing", exc_info=True)
-        picked = bool(getattr(parent, "_pick_flags", {}).get(path, False))
-        stars = "★" * rating + "☆" * (5 - rating)
-        flags = []
-        if picked:
-            flags.append("PICK")
-        if rejected:
-            flags.append("REJECT")
-        flag_s = ("  ·  " + " ".join(flags)) if flags else ""
-        self.info.setText(
-            f"{self._index + 1}/{len(self._paths)}  ·  {os.path.basename(path)}  ·  {stars}{flag_s}"
-        )
-        self.setWindowTitle(f"Culling — {os.path.basename(path)}")
-
-    def _rate(self, stars: int):
-        path = self.current_path()
-        if not path or self._parent is None:
-            return
-        try:
-            self._parent.rate_current(stars)
-        except Exception:
-            # rate may require current_path match
-            try:
-                if hasattr(self._parent, "catalog"):
-                    self._parent.catalog.set_rating(path, stars)
-                if hasattr(self._parent, "_image_ratings"):
-                    self._parent._image_ratings[path] = stars
-            except Exception:
-                log.debug("_rate: non-critical failure, continuing", exc_info=True)
-        self._update_info()
-
-    def _toggle_reject(self):
-        path = self.current_path()
-        if not path or self._parent is None:
-            return
-        # Ensure parent current is this path for shared handlers
-        try:
-            if self._parent.current_path != path:
-                # set without full load if possible
-                self._parent.current_path = path
-        except Exception:
-            log.debug("_toggle_reject: non-critical failure, continuing", exc_info=True)
-        try:
-            self._parent.toggle_reject_current()
-        except Exception:
-            try:
-                rec = self._parent.catalog.get_image(path) or {}
-                new_r = not bool(rec.get("reject"))
-                self._parent.catalog.set_reject(path, new_r)
-            except Exception:
-                log.debug("_toggle_reject: non-critical failure, continuing", exc_info=True)
-        self._update_info()
-
-    def _toggle_pick(self):
-        path = self.current_path()
-        if not path or self._parent is None:
-            return
-        flags = getattr(self._parent, "_pick_flags", None)
-        if flags is None:
-            return
-        flags[path] = not flags.get(path, False)
-        self._update_info()
-
-    def keyPressEvent(self, e):
-        key = e.key()
-        if key in (Qt.Key.Key_Escape, Qt.Key.Key_Q):
-            self.accept()
-            return
-        if key in (Qt.Key.Key_Right, Qt.Key.Key_Space, Qt.Key.Key_Down):
-            if self._index < len(self._paths) - 1:
-                self._index += 1
-                self._load_current()
-            return
-        if key in (Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_Backspace):
-            if self._index > 0:
-                self._index -= 1
-                self._load_current()
-            return
-        if key == Qt.Key.Key_X:
-            self._toggle_reject()
-            return
-        if key in (Qt.Key.Key_U, Qt.Key.Key_P):
-            self._toggle_pick()
-            return
-        # 0-5 ratings
-        for n, k in enumerate((
-            Qt.Key.Key_0, Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3, Qt.Key.Key_4, Qt.Key.Key_5,
-        )):
-            if key == k:
-                self._rate(n)
-                return
-        super().keyPressEvent(e)
 
 
 # Backward-compatible alias

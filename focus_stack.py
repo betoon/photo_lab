@@ -278,10 +278,14 @@ def focus_stack(
     boundary_smooth: int = 5,
     pyramid_levels: int = 5,
     crop_common: bool = True,
+    min_align_score: float = 0.0,
     progress_cb=None,
 ) -> Tuple[np.ndarray, Optional[np.ndarray], dict]:
     """
     Align and fuse a focus stack.
+
+    min_align_score: drop non-reference frames whose alignment score is below
+    this threshold before fusion (0 = keep all).
 
     Returns (result_bgr_u8, depth_u8_or_None, report_dict).
     """
@@ -301,7 +305,10 @@ def focus_stack(
         "reference": ref_idx,
         "align_mode": align_mode,
         "fusion_mode": fusion_mode,
+        "min_align_score": float(min_align_score or 0),
         "scores": [],
+        "excluded": [],
+        "used_indices": [],
     }
 
     def prog(msg, frac=None):
@@ -327,7 +334,9 @@ def focus_stack(
     ref_gray = _to_gray32(frames[ref_idx])
     aligned = [None] * n
     aligned[ref_idx] = frames[ref_idx]
-    report["scores"].append({"index": ref_idx, "score": 1.0, "path": paths[ref_idx]})
+    report["scores"].append({
+        "index": ref_idx, "score": 1.0, "path": paths[ref_idx], "kept": True,
+    })
 
     for i, f in enumerate(frames):
         if i == ref_idx:
@@ -347,9 +356,38 @@ def focus_stack(
                 ecc = "homography"
             M, score = align_ecc(ref_gray, g, mode=ecc)
         aligned[i] = warp_image(f, M, (rh, rw))
-        report["scores"].append({"index": i, "score": score, "path": paths[i]})
+        report["scores"].append({
+            "index": i, "score": float(score), "path": paths[i], "kept": True,
+        })
 
-    frames = aligned
+    # Exclude weak alignments (never drop the reference)
+    thresh = float(min_align_score or 0.0)
+    keep_idx = []
+    for entry in report["scores"]:
+        i = int(entry["index"])
+        sc = float(entry.get("score") or 0.0)
+        if i == ref_idx or thresh <= 0 or sc >= thresh:
+            keep_idx.append(i)
+            entry["kept"] = True
+        else:
+            entry["kept"] = False
+            report["excluded"].append({
+                "index": i, "score": sc, "path": entry.get("path"),
+            })
+
+    keep_idx = sorted(set(keep_idx))
+    if len(keep_idx) < 2:
+        # Fall back to all frames so fusion can still run
+        keep_idx = list(range(n))
+        report["excluded"] = []
+        for entry in report["scores"]:
+            entry["kept"] = True
+        report["note"] = "All frames kept — exclusion would leave fewer than 2 frames"
+
+    report["used_indices"] = keep_idx
+    frames = [aligned[i] for i in keep_idx]
+    report["frames_used"] = len(frames)
+
     if crop_common:
         frames = common_area_crop(frames, margin=4)
 

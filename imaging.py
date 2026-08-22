@@ -11,22 +11,18 @@ from __future__ import annotations
 import json
 import os
 import threading
-from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field, fields
 from typing import Optional, Tuple
 
 import numpy as np
 import cv2
-import logging
-
-log = logging.getLogger(__name__)
 
 # Suppress OpenCV's noisy TIFF tag warnings (NEF/CR2 false probes)
 try:
     if hasattr(cv2, 'setLogLevel'):
         cv2.setLogLevel(3)  # ERROR only
 except Exception:
-    log.debug("<module>: non-critical failure, continuing", exc_info=True)
+    pass
 
 # rawpy/LibRaw is not thread-safe. ThumbnailWorker and LoadImageWorker (and
 # any other background threads) can call into it concurrently, which
@@ -34,55 +30,6 @@ except Exception:
 # "Out of order call of libraw function". Serialize all RAW decodes through
 # this lock so only one thread touches rawpy at a time.
 _rawpy_lock = threading.Lock()
-# Pillow raises DecompressionBombError for extremely large pixel dimensions.
-# PhotoLab is a trusted local photo application and must support panoramas,
-# scans, and very-high-resolution camera files, so use a narrowly-scoped
-# override while opening images rather than changing Pillow globally.
-_pillow_open_lock = threading.RLock()
-
-
-@contextmanager
-def _pillow_large_image_context():
-    """Temporarily disable Pillow's pixel-count bomb protection.
-
-    The setting is process-global in Pillow, therefore it is changed only for
-    the short duration of an Image.open()/metadata operation and restored even
-    when Pillow raises. This prevents large trusted local photographs from
-    being rejected while avoiding a permanent global configuration change.
-    """
-    try:
-        from PIL import Image
-    except Exception:
-        yield
-        return
-
-    with _pillow_open_lock:
-        previous = getattr(Image, "MAX_IMAGE_PIXELS", None)
-        try:
-            Image.MAX_IMAGE_PIXELS = None
-            yield
-        finally:
-            Image.MAX_IMAGE_PIXELS = previous
-
-
-@contextmanager
-def safe_pil_open(path: str, *args, **kwargs):
-    """Open a trusted local image without Pillow's decompression-bomb limit.
-
-    This is intended for PhotoLab's own local-photo workflow. The image is
-    fully opened inside the protected context; callers that need lazy data
-    should call load()/thumbnail()/copy() before leaving the context.
-    """
-    from PIL import Image
-    with _pillow_large_image_context():
-        img = Image.open(path, *args, **kwargs)
-        try:
-            yield img
-        finally:
-            try:
-                img.close()
-            except Exception:
-                log.debug("safe_pil_open: non-critical failure, continuing", exc_info=True)
 
 IMAGE_EXTS = (
     # RGB
@@ -136,11 +83,6 @@ class Recipe:
 
     temperature: float = 5500.0
     tint: float = 0.0
-    # Dual-illuminant WB (blend primary ↔ secondary)
-    wb_dual: bool = False
-    temperature2: float = 6500.0
-    tint2: float = 0.0
-    wb_mix: float = 0.0  # 0..100 toward secondary
     wb_as_shot: bool = True
 
     vibrance: float = 0.0
@@ -156,9 +98,6 @@ class Recipe:
     soft_proof: bool = False
     soft_proof_profile: str = "sRGB"
     soft_proof_gamut: bool = False
-    soft_proof_paper_white: bool = False
-    soft_proof_icc_path: str = ""
-    soft_proof_intent: str = "relative"  # perceptual | relative | saturation | absolute
 
     local_points: list = field(default_factory=list)
     gradients: list = field(default_factory=list)  # graduated filters
@@ -166,28 +105,12 @@ class Recipe:
     # Optics (manual / Lensfun-assisted)
     ca_amount: float = 0.0  # lateral chromatic aberration -100..100
     lens_auto: bool = False
-    lens_strength: float = 100.0  # 0..100 Lensfun correction strength
-    # Four-corner keystone: list of 4 [x,y] normalized dest corners TL,TR,BR,BL
-    # None or identity = no warp
-    keystone: list | None = None
-    perspective_h: float = 0.0  # horizontal keystone -100..100 (simple)
 
     curve_shadows: float = 0.0
     curve_darks: float = 0.0
     curve_mids: float = 0.0
     curve_lights: float = 0.0
     curve_highlights: float = 0.0
-    # Point curves: list of [x, y] in 0..1 (identity if empty / only endpoints)
-    curve_points: list = field(default_factory=list)       # luminance / RGB master
-    curve_r_points: list = field(default_factory=list)
-    curve_g_points: list = field(default_factory=list)
-    curve_b_points: list = field(default_factory=list)
-    # Split toning
-    split_shadow_hue: float = 0.0        # 0..360
-    split_shadow_sat: float = 0.0        # 0..100
-    split_highlight_hue: float = 0.0     # 0..360
-    split_highlight_sat: float = 0.0     # 0..100
-    split_balance: float = 0.0           # -100..100 (neg = more shadows, pos = more highlights)
 
     denoise_luminance: float = 0.0
     denoise_chroma: float = 0.0
@@ -199,9 +122,6 @@ class Recipe:
     sharpen_threshold: float = 0.0     # edge masking amount 0..100
     sharpen_detail: float = 0.0        # fine structure (small radius)
     output_sharpen: float = 0.0        # output/print sharpen 0..100
-    output_ppi: float = 300.0          # intended output resolution (screen ~96, print 240–360)
-    output_media: str = "screen"       # screen | matte | glossy
-    protect_skin: float = 0.0          # 0..100 reduce sharpen / vibrance on skin hues
 
     horizon: float = 0.0
     distortion: float = 0.0
@@ -273,7 +193,7 @@ def _silent_imread(path: str, flags=None):
             try:
                 devnull.close()
             except Exception:
-                log.debug("_silent_imread: non-critical failure, continuing", exc_info=True)
+                pass
 
 
 def safe_imread(path: str):
@@ -287,8 +207,9 @@ def safe_imread(path: str):
 def extract_exif(path: str) -> dict:
     meta = {}
     try:
+        from PIL import Image
         from PIL.ExifTags import TAGS
-        with safe_pil_open(path) as img:
+        with Image.open(path) as img:
             exif = img._getexif()
             if exif:
                 for tag, value in exif.items():
@@ -318,7 +239,7 @@ def extract_exif(path: str) -> dict:
                     elif decoded == "DateTime":
                         meta.setdefault("datetime", str(value))
     except Exception:
-        log.debug("extract_exif: non-critical failure, continuing", exc_info=True)
+        pass
     return meta
 
 
@@ -356,17 +277,17 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                     try:
                         meta["wb_multipliers"] = list(raw.camera_whitebalance)
                     except Exception:
-                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                        pass
                     try:
                         meta["camera"] = str(getattr(raw, "camera", "") or "")
                     except Exception:
-                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                        pass
                     # Optics fields for Lensfun (best-effort across rawpy versions)
                     try:
                         if hasattr(raw, "lens") and raw.lens:
                             meta["lens"] = str(raw.lens)
                     except Exception:
-                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                        pass
                     try:
                         ed = getattr(raw, "exif_dict", None) or {}
                         flat = {}
@@ -380,12 +301,12 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                                 try:
                                     meta["focal"] = f"{float(v)}mm"
                                 except Exception:
-                                    log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                                    pass
                             if ks in ("fnumber", "aperturevalue") and "aperture" not in meta:
                                 try:
                                     meta["aperture"] = f"f/{float(v)}"
                                 except Exception:
-                                    log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                                    pass
                             if "lensmodel" in ks and "lens" not in meta:
                                 meta["lens"] = str(v)
                             if ks == "make":
@@ -393,10 +314,10 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                             if ks == "model" and not meta.get("camera"):
                                 meta["camera"] = str(v)
                     except Exception:
-                        log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                        pass
         except Exception as e:
             err = str(e)
-            log.warning("rawpy failed for %s: %s", path, e)
+            print(f"rawpy failed for {path}: {e}")
             # Retry only for libraw ordering / transient errors — not for true unsupported files
             if "Out of order" in err or "out of order" in err.lower():
                 try:
@@ -415,9 +336,9 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                             try:
                                 meta["wb_multipliers"] = list(raw.camera_whitebalance)
                             except Exception:
-                                log.debug("load_image: non-critical failure, continuing", exc_info=True)
+                                pass
                 except Exception as e2:
-                    log.warning("rawpy retry failed for %s: %s", path, e2)
+                    print(f"rawpy retry failed for {path}: {e2}")
     if img_bgr is None:
         if is_raw(path):
             # Don't fall back to cv2.imread() for RAW files — OpenCV's TIFF
@@ -461,145 +382,20 @@ def apply_distortion(img, amount):
     return cv2.remap(img, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
 
-def apply_perspective(img, amount, horizontal=0.0):
-    """Simple vertical and/or horizontal perspective (trapezoid) correction."""
-    if abs(amount) < 1e-4 and abs(horizontal) < 1e-4:
+def apply_perspective(img, amount):
+    if abs(amount) < 1e-4:
         return img
     h, w = img.shape[:2]
-    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])  # TL TR BR BL
-    dst = src.copy()
-    f = max(-0.4, min(0.4, float(amount) / 100.0 * 0.4))
-    fh = max(-0.4, min(0.4, float(horizontal) / 100.0 * 0.4))
+    f = max(-0.4, min(0.4, amount / 100.0 * 0.4))
+    src = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
     if f >= 0:
         inset = w * f
-        dst[0, 0] += inset
-        dst[1, 0] -= inset
+        dst = np.float32([[inset, 0], [w - inset, 0], [0, h], [w, h]])
     else:
         inset = w * (-f)
-        dst[3, 0] += inset
-        dst[2, 0] -= inset
-    if fh >= 0:
-        inset = h * fh
-        dst[0, 1] += inset
-        dst[3, 1] -= inset
-    else:
-        inset = h * (-fh)
-        dst[1, 1] += inset
-        dst[2, 1] -= inset
+        dst = np.float32([[0, 0], [w, 0], [inset, h], [w - inset, h]])
     M = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, M, (w, h), borderMode=cv2.BORDER_REFLECT)
-
-
-def apply_keystone(img, corners):
-    """Four-corner keystone. corners: 4×[x,y] normalized (0..1) dest TL,TR,BR,BL.
-
-    Source is always the full image rectangle. Destination corners define the
-    warp (interactive UI stores where the image corners should map to).
-    """
-    if not corners or len(corners) != 4:
-        return img
-    try:
-        pts = []
-        for c in corners:
-            pts.append([float(c[0]), float(c[1])])
-    except Exception:
-        return img
-    # Identity check
-    identity = [[0, 0], [1, 0], [1, 1], [0, 1]]
-    if all(abs(pts[i][0] - identity[i][0]) < 1e-4 and abs(pts[i][1] - identity[i][1]) < 1e-4 for i in range(4)):
-        return img
-    h, w = img.shape[:2]
-    src = np.float32([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])
-    dst = np.float32([[p[0] * (w - 1), p[1] * (h - 1)] for p in pts])
-    # Clamp destination slightly inside to avoid degenerate transforms
-    dst[:, 0] = np.clip(dst[:, 0], -0.25 * w, 1.25 * w)
-    dst[:, 1] = np.clip(dst[:, 1], -0.25 * h, 1.25 * h)
-    try:
-        M = cv2.getPerspectiveTransform(src, dst)
-        return cv2.warpPerspective(img, M, (w, h), borderMode=cv2.BORDER_REFLECT)
-    except Exception:
-        return img
-
-
-def detect_horizon_angle(img_bgr, max_side=900):
-    """Estimate horizon tilt (degrees) from dominant near-horizontal edges.
-
-    Positive angle = counterclockwise (OpenCV rotation convention).
-    Returns 0.0 if detection is weak.
-    """
-    if img_bgr is None:
-        return 0.0
-    src = img_bgr
-    if src.dtype != np.uint8:
-        src = (np.clip(src, 0, 1) * 255).astype(np.uint8) if src.max() <= 1.5 else np.clip(src, 0, 255).astype(np.uint8)
-    h, w = src.shape[:2]
-    scale = 1.0
-    work = src
-    if max(h, w) > max_side:
-        scale = max_side / max(h, w)
-        work = cv2.resize(src, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-    min_len = max(work.shape[1] * 0.2, 40)
-    lines = cv2.HoughLinesP(
-        edges, 1, np.pi / 180.0, threshold=80,
-        minLineLength=int(min_len), maxLineGap=20,
-    )
-    if lines is None or len(lines) == 0:
-        return 0.0
-    angles = []
-    weights = []
-    for line in lines[:, 0]:
-        x0, y0, x1, y1 = map(float, line)
-        dx, dy = x1 - x0, y1 - y0
-        length = float(np.hypot(dx, dy))
-        if length < 1e-3:
-            continue
-        ang = float(np.degrees(np.arctan2(dy, dx)))
-        # Normalize to [-90, 90]
-        while ang > 90:
-            ang -= 180
-        while ang < -90:
-            ang += 180
-        # Prefer near-horizontal lines (|ang| < 30°)
-        if abs(ang) > 30:
-            continue
-        angles.append(ang)
-        weights.append(length)
-    if not angles:
-        return 0.0
-    angles = np.array(angles, dtype=np.float64)
-    weights = np.array(weights, dtype=np.float64)
-    # Weighted median
-    order = np.argsort(angles)
-    angles, weights = angles[order], weights[order]
-    cum = np.cumsum(weights)
-    mid = cum[-1] * 0.5
-    idx = int(np.searchsorted(cum, mid))
-    idx = min(idx, len(angles) - 1)
-    ang = float(angles[idx])
-    # Clamp typical horizon corrections
-    return max(-15.0, min(15.0, ang))
-
-
-def orientation_from_exif(meta: dict | None) -> float:
-    """Return additional rotation degrees suggested by EXIF Orientation (if any).
-
-    Most loaders already apply orientation; this returns 0 when already handled.
-    """
-    if not meta:
-        return 0.0
-    orient = meta.get("orientation") or meta.get("Orientation")
-    if orient is None:
-        return 0.0
-    try:
-        o = int(orient)
-    except Exception:
-        return 0.0
-    # Standard EXIF orientation → CW degrees (only pure rotations)
-    mapping = {1: 0.0, 3: 180.0, 6: 90.0, 8: -90.0}
-    return mapping.get(o, 0.0)
 
 
 def apply_crop(img, crop):
@@ -636,7 +432,15 @@ def kelvin_to_rgb(kelvin):
     return rgb
 
 
-def _wb_gains(temperature, tint):
+def apply_white_balance(img, temperature, tint, as_shot=False, multipliers=None):
+    if as_shot and multipliers is not None:
+        try:
+            r_m, g_m, b_m = float(multipliers[0]), float(multipliers[1]), float(multipliers[2])
+            gains = np.array([b_m, g_m, r_m], dtype=np.float32)
+            gains /= (gains[1] + 1e-6)
+            return np.clip(img * gains[None, None, :], 0, 1)
+        except Exception:
+            pass
     rgb = kelvin_to_rgb(temperature)
     tf = tint / 150.0
     rgb[0] *= (1.0 + tf * 0.4)
@@ -644,35 +448,8 @@ def _wb_gains(temperature, tint):
     rgb[2] *= (1.0 + tf * 0.4)
     rgb = np.clip(rgb, 0.2, 2.5)
     rgb /= (rgb[1] + 1e-6)
-    return np.array([rgb[2], rgb[1], rgb[0]], dtype=np.float32)  # BGR
-
-
-def apply_white_balance(
-    img, temperature, tint, as_shot=False, multipliers=None,
-    dual=False, temperature2=6500.0, tint2=0.0, mix=0.0,
-):
-    """White balance with optional dual-illuminant blend.
-
-    mix 0..100 blends primary (temp/tint) toward secondary (temp2/tint2).
-    """
-    if as_shot and multipliers is not None and not dual:
-        try:
-            r_m, g_m, b_m = float(multipliers[0]), float(multipliers[1]), float(multipliers[2])
-            gains = np.array([b_m, g_m, r_m], dtype=np.float32)
-            gains /= (gains[1] + 1e-6)
-            return np.clip(img * gains[None, None, :], 0, 1)
-        except Exception:
-            log.debug("apply_white_balance: non-critical failure, continuing", exc_info=True)
-
-    g1 = _wb_gains(temperature, tint)
-    if dual and float(mix) > 0.5:
-        g2 = _wb_gains(temperature2, tint2)
-        t = max(0.0, min(1.0, float(mix) / 100.0))
-        gains = g1 * (1.0 - t) + g2 * t
-        gains /= (gains[1] + 1e-6)
-    else:
-        gains = g1
-    return np.clip(img * gains[None, None, :], 0, 1)
+    bgr_gain = np.array([rgb[2], rgb[1], rgb[0]], dtype=np.float32)
+    return np.clip(img * bgr_gain[None, None, :], 0, 1)
 
 
 def apply_vibrance_saturation(img, vibrance, saturation):
@@ -691,7 +468,6 @@ def apply_vibrance_saturation(img, vibrance, saturation):
 
 
 def apply_tone_curve(img, shadows, darks, mids, lights, highlights):
-    """Parametric 5-region tone curve on LAB L channel."""
     if all(abs(v) < 1e-4 for v in (shadows, darks, mids, lights, highlights)):
         return img
     xs = np.array([0.0, 64.0, 128.0, 192.0, 255.0], dtype=np.float32)
@@ -702,148 +478,6 @@ def apply_tone_curve(img, shadows, darks, mids, lights, highlights):
     l_idx = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
     lab[..., 0] = lut[l_idx] * 100.0
     return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-
-def _points_to_lut(points, size=256):
-    """Build a 0..1 LUT from sorted [[x,y], ...] control points (0..1)."""
-    if not points:
-        return np.linspace(0, 1, size, dtype=np.float32)
-    pts = []
-    for p in points:
-        try:
-            x, y = float(p[0]), float(p[1])
-            pts.append((max(0.0, min(1.0, x)), max(0.0, min(1.0, y))))
-        except Exception:
-            continue
-    if not pts:
-        return np.linspace(0, 1, size, dtype=np.float32)
-    pts = sorted(pts, key=lambda t: t[0])
-    # Ensure endpoints
-    if pts[0][0] > 0.0:
-        pts = [(0.0, pts[0][1])] + pts
-    if pts[-1][0] < 1.0:
-        pts = pts + [(1.0, pts[-1][1])]
-    xs = np.array([p[0] for p in pts], dtype=np.float32)
-    ys = np.array([p[1] for p in pts], dtype=np.float32)
-    # Deduplicate x
-    uniq_x, uniq_y = [xs[0]], [ys[0]]
-    for i in range(1, len(xs)):
-        if xs[i] - uniq_x[-1] > 1e-6:
-            uniq_x.append(xs[i])
-            uniq_y.append(ys[i])
-        else:
-            uniq_y[-1] = ys[i]
-    grid = np.linspace(0, 1, size, dtype=np.float32)
-    return np.clip(np.interp(grid, uniq_x, uniq_y), 0, 1).astype(np.float32)
-
-
-def apply_point_curve_luma(img, points):
-    """Apply luminance point curve via LAB L channel."""
-    if not points or len(points) < 2:
-        return img
-    lut = _points_to_lut(points)
-    img = np.clip(img, 0, 1).astype(np.float32)
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l_idx = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
-    lab[..., 0] = lut[l_idx] * 100.0
-    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-
-def apply_rgb_point_curves(img, r_pts=None, g_pts=None, b_pts=None):
-    """Per-channel RGB point curves. Input/output float BGR 0..1."""
-    if not r_pts and not g_pts and not b_pts:
-        return img
-    img = np.clip(img, 0, 1).astype(np.float32)
-    out = img.copy()
-    # OpenCV BGR order
-    channels = [
-        (0, b_pts),
-        (1, g_pts),
-        (2, r_pts),
-    ]
-    for ch, pts in channels:
-        if pts and len(pts) >= 2:
-            lut = _points_to_lut(pts)
-            idx = (np.clip(out[..., ch], 0, 1) * 255).astype(np.int32)
-            out[..., ch] = lut[idx]
-    return np.clip(out, 0, 1)
-
-
-def apply_split_tone(img, sh_hue, sh_sat, hi_hue, hi_sat, balance=0.0):
-    """Split toning: colorize shadows and highlights separately.
-
-    sh_hue/hi_hue: 0..360, sat: 0..100, balance: -100..100.
-    """
-    if abs(sh_sat) < 0.5 and abs(hi_sat) < 0.5:
-        return img
-    img = np.clip(img, 0, 1).astype(np.float32)
-    # Luminance mask
-    lum = 0.114 * img[..., 0] + 0.587 * img[..., 1] + 0.299 * img[..., 2]
-    # balance shifts the mid crossover
-    mid = 0.5 - float(balance) / 200.0
-    mid = max(0.15, min(0.85, mid))
-    soft = 0.18
-    hi_w = np.clip((lum - (mid - soft)) / (2.0 * soft + 1e-6), 0, 1)
-    hi_w = hi_w * hi_w * (3 - 2 * hi_w)
-    sh_w = 1.0 - hi_w
-
-    def tint_color(hue_deg, sat):
-        # HSV pure color at given hue, sat 0..1 → BGR
-        s = max(0.0, min(1.0, float(sat) / 100.0))
-        h = float(hue_deg) % 360.0
-        hsv = np.array([[[h, s, 1.0]]], dtype=np.float32)
-        bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
-        return bgr
-
-    out = img.copy()
-    if abs(sh_sat) >= 0.5:
-        col = tint_color(sh_hue, sh_sat)
-        strength = (float(sh_sat) / 100.0) * 0.55
-        w = (sh_w * strength)[..., None]
-        # Soft light-ish blend toward tint while preserving lum
-        out = out * (1.0 - w) + (out * col[None, None, :]) * w + col[None, None, :] * (w * 0.35)
-    if abs(hi_sat) >= 0.5:
-        col = tint_color(hi_hue, hi_sat)
-        strength = (float(hi_sat) / 100.0) * 0.55
-        w = (hi_w * strength)[..., None]
-        out = out * (1.0 - w) + (out * col[None, None, :]) * w + col[None, None, :] * (w * 0.25)
-    return np.clip(out, 0, 1)
-
-
-def estimate_exposure_stops(img_bgr, target_mid=0.36):
-    """Median-luminance based exposure offset in stops."""
-    if img_bgr is None:
-        return 0.0
-    img = img_bgr
-    if img.dtype != np.float32 and img.max() > 1.5:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
-    else:
-        g = img if img.ndim == 2 else cv2.cvtColor(np.clip(img, 0, 1).astype(np.float32), cv2.COLOR_BGR2GRAY)
-        gray = g.astype(np.float32)
-        if gray.max() > 1.5:
-            gray = gray / 255.0
-    med = float(np.median(gray))
-    if med < 1e-4:
-        return 0.0
-    stops = float(np.log2(target_mid / med))
-    return max(-3.0, min(3.0, stops))
-
-
-def estimate_wb_temp_tint(img_bgr):
-    """Crude gray-world temperature (K) and tint from mean RGB."""
-    if img_bgr is None:
-        return 5500.0, 0.0
-    img = img_bgr.astype(np.float32)
-    if img.max() > 1.5:
-        img = img / 255.0
-    b, g, r = float(img[..., 0].mean()), float(img[..., 1].mean()), float(img[..., 2].mean())
-    avg = (r + g + b) / 3.0 + 1e-6
-    rb = r / (b + 1e-6)
-    temp = 5500.0 + (rb - 1.0) * 1500.0
-    temp = max(2000.0, min(12000.0, temp))
-    tint = (g / avg - 1.0) * 80.0
-    tint = max(-150.0, min(150.0, tint))
-    return temp, tint
 
 
 def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0, method="auto"):
@@ -914,102 +548,52 @@ def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0
     return denoised
 
 
-def skin_tone_mask(img_float):
-    """Soft mask 0..1 for approximate skin hues (OpenCV HSV H in 0..180)."""
-    img = np.clip(img_float, 0, 1).astype(np.float32)
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    # Skin-ish: hue ~0–25 or ~170–180, moderate sat, mid value
-    hue_ok = ((h <= 25) | (h >= 165)).astype(np.float32)
-    sat_ok = np.clip((s - 0.08) / 0.45, 0, 1) * np.clip((0.75 - s) / 0.25, 0, 1)
-    val_ok = np.clip((v - 0.12) / 0.25, 0, 1) * np.clip((0.98 - v) / 0.15, 0, 1)
-    m = hue_ok * sat_ok * val_ok
-    m = cv2.GaussianBlur(m, (0, 0), sigmaX=2.0)
-    return np.clip(m, 0, 1).astype(np.float32)
-
-
-def apply_sharpen(img_float, intensity, radius, threshold, detail=0.0, protect_skin=0.0):
+def apply_sharpen(img_float, intensity, radius, threshold, detail=0.0):
     """Edge-masked unsharp + optional fine detail boost.
 
     intensity: 0..200  main USM amount
     radius: blur sigma for USM
     threshold: 0..100  edge masking (higher = only strong edges)
     detail: 0..100  small-radius structure enhancement
-    protect_skin: 0..100 reduce sharpening on skin-like hues
     """
     out = img_float
-    skin = None
-    if float(protect_skin) > 0.5:
-        skin = skin_tone_mask(out)
-        skin_w = float(protect_skin) / 100.0
-
     if intensity > 0:
         blur = cv2.GaussianBlur(out, (0, 0), sigmaX=max(float(radius), 0.15))
         diff = out - blur
+        # Edge mask from luminance gradient
         lum = 0.114 * out[..., 0] + 0.587 * out[..., 1] + 0.299 * out[..., 2]
         gx = cv2.Sobel(lum, cv2.CV_32F, 1, 0, ksize=3)
         gy = cv2.Sobel(lum, cv2.CV_32F, 0, 1, ksize=3)
         edge = np.sqrt(gx * gx + gy * gy)
         edge = edge / (edge.max() + 1e-6)
         if threshold > 0:
+            # Soft threshold: suppress low-contrast (noise) regions
             t = float(threshold) / 100.0
             mask = np.clip((edge - t * 0.35) / max(1.0 - t * 0.35, 0.05), 0, 1)
             mask = mask * mask * (3 - 2 * mask)
+            diff = diff * mask[..., None]
         else:
+            # Still mild edge bias to avoid sharpening noise in flats
             mask = 0.4 + 0.6 * edge
-        if skin is not None:
-            mask = mask * (1.0 - skin * skin_w)
-        diff = diff * mask[..., None]
+            diff = diff * mask[..., None]
         out = out + diff * (float(intensity) / 100.0)
 
     if abs(detail) > 1e-4:
+        # Fine structure: difference of Gaussians at small scale
         fine = cv2.GaussianBlur(out, (0, 0), sigmaX=0.6)
         mid = cv2.GaussianBlur(out, (0, 0), sigmaX=1.8)
         residual = fine - mid
-        if skin is not None:
-            residual = residual * (1.0 - skin * skin_w)[..., None]
         out = out + residual * (float(detail) / 100.0)
 
     return np.clip(out, 0, 1)
 
 
-def output_sharpen_params(ppi: float, media: str = "screen"):
-    """Map intended output PPI + media to (amount 0..100, radius).
-
-    Higher PPI → slightly stronger / tighter radius for print acuity.
-    Media scales overall strength (matte absorbs more ink → milder).
-    """
-    ppi = max(36.0, min(600.0, float(ppi or 96)))
-    media = (media or "screen").lower()
-    # Normalize around screen 96 and print 300
-    if media == "screen":
-        base_amt = 25.0 + (ppi / 96.0) * 15.0
-        radius = 0.55 + (96.0 / max(ppi, 48)) * 0.25
-        base_amt = min(55.0, base_amt)
-    elif media == "matte":
-        base_amt = 35.0 + (ppi / 300.0) * 25.0
-        radius = 0.7 + (300.0 / max(ppi, 120)) * 0.35
-        base_amt = min(70.0, base_amt)
-    else:  # glossy
-        base_amt = 45.0 + (ppi / 300.0) * 35.0
-        radius = 0.6 + (300.0 / max(ppi, 120)) * 0.3
-        base_amt = min(85.0, base_amt)
-    radius = max(0.35, min(2.5, radius))
-    return float(base_amt), float(radius)
-
-
-def apply_output_sharpen(img_float, amount, radius=0.8, protect_skin=0.0):
+def apply_output_sharpen(img_float, amount, radius=0.8):
     """Output/print sharpening — modest, edge-aware, applied last before grain."""
     if amount <= 0:
         return img_float
-    return apply_sharpen(
-        img_float,
-        intensity=float(amount) * 0.7,
-        radius=radius,
-        threshold=25.0,
-        detail=float(amount) * 0.25,
-        protect_skin=protect_skin,
-    )
+    return apply_sharpen(img_float, intensity=float(amount) * 0.7, radius=radius,
+                         threshold=25.0, detail=float(amount) * 0.25)
 
 
 
@@ -1044,211 +628,79 @@ def apply_hsl_selective(img, hue_offs, sat_offs, lum_offs):
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
 
-# Intent map for Pillow ImageCms
-_PROOF_INTENTS = {
-    "perceptual": 0,
-    "relative": 1,
-    "saturation": 2,
-    "absolute": 3,
-}
-
-
-def _find_system_icc(name: str) -> str | None:
-    """Best-effort locate a system ICC for common profile names."""
-    name = (name or "").lower().replace(" ", "")
-    candidates = []
-    search_dirs = [
-        "/usr/share/color/icc",
-        "/usr/share/color/icc/ghostscript",
-        "/usr/local/share/color/icc",
-        os.path.expanduser("~/.local/share/icc"),
-        os.path.expanduser("~/.color/icc"),
-    ]
-    mapping = {
-        "srgb": ["sRGB.icc", "srgb.icc", "sRGB_IEC61966-2-1_black_scaled.icc", "esrgb.icc"],
-        "adobergb": ["AdobeRGB1998.icc", "a98.icc", "AdobeRGB.icc"],
-        "displayp3": ["DisplayP3.icc", "DCI-P3.icc", "P3.icc"],
-        "cmyk": ["default_cmyk.icc", "USWebCoatedSWOP.icc", "CoatedFOGRA39.icc", "ps_cmyk.icc"],
-        "gray": ["default_gray.icc", "Gray.icc", "ps_gray.icc"],
-    }
-    keys = []
-    if "adobe" in name:
-        keys = mapping["adobergb"]
-    elif "p3" in name:
-        keys = mapping["displayp3"]
-    elif "cmyk" in name or "print" in name:
-        keys = mapping["cmyk"]
-    elif "gray" in name:
-        keys = mapping["gray"]
-    else:
-        keys = mapping["srgb"]
-    for d in search_dirs:
-        if not os.path.isdir(d):
-            continue
-        for root, _dirs, files in os.walk(d):
-            lower = {f.lower(): os.path.join(root, f) for f in files}
-            for k in keys:
-                if k.lower() in lower:
-                    return lower[k.lower()]
-            for f in files:
-                fl = f.lower()
-                if name in fl and fl.endswith((".icc", ".icm")):
-                    candidates.append(os.path.join(root, f))
-    return candidates[0] if candidates else None
-
-
-def soft_proof_gamut_percent(src: np.ndarray, proofed: np.ndarray, threshold: float = 0.08) -> float:
-    """Percentage of pixels that changed more than threshold under soft-proof (OOG proxy)."""
-    if src is None or proofed is None:
-        return 0.0
-    a = np.clip(src, 0, 1).astype(np.float32)
-    b = np.clip(proofed, 0, 1).astype(np.float32)
-    if a.shape != b.shape:
-        return 0.0
-    delta = np.max(np.abs(b - a), axis=2)
-    return float(100.0 * np.mean(delta > threshold))
-
-
-def apply_soft_proof(
-    img,
-    profile: str = "sRGB",
-    gamut_warning: bool = False,
-    paper_white: bool = False,
-    icc_path: str = "",
-    intent: str = "relative",
-    return_stats: bool = False,
-):
+def apply_soft_proof(img, profile: str, gamut_warning: bool = False):
     """Soft-proof simulation for common target spaces.
 
-    Prefers a real ICC transform via Pillow ImageCms when a profile is available
-    (custom path, system ICC, or built-in sRGB). Falls back to a matrix/tone
-    approximation otherwise.
-
-    Optional gamut_warning tints likely out-of-gamut pixels magenta.
-    paper_white applies a slight warm paper simulation after conversion.
-
-    If return_stats is True, returns (image, {"gamut_percent": float, "method": str}).
+    Uses a simple RGB matrix / tone curve approximation (no external ICC required).
+    Optional gamut_warning tints out-of-gamut-ish pixels magenta.
     """
     img = np.clip(img, 0, 1).astype(np.float32)
     name = (profile or "sRGB").strip()
-    method = "approximate"
-    out = None
 
-    # --- ICC path (Pillow ImageCms) ---
-    icc = (icc_path or "").strip()
-    if icc and not os.path.isfile(icc):
-        icc = ""
-    if not icc:
-        icc = _find_system_icc(name) or ""
-
-    if name in ("Gray", "Grayscale") and not icc:
+    if name in ("Gray", "Grayscale"):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        out = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        method = "grayscale"
+        return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    # Work in linear-ish space with a cheap gamma expand/compress
+    def to_linear(x):
+        return np.power(np.clip(x, 0, 1), 2.2)
+
+    def to_gamma(x):
+        return np.power(np.clip(x, 0, 1), 1.0 / 2.2)
+
+    lin = to_linear(img)
+    b, g, r = lin[..., 0], lin[..., 1], lin[..., 2]
+
+    if name in ("DisplayP3", "P3", "Display P3"):
+        # Approximate: slightly expand saturation toward P3-like look, then mild compress
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hsv[..., 1] = np.clip(hsv[..., 1] * 1.06, 0, 1)
+        out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        # Soft highlight roll-off
+        out = to_gamma(to_linear(out) * 0.98)
+    elif name in ("AdobeRGB", "Adobe RGB"):
+        # Map toward a wider-gamut feel then clip back (hint of conversion)
+        mat = np.array([
+            [1.04, -0.02, -0.02],
+            [-0.02, 1.03, -0.01],
+            [-0.02, -0.01, 1.04],
+        ], dtype=np.float32)
+        stacked = np.stack([b, g, r], axis=-1)
+        conv = stacked @ mat.T
+        out = to_gamma(conv)
+        out = np.clip(out, 0, 1)
+        # Reorder to BGR
+        out = out[..., ::-1] if False else out  # already BGR order from stack
+        # stacked was B,G,R so keep as BGR
+    elif name in ("CMYK", "Printer", "Printer (matte)"):
+        # Emulate ink limit: compress contrast + desaturate slightly + warm paper
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hsv[..., 1] = np.clip(hsv[..., 1] * 0.88, 0, 1)
+        hsv[..., 2] = np.clip(hsv[..., 2] * 0.92 + 0.04, 0, 1)
+        out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        out = (out - 0.5) * 0.92 + 0.5
+        out = np.clip(out, 0, 1)
+        # Paper white tint
+        out = out * np.array([0.97, 0.98, 1.0], dtype=np.float32)  # BGR slight warm
     else:
-        try:
-            from PIL import Image, ImageCms
-            # Source assumed working-space sRGB
-            src_prof = ImageCms.createProfile("sRGB")
-            if icc:
-                dst_prof = ImageCms.getOpenProfile(icc)
-            elif name in ("sRGB",):
-                dst_prof = ImageCms.createProfile("sRGB")
-            else:
-                dst_prof = None
-
-            if dst_prof is not None:
-                intent_i = _PROOF_INTENTS.get((intent or "relative").lower(), 1)
-                # ImageCms soft-proof: src -> dst -> src (display)
-                # INTENT flags: use absolute for paper simulation when absolute intent chosen
-                u8 = (img[..., ::-1] * 255.0).astype(np.uint8)  # BGR -> RGB
-                pil = Image.fromarray(u8, mode="RGB")
-                # Transform into destination, then back to sRGB for display
-                xform = ImageCms.buildTransformFromOpenProfiles(
-                    src_prof, dst_prof, "RGB", "RGB",
-                    renderingIntent=intent_i,
-                    flags=getattr(ImageCms, "FLAGS", {}).get("SOFTPROOFING", 0) or 0,
-                )
-                # Pillow may not expose SOFTPROOFING the same on all builds — two-step convert
-                try:
-                    proofed = ImageCms.applyTransform(pil, xform)
-                except Exception:
-                    # Manual: convert to dst then back to sRGB
-                    to_dst = ImageCms.buildTransformFromOpenProfiles(
-                        src_prof, dst_prof, "RGB", "RGB", renderingIntent=intent_i
-                    )
-                    mid = ImageCms.applyTransform(pil, to_dst)
-                    back = ImageCms.buildTransformFromOpenProfiles(
-                        dst_prof, src_prof, "RGB", "RGB", renderingIntent=intent_i
-                    )
-                    proofed = ImageCms.applyTransform(mid, back)
-                arr = np.asarray(proofed).astype(np.float32) / 255.0
-                out = arr[..., ::-1].copy()  # RGB -> BGR
-                method = f"icc:{os.path.basename(icc) if icc else 'sRGB'}"
-        except Exception:
-            out = None
-
-    # --- Approximate fallback ---
-    if out is None:
-        def to_linear(x):
-            return np.power(np.clip(x, 0, 1), 2.2)
-
-        def to_gamma(x):
-            return np.power(np.clip(x, 0, 1), 1.0 / 2.2)
-
-        lin = to_linear(img)
-        b, g, r = lin[..., 0], lin[..., 1], lin[..., 2]
-
-        if name in ("DisplayP3", "P3", "Display P3"):
-            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            hsv[..., 1] = np.clip(hsv[..., 1] * 1.06, 0, 1)
-            out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-            out = to_gamma(to_linear(out) * 0.98)
-        elif name in ("AdobeRGB", "Adobe RGB"):
-            mat = np.array([
-                [1.04, -0.02, -0.02],
-                [-0.02, 1.03, -0.01],
-                [-0.02, -0.01, 1.04],
-            ], dtype=np.float32)
-            stacked = np.stack([b, g, r], axis=-1)
-            conv = stacked @ mat.T
-            out = to_gamma(np.clip(conv, 0, 1))
-        elif name in ("CMYK", "Printer", "Printer (matte)"):
-            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            hsv[..., 1] = np.clip(hsv[..., 1] * 0.88, 0, 1)
-            hsv[..., 2] = np.clip(hsv[..., 2] * 0.92 + 0.04, 0, 1)
-            out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-            out = np.clip((out - 0.5) * 0.92 + 0.5, 0, 1)
-            out = out * np.array([0.97, 0.98, 1.0], dtype=np.float32)
-        elif name in ("Gray", "Grayscale"):
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            out = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        else:
-            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            hsv[..., 1] = np.clip(hsv[..., 1], 0, 0.96)
-            out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-        method = "approximate"
-        out = np.clip(out, 0, 1).astype(np.float32)
+        # sRGB proof: clip extreme saturation, gentle contrast toward display
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hsv[..., 1] = np.clip(hsv[..., 1], 0, 0.96)
+        out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        out = np.clip(out, 0, 1)
 
     out = np.clip(out, 0, 1).astype(np.float32)
 
-    # Simulate paper white (slightly warm, not pure 255)
-    if paper_white:
-        paper = np.array([0.94, 0.96, 0.98], dtype=np.float32)  # BGR warm paper
-        out = out * paper
-
-    gamut_pct = soft_proof_gamut_percent(img, out)
-
     if gamut_warning:
+        # Flag pixels that changed a lot vs original as potential OOG
         delta = np.max(np.abs(out - img), axis=2)
         warn = delta > 0.08
         if np.any(warn):
+            magenta = np.array([1.0, 0.0, 1.0], dtype=np.float32)  # BGR? B=1,G=0,R=1 -> magenta-ish in BGR is B+R
             magenta = np.array([1.0, 0.2, 1.0], dtype=np.float32)
             out = out.copy()
             out[warn] = out[warn] * 0.35 + magenta * 0.65
 
-    if return_stats:
-        return out, {"gamut_percent": gamut_pct, "method": method}
     return out
 
 
@@ -1288,7 +740,7 @@ def extract_embedded_preview(path: str, max_side: int = 160):
                                         img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
                                     return img
                     except Exception:
-                        log.debug("extract_embedded_preview: non-critical failure, continuing", exc_info=True)
+                        pass
                     # Fallback: half-size quick postprocess
                     try:
                         rgb = raw.postprocess(
@@ -1349,50 +801,54 @@ def apply_local_points(img, points):
         if radius > inner:
             mask[ring] = 1.0 - (dist[ring] - inner) / (radius - inner + 1e-6)
             
-        # 2. Chroma & Luma Selectivity (similarity to center sample)
+        # 2. Chroma & Luma Selectivity
         chroma_sel = float(pt.get("chroma", 100.0))
         luma_sel = float(pt.get("luma", 100.0))
-
+        
         if chroma_sel < 99.5 or luma_sel < 99.5:
+            # Sample target color at center point (clamped to image bounds)
             sample_x = max(0, min(int(cx), w - 1))
             sample_y = max(0, min(int(cy), h - 1))
+            
             H_target = H_img[sample_y, sample_x]
             S_target = S_img[sample_y, sample_x]
             V_target = V_img[sample_y, sample_x]
+            
+            # Calculate color similarity
             similarity = np.ones((h, w), dtype=np.float32)
-
+            
             if chroma_sel < 99.5:
+                # Hue distance (circular 0..180 degrees mapped to 0..1)
                 dist_h = np.abs(H_img - H_target)
                 dist_h = np.minimum(dist_h, 360.0 - dist_h) / 180.0
+                
+                # Saturation distance
                 dist_s = np.abs(S_img - S_target)
+                
+                # Combined Chroma difference
                 chroma_diff = dist_h * 0.7 + dist_s * 0.3
-                sensitivity = max((chroma_sel / 100.0) ** 1.5, 1e-4)
-                similarity *= np.clip(1.0 - chroma_diff / sensitivity, 0, 1)
-
+                
+                # Sensitivity mapping: lower selectivity = stricter match
+                sensitivity = (chroma_sel / 100.0) ** 1.5
+                if sensitivity < 1e-4:
+                    sensitivity = 1e-4
+                
+                # Linear falloff of match based on difference
+                color_match = np.clip(1.0 - chroma_diff / sensitivity, 0, 1)
+                similarity *= color_match
+                
             if luma_sel < 99.5:
                 dist_v = np.abs(V_img - V_target)
-                sensitivity = max((luma_sel / 100.0) ** 1.5, 1e-4)
-                similarity *= np.clip(1.0 - dist_v / sensitivity, 0, 1)
-
+                
+                sensitivity = (luma_sel / 100.0) ** 1.5
+                if sensitivity < 1e-4:
+                    sensitivity = 1e-4
+                    
+                luma_match = np.clip(1.0 - dist_v / sensitivity, 0, 1)
+                similarity *= luma_match
+                
             mask *= similarity
-
-        # 3. Absolute luminance range (0..100 UI → 0..1). Only affect tones in range.
-        luma_min = float(pt.get("luma_min", 0.0)) / 100.0
-        luma_max = float(pt.get("luma_max", 100.0)) / 100.0
-        if luma_min > 0.001 or luma_max < 0.999:
-            lo, hi = min(luma_min, luma_max), max(luma_min, luma_max)
-            # Soft edges (~4% of range or fixed 0.04)
-            soft = 0.04
-            range_mask = np.ones((h, w), dtype=np.float32)
-            range_mask[V_img < lo - soft] = 0.0
-            range_mask[V_img > hi + soft] = 0.0
-            mid_lo = (V_img >= lo - soft) & (V_img < lo)
-            mid_hi = (V_img > hi) & (V_img <= hi + soft)
-            if soft > 1e-6:
-                range_mask[mid_lo] = (V_img[mid_lo] - (lo - soft)) / soft
-                range_mask[mid_hi] = ((hi + soft) - V_img[mid_hi]) / soft
-            mask *= range_mask
-
+            
         mask = mask[..., None]
         
         # 3. Apply adjustments
@@ -1483,43 +939,13 @@ def apply_gradients(img, gradients):
 
 
 
-def _brush_dab(mask, cx, cy, rad, hardness, flow, mode="add"):
-    """Composite one circular dab into mask in-place. mode: add|subtract|intersect."""
-    h, w = mask.shape[:2]
-    x0 = max(int(cx - rad - 2), 0)
-    x1 = min(int(cx + rad + 2), w - 1)
-    y0 = max(int(cy - rad - 2), 0)
-    y1 = min(int(cy + rad + 2), h - 1)
-    if x1 <= x0 or y1 <= y0:
-        return
-    yy, xx = np.mgrid[y0:y1 + 1, x0:x1 + 1].astype(np.float32)
-    d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / max(rad, 1e-6)
-    core = max(0.0, min(1.0, hardness))
-    fall = np.clip(1.0 - (d - core) / max(1.0 - core, 0.05), 0, 1)
-    fall = fall * fall * (3 - 2 * fall)
-    fall[d > 1.0] = 0
-    fall = fall * float(flow)
-    region = mask[y0:y1 + 1, x0:x1 + 1]
-    if mode == "subtract":
-        mask[y0:y1 + 1, x0:x1 + 1] = np.clip(region - fall, 0, 1)
-    elif mode == "intersect":
-        # Keep only where dab overlaps existing mask, scaled by flow
-        mask[y0:y1 + 1, x0:x1 + 1] = region * fall
-    else:
-        mask[y0:y1 + 1, x0:x1 + 1] = np.maximum(region, fall)
-
-
 def apply_brush_masks(img, masks):
     """Apply painted brush local adjustments.
 
     Each mask: {
-      "strokes": [ {"x":0.5,"y":0.5,"r":0.05, "flow":1.0, "mode":"add"}, ... ],
+      "strokes": [ {"x":0.5,"y":0.5,"r":0.05}, ... ],  # normalized coords & radius
       "exposure", "contrast", "saturation", "clarity", "temperature",
-      "hardness": 0..1,
-      "flow": 0..1 (default dab strength),
-      "opacity": 0..1 (overall mask strength),
-      "mode": "add"|"subtract"|"intersect",
-      "invert": bool,
+      "hardness": 0..1
     }
     """
     if not masks:
@@ -1528,40 +954,32 @@ def apply_brush_masks(img, masks):
     out = img.copy()
     for m in masks:
         strokes = m.get("strokes") or []
-        if not strokes and not m.get("raster"):
+        if not strokes:
             continue
         hardness = float(m.get("hardness", 0.7))
-        default_flow = float(m.get("flow", 1.0))
-        opacity = float(m.get("opacity", 1.0))
-        default_mode = (m.get("mode") or "add").lower()
         mask = np.zeros((h, w), dtype=np.float32)
-
-        # Optional precomputed raster mask (e.g. subject detect) — normalized 0..1, may be smaller
-        raster = m.get("raster")
-        if raster is not None:
-            try:
-                arr = np.asarray(raster, dtype=np.float32)
-                if arr.ndim == 2:
-                    if arr.shape[0] != h or arr.shape[1] != w:
-                        arr = cv2.resize(arr, (w, h), interpolation=cv2.INTER_LINEAR)
-                    mask = np.clip(arr, 0, 1)
-            except Exception:
-                log.debug("apply_brush_masks: non-critical failure, continuing", exc_info=True)
-
         for s in strokes:
             cx = float(s.get("x", 0.5)) * (w - 1)
             cy = float(s.get("y", 0.5)) * (h - 1)
             rad = max(float(s.get("r", 0.05)) * max(w, h), 1.0)
-            flow = float(s.get("flow", default_flow))
-            mode = (s.get("mode") or default_mode).lower()
-            _brush_dab(mask, cx, cy, rad, hardness, flow, mode=mode)
-
+            x0 = max(int(cx - rad - 2), 0)
+            x1 = min(int(cx + rad + 2), w - 1)
+            y0 = max(int(cy - rad - 2), 0)
+            y1 = min(int(cy + rad + 2), h - 1)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            yy, xx = np.mgrid[y0:y1 + 1, x0:x1 + 1].astype(np.float32)
+            d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / rad
+            # soft brush: inner hard core then falloff
+            core = max(0.0, min(1.0, hardness))
+            fall = np.clip(1.0 - (d - core) / max(1.0 - core, 0.05), 0, 1)
+            fall = fall * fall * (3 - 2 * fall)
+            fall[d > 1.0] = 0
+            mask[y0:y1 + 1, x0:x1 + 1] = np.maximum(mask[y0:y1 + 1, x0:x1 + 1], fall)
         if mask.max() < 1e-6:
             continue
         if m.get("invert") or m.get("inverted"):
             mask = 1.0 - mask
-        # Overall opacity scales the mask
-        mask = np.clip(mask * max(0.0, min(1.0, opacity)), 0, 1)
         mask3 = mask[..., None]
         local = out.copy()
         exp = float(m.get("exposure", 0.0))
@@ -1589,55 +1007,6 @@ def apply_brush_masks(img, masks):
     return np.clip(out, 0, 1)
 
 
-def generate_subject_mask(img_bgr, max_side: int = 640):
-    """Offline subject mask via OpenCV GrabCut (no neural net).
-
-    img_bgr: float 0..1 or uint8 BGR.
-    Returns float32 mask 0..1 at the input resolution.
-    """
-    if img_bgr is None:
-        return None
-    src = img_bgr
-    if src.dtype != np.uint8:
-        src_u8 = np.clip(src * 255.0 if src.max() <= 1.5 else src, 0, 255).astype(np.uint8)
-    else:
-        src_u8 = src
-    h, w = src_u8.shape[:2]
-    scale = 1.0
-    work = src_u8
-    if max(h, w) > max_side:
-        scale = max_side / max(h, w)
-        work = cv2.resize(src_u8, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-    wh, ww = work.shape[:2]
-    # Center rectangle as probable foreground
-    margin = 0.12
-    rect = (
-        int(ww * margin),
-        int(wh * margin),
-        max(1, int(ww * (1 - 2 * margin))),
-        max(1, int(wh * (1 - 2 * margin))),
-    )
-    mask = np.zeros((wh, ww), np.uint8)
-    bgd = np.zeros((1, 65), np.float64)
-    fgd = np.zeros((1, 65), np.float64)
-    try:
-        cv2.grabCut(work, mask, rect, bgd, fgd, 3, cv2.GC_INIT_WITH_RECT)
-        binary = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 1.0, 0.0).astype(np.float32)
-    except Exception:
-        # Fallback: center-weighted luminance threshold
-        gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
-        yy, xx = np.mgrid[0:wh, 0:ww].astype(np.float32)
-        cy, cx = (wh - 1) / 2.0, (ww - 1) / 2.0
-        dist = np.sqrt(((xx - cx) / max(cx, 1)) ** 2 + ((yy - cy) / max(cy, 1)) ** 2)
-        binary = np.clip(1.0 - dist * 0.85, 0, 1) * (0.4 + 0.6 * gray)
-        binary = (binary > 0.35).astype(np.float32)
-    # Feather edges
-    binary = cv2.GaussianBlur(binary, (0, 0), sigmaX=max(ww, wh) * 0.01)
-    if scale < 0.999:
-        binary = cv2.resize(binary, (w, h), interpolation=cv2.INTER_LINEAR)
-    return np.clip(binary, 0, 1).astype(np.float32)
-
-
 def apply_chromatic_aberration_fix(img, amount):
     """Simple lateral CA correction: shift R/B channels radially. amount -100..100."""
     if abs(amount) < 1e-4:
@@ -1660,109 +1029,16 @@ def apply_chromatic_aberration_fix(img, amount):
     return cv2.merge([b2, g, r2])
 
 
-def _open_lensfun_database():
-    """Open lensfunpy.Database, preferring a local ./lensfun tree next to the app.
-
-    Returns (db, path_or_note). path_or_note is the DB directory used, or a
-    short note when falling back to the system/bundled database.
-    """
-    import lensfunpy  # type: ignore
-
-    try:
-        from app_paths import lensfun_db_paths
-        paths = lensfun_db_paths()
-    except Exception:
-        paths = []
-
-    # lensfunpy accepts paths= list of directories containing version_N or xml
-    for p in paths:
-        try:
-            db = lensfunpy.Database(paths=[p], load_common=False, load_bundled=False)
-            # Sanity: empty DB is useless
-            if hasattr(db, "cameras") and len(getattr(db, "cameras", []) or []) == 0:
-                # Some builds use find_cameras only — try a dummy query instead
-                pass
-            return db, p
-        except TypeError:
-            # Older lensfunpy may not accept keyword args the same way
-            try:
-                db = lensfunpy.Database(paths=[p])
-                return db, p
-            except Exception:
-                continue
-        except Exception:
-            continue
-
-    # System / bundled defaults
-    try:
-        db = lensfunpy.Database()
-        return db, "(system/bundled)"
-    except Exception as e:
-        raise RuntimeError(f"Could not open Lensfun database: {e}") from e
-
-
-def probe_lensfun(meta):
-    """Return a status dict describing Lensfun availability and EXIF match (no image warp)."""
-    info = {
-        "installed": False,
-        "camera_query": (meta or {}).get("camera") or "",
-        "lens_query": (meta or {}).get("lens") or "",
-        "camera_match": None,
-        "lens_match": None,
-        "db_path": None,
-        "message": "",
-    }
-    try:
-        import lensfunpy  # type: ignore  # noqa: F401
-    except Exception:
-        info["message"] = "lensfunpy not installed (pip install lensfunpy)"
-        return info
-    info["installed"] = True
-    try:
-        db, db_note = _open_lensfun_database()
-        info["db_path"] = db_note
-        cam_maker = (info["camera_query"] or "").split()[0] if info["camera_query"] else None
-        cams = db.find_cameras(cam_maker, info["camera_query"]) if cam_maker else []
-        if not cams and cam_maker:
-            cams = db.find_cameras(cam_maker, None)
-        if not cams:
-            info["message"] = (
-                f"No camera match for “{info['camera_query'] or '?'}” "
-                f"(DB: {db_note})"
-            )
-            return info
-        cam = cams[0]
-        info["camera_match"] = f"{getattr(cam, 'maker', '')} {getattr(cam, 'model', '')}".strip()
-        lens_model = info["lens_query"]
-        lenses = db.find_lenses(cam, None, lens_model) if lens_model else []
-        if not lenses:
-            lenses = db.find_lenses(cam)
-        if not lenses:
-            info["message"] = (
-                f"Camera OK ({info['camera_match']}), no lens match for "
-                f"“{lens_model or '?'}” (DB: {db_note})"
-            )
-            return info
-        lens = lenses[0]
-        info["lens_match"] = f"{getattr(lens, 'maker', '')} {getattr(lens, 'model', '')}".strip()
-        info["message"] = f"Match: {info['camera_match']} · {info['lens_match']} · DB: {db_note}"
-        return info
-    except Exception as e:
-        info["message"] = f"Lensfun error: {e}"
-        return info
-
-
 def try_lensfun_correct(img, meta, strength=1.0):
     """Optional Lensfun geometry correction if lensfunpy is installed.
     Returns (img, message). Falls back unchanged if unavailable.
-    strength 0..1 blends corrected result with original.
     """
     try:
         import lensfunpy  # type: ignore
     except Exception:
         return img, "Lensfun not installed (pip install lensfunpy)"
     try:
-        db, db_note = _open_lensfun_database()
+        db = lensfunpy.Database()
         cam_maker = (meta.get("camera") or "").split()[0] if meta.get("camera") else None
         cam_model = meta.get("camera") or ""
         lens_model = meta.get("lens") or ""
@@ -1770,47 +1046,32 @@ def try_lensfun_correct(img, meta, strength=1.0):
         try:
             focal = float(str(meta.get("focal", "50")).replace("mm", "").strip())
         except Exception:
-            log.debug("try_lensfun_correct: non-critical failure, continuing", exc_info=True)
+            pass
         aperture = 4.0
         try:
             aperture = float(str(meta.get("aperture", "4")).replace("f/", "").strip())
         except Exception:
-            log.debug("try_lensfun_correct: non-critical failure, continuing", exc_info=True)
+            pass
         cams = db.find_cameras(cam_maker, cam_model) if cam_maker else []
-        if not cams and cam_maker:
-            cams = db.find_cameras(cam_maker, None)
         if not cams:
-            return img, f"No Lensfun camera match ({cam_model or '?'}) DB={db_note}"
+            cams = db.find_cameras(None, None)[:1]
+        if not cams:
+            return img, "No Lensfun camera match"
         cam = cams[0]
-        lenses = db.find_lenses(cam, None, lens_model) if lens_model else []
+        lenses = db.find_lenses(cam, None, lens_model) if lens_model else db.find_lenses(cam)
         if not lenses:
-            lenses = db.find_lenses(cam)
-        if not lenses:
-            return img, f"No Lensfun lens match ({lens_model or '?'}) DB={db_note}"
+            return img, "No Lensfun lens match"
         lens = lenses[0]
         h, w = img.shape[:2]
         mod = lensfunpy.Modifier(lens, cam.crop_factor, w, h)
         mod.initialize(focal, aperture, 1.0)
+        # distortion + vignetting on float image
         coords = mod.apply_geometry_distortion()
         if coords is not None:
-            was_float = img.dtype != np.uint8 and float(np.max(img)) <= 1.5
-            if was_float:
-                img_u8 = (np.clip(img, 0, 1) * 255).astype(np.uint8)
-            else:
-                img_u8 = np.clip(img, 0, 255).astype(np.uint8)
+            img_u8 = (np.clip(img, 0, 1) * 255).astype(np.uint8)
             und = cv2.remap(img_u8, coords[0], coords[1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-            s = max(0.0, min(1.0, float(strength)))
-            if s < 0.999:
-                und = cv2.addWeighted(und, s, img_u8, 1.0 - s, 0)
-            if was_float:
-                img = und.astype(np.float32) / 255.0
-            else:
-                img = und
-        cam_s = f"{getattr(cam, 'maker', '')} {getattr(cam, 'model', '')}".strip()
-        lens_s = f"{getattr(lens, 'maker', '')} {getattr(lens, 'model', '')}".strip()
-        return img, (
-            f"Lensfun OK · {cam_s} · {lens_s} · strength {int(strength * 100)}% · DB: {db_note}"
-        )
+            img = und.astype(np.float32) / 255.0
+        return img, f"Lensfun: {getattr(lens, 'model', lens_model)}"
     except Exception as e:
         return img, f"Lensfun error: {e}"
 
@@ -1819,22 +1080,8 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
     rot = int(getattr(r, "rotate_90", 0)) % 4
     if rot:
         img_bgr = np.rot90(img_bgr, rot).copy()
-    # Lensfun early (works on pixel grid before creative geometry)
-    if getattr(r, "lens_auto", False) and meta:
-        strength = float(getattr(r, "lens_strength", 100.0) or 100.0) / 100.0
-        img_bgr, _msg = try_lensfun_correct(
-            img_bgr.astype(np.float32) / 255.0 if img_bgr.dtype == np.uint8 else img_bgr,
-            meta, strength=strength,
-        )
-        if img_bgr.dtype != np.uint8 and float(np.max(img_bgr)) <= 1.5:
-            img_bgr = (np.clip(img_bgr, 0, 1) * 255).astype(np.uint8)
     img_bgr = apply_distortion(img_bgr, r.distortion)
-    img_bgr = apply_perspective(
-        img_bgr, r.perspective, horizontal=getattr(r, "perspective_h", 0.0),
-    )
-    ks = getattr(r, "keystone", None)
-    if ks:
-        img_bgr = apply_keystone(img_bgr, ks)
+    img_bgr = apply_perspective(img_bgr, r.perspective)
     img_bgr = apply_horizon(img_bgr, r.horizon)
     img_bgr = apply_crop(img_bgr, r.crop)
     img_bgr = apply_denoise(
@@ -1844,14 +1091,7 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
     )
 
     img = img_bgr.astype(np.float32) / 255.0
-    img = apply_white_balance(
-        img, r.temperature, r.tint,
-        as_shot=r.wb_as_shot, multipliers=wb_multipliers,
-        dual=bool(getattr(r, "wb_dual", False)),
-        temperature2=getattr(r, "temperature2", 6500.0),
-        tint2=getattr(r, "tint2", 0.0),
-        mix=getattr(r, "wb_mix", 0.0),
-    )
+    img = apply_white_balance(img, r.temperature, r.tint, as_shot=r.wb_as_shot, multipliers=wb_multipliers)
 
     if abs(r.exposure) > 1e-4:
         img *= (2.0 ** r.exposure)
@@ -1880,41 +1120,17 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         img = img + (img - blur) * (r.clarity / 100.0)
 
     img = apply_tone_curve(img, r.curve_shadows, r.curve_darks, r.curve_mids, r.curve_lights, r.curve_highlights)
-    img = apply_point_curve_luma(img, getattr(r, "curve_points", None) or [])
-    img = apply_rgb_point_curves(
-        img,
-        getattr(r, "curve_r_points", None) or [],
-        getattr(r, "curve_g_points", None) or [],
-        getattr(r, "curve_b_points", None) or [],
-    )
     img = np.clip(img, 0, 1)
     if abs(r.gamma - 1.0) > 1e-4:
         img = img ** (1.0 / r.gamma)
 
-    # Vibrance/sat with optional skin protection (blend unprocessed skin back)
-    vib_src = img
     img = apply_vibrance_saturation(img, r.vibrance, r.saturation)
-    ps = float(getattr(r, "protect_skin", 0.0) or 0.0)
-    if ps > 0.5 and (abs(r.vibrance) > 1e-4 or abs(r.saturation) > 1e-4):
-        sm = skin_tone_mask(vib_src)
-        w = (sm * (ps / 100.0))[..., None]
-        img = img * (1.0 - w) + vib_src * w
 
     # Selective HSL
     hue_o = r.hsl_hue if r.hsl_hue is not None else (0,) * 8
     sat_o = r.hsl_sat if r.hsl_sat is not None else (0,) * 8
     lum_o = r.hsl_lum if r.hsl_lum is not None else (0,) * 8
     img = apply_hsl_selective(img, hue_o, sat_o, lum_o)
-
-    # Split toning
-    img = apply_split_tone(
-        img,
-        getattr(r, "split_shadow_hue", 0.0),
-        getattr(r, "split_shadow_sat", 0.0),
-        getattr(r, "split_highlight_hue", 0.0),
-        getattr(r, "split_highlight_sat", 0.0),
-        getattr(r, "split_balance", 0.0),
-    )
 
     # Local control points
     if r.local_points:
@@ -1930,23 +1146,13 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         img = apply_soft_proof(
             img, r.soft_proof_profile,
             gamut_warning=getattr(r, "soft_proof_gamut", False),
-            paper_white=getattr(r, "soft_proof_paper_white", False),
-            icc_path=getattr(r, "soft_proof_icc_path", "") or "",
-            intent=getattr(r, "soft_proof_intent", "relative") or "relative",
         )
-    ps = float(getattr(r, "protect_skin", 0.0) or 0.0)
     img = apply_sharpen(
         img, r.sharpen_intensity, r.sharpen_radius, r.sharpen_threshold,
         detail=getattr(r, 'sharpen_detail', 0.0),
-        protect_skin=ps,
     )
-    out_amt = float(getattr(r, "output_sharpen", 0.0) or 0.0)
-    if out_amt > 1e-4:
-        # Prefer explicit amount; radius from PPI/media when available
-        media = getattr(r, "output_media", "screen") or "screen"
-        ppi = float(getattr(r, "output_ppi", 300.0) or 300.0)
-        _sug_amt, sug_radius = output_sharpen_params(ppi, media)
-        img = apply_output_sharpen(img, out_amt, radius=sug_radius, protect_skin=ps)
+    if abs(getattr(r, 'output_sharpen', 0.0)) > 1e-4:
+        img = apply_output_sharpen(img, r.output_sharpen)
 
     # ClearView Plus approximation: local contrast / dehaze
     if abs(getattr(r, "clearview", 0.0)) > 1e-4:
@@ -2039,7 +1245,7 @@ def merge_hdr_mertens(paths, align=True, max_dim=0,
             align_mtb = cv2.createAlignMTB()
             align_mtb.process(images, images)
         except Exception as e:
-            log.debug("HDR align skipped: %s", e)
+            print(f"HDR align skipped: {e}")
     merger = cv2.createMergeMertens(
         contrast_weight=contrast_weight,
         saturation_weight=saturation_weight,
@@ -2078,7 +1284,7 @@ def recipe_from_dict(d: dict):
             try:
                 setattr(r, k, v)
             except Exception:
-                log.debug("recipe_from_dict: non-critical failure, continuing", exc_info=True)
+                pass
     return r
 
 
@@ -2086,85 +1292,31 @@ def sidecar_path(image_path: str) -> str:
     return image_path + ".photolab.json"
 
 
-def load_sidecar_data(image_path: str) -> dict:
-    """Load full sidecar JSON (recipe + optional snapshots). Returns {} if missing."""
+def save_recipe_sidecar(image_path: str, recipe) -> str:
     import json
     path = sidecar_path(image_path)
-    if not os.path.isfile(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        log.warning("sidecar load failed: %s", e)
-        return {}
-
-
-def save_sidecar_data(image_path: str, data: dict) -> str:
-    """Write full sidecar JSON. Merges with existing keys when possible."""
-    import json
-    path = sidecar_path(image_path)
-    existing = load_sidecar_data(image_path)
-    merged = dict(existing)
-    merged.update(data or {})
-    merged.setdefault("version", 1)
-    merged.setdefault("image", os.path.basename(image_path))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2)
-    return path
-
-
-def save_recipe_sidecar(image_path: str, recipe, snapshots: list | None = None) -> str:
-    """Save recipe (and optional named snapshots) next to the image."""
     data = {
         "version": 1,
         "image": os.path.basename(image_path),
         "recipe": recipe_to_dict(recipe),
     }
-    if snapshots is not None:
-        data["snapshots"] = list(snapshots)
-    else:
-        # Preserve existing snapshots when only the recipe is updated
-        existing = load_sidecar_data(image_path)
-        if existing.get("snapshots"):
-            data["snapshots"] = existing["snapshots"]
-    return save_sidecar_data(image_path, data)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return path
 
 
 def load_recipe_sidecar(image_path: str):
-    data = load_sidecar_data(image_path)
-    if not data:
+    import json
+    path = sidecar_path(image_path)
+    if not os.path.isfile(path):
         return None
     try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
         return recipe_from_dict(data.get("recipe") or data)
     except Exception as e:
-        log.warning("sidecar recipe parse failed: %s", e)
+        print(f"sidecar load failed: {e}")
         return None
-
-
-def load_snapshots_sidecar(image_path: str) -> list:
-    """Return list of {name, recipe, ts?} from the sidecar."""
-    data = load_sidecar_data(image_path)
-    snaps = data.get("snapshots") or []
-    if not isinstance(snaps, list):
-        return []
-    out = []
-    for s in snaps:
-        if isinstance(s, dict) and s.get("name") and s.get("recipe") is not None:
-            out.append(s)
-    return out
-
-
-def save_snapshots_sidecar(image_path: str, snapshots: list) -> str:
-    """Update only the snapshots array in the sidecar (creates file if needed)."""
-    data = load_sidecar_data(image_path)
-    data["snapshots"] = list(snapshots or [])
-    data.setdefault("version", 1)
-    data.setdefault("image", os.path.basename(image_path))
-    if "recipe" not in data:
-        data["recipe"] = recipe_to_dict(Recipe())
-    return save_sidecar_data(image_path, data)
 
 
 def apply_watermark(img_bgr, text, opacity=0.45, scale=0.035, margin=0.02):

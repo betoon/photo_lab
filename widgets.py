@@ -4,18 +4,9 @@ from __future__ import annotations
 
 import math
 import cv2
-from typing import Optional
-
 from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QWheelEvent, QMouseEvent, QPainterPath
-from PyQt6.QtWidgets import (
-    QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy,
-    QVBoxLayout, QHBoxLayout, QPushButton, QButtonGroup, QStackedWidget,
-)
-
-import logging
-
-log = logging.getLogger(__name__)
+from PyQt6.QtWidgets import QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy
 
 
 class HistogramWidget(QWidget):
@@ -252,72 +243,24 @@ class SliderRow(QWidget):
 
 
 class ToneCurveWidget(QWidget):
-    """Parametric 5-point region curve + free point curves for L / R / G / B."""
-    curveChanged = pyqtSignal(float, float, float, float, float)  # parametric
-    pointCurveChanged = pyqtSignal(str, list)  # channel key, [[x,y],...]
-
-    CHANNELS = ("Parametric", "Luma", "Red", "Green", "Blue")
-    CHANNEL_KEYS = ("param", "luma", "r", "g", "b")
-    CHANNEL_COLORS = {
-        "param": QColor(120, 180, 255),
-        "luma": QColor(220, 220, 220),
-        "r": QColor(230, 90, 90),
-        "g": QColor(90, 200, 100),
-        "b": QColor(90, 140, 240),
-    }
+    curveChanged = pyqtSignal(float, float, float, float, float)
 
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(200)
+        self.setMinimumHeight(160)
         self.setMinimumWidth(200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.values = [0.0, 0.0, 0.0, 0.0, 0.0]
-        self.point_curves = {
-            "luma": [[0.0, 0.0], [1.0, 1.0]],
-            "r": [[0.0, 0.0], [1.0, 1.0]],
-            "g": [[0.0, 0.0], [1.0, 1.0]],
-            "b": [[0.0, 0.0], [1.0, 1.0]],
-        }
-        self.channel = "param"
         self._drag_idx = None
         self.setMouseTracking(True)
-        self.setToolTip(
-            "Parametric: drag the 5 region handles.\n"
-            "Luma/RGB: drag points; double-click empty area to add; "
-            "double-click a point (not endpoint) to remove."
-        )
-
-    def set_channel(self, key: str):
-        if key in self.CHANNEL_KEYS:
-            self.channel = key
-            self._drag_idx = None
-            self.update()
 
     def set_values(self, shadows, darks, mids, lights, highlights):
         self.values = [shadows, darks, mids, lights, highlights]
         self.update()
 
-    def set_point_curve(self, key: str, points: list):
-        if key not in self.point_curves:
-            return
-        pts = []
-        for p in points or []:
-            try:
-                pts.append([float(p[0]), float(p[1])])
-            except Exception:
-                log.debug("set_point_curve: non-critical failure, continuing", exc_info=True)
-        if len(pts) < 2:
-            pts = [[0.0, 0.0], [1.0, 1.0]]
-        pts = sorted(pts, key=lambda t: t[0])
-        self.point_curves[key] = pts
-        self.update()
-
-    def _margin(self):
-        return 12
-
-    def _param_points(self):
+    def _points(self):
         w, h = self.width(), self.height()
-        margin = self._margin()
+        margin = 12
         xs = [0.0, 0.25, 0.5, 0.75, 1.0]
         pts = []
         for i, xnorm in enumerate(xs):
@@ -327,26 +270,11 @@ class ToneCurveWidget(QWidget):
             pts.append(QPoint(int(x), int(y)))
         return pts
 
-    def _curve_widget_pts(self, key):
-        w, h = self.width(), self.height()
-        margin = self._margin()
-        pts = []
-        for x, y in self.point_curves.get(key, [[0, 0], [1, 1]]):
-            px = margin + float(x) * (w - 2 * margin)
-            py = margin + (1.0 - float(y)) * (h - 2 * margin)
-            pts.append(QPoint(int(px), int(py)))
-        return pts
-
-    def _emit_points(self):
-        key = self.channel
-        if key in self.point_curves:
-            self.pointCurveChanged.emit(key, [list(p) for p in self.point_curves[key]])
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        margin = self._margin()
+        margin = 12
         painter.fillRect(self.rect(), QColor("#1a1a1a"))
         painter.setPen(QPen(QColor(45, 45, 45), 1))
         for i in range(1, 4):
@@ -356,33 +284,18 @@ class ToneCurveWidget(QWidget):
             painter.drawLine(margin, int(y), w - margin, int(y))
         painter.setPen(QPen(QColor(70, 70, 70), 1, Qt.PenStyle.DashLine))
         painter.drawLine(margin, h - margin, w - margin, margin)
-
-        if self.channel == "param":
-            pts = self._param_points()
-            color = self.CHANNEL_COLORS["param"]
-        else:
-            pts = self._curve_widget_pts(self.channel)
-            color = self.CHANNEL_COLORS.get(self.channel, QColor(200, 200, 200))
-
-        painter.setPen(QPen(color, 2))
+        pts = self._points()
+        painter.setPen(QPen(QColor(120, 180, 255), 2))
         for i in range(len(pts) - 1):
             painter.drawLine(pts[i], pts[i + 1])
         for i, p in enumerate(pts):
-            painter.setBrush(QBrush(color.lighter(120) if i == self._drag_idx else color))
+            painter.setBrush(QBrush(QColor(100, 160, 255) if i == self._drag_idx else QColor(80, 140, 230)))
             painter.setPen(QPen(QColor(220, 220, 220), 1))
             painter.drawEllipse(p, 6, 6)
-        # Channel label
-        painter.setPen(QColor(160, 160, 160))
-        painter.drawText(margin, h - 2, self.channel.upper())
         painter.end()
 
     def mousePressEvent(self, e):
-        if e.button() != Qt.MouseButton.LeftButton:
-            return
-        if self.channel == "param":
-            pts = self._param_points()
-        else:
-            pts = self._curve_widget_pts(self.channel)
+        pts = self._points()
         pos = e.position().toPoint()
         for i, p in enumerate(pts):
             if (pos - p).manhattanLength() < 14:
@@ -390,75 +303,20 @@ class ToneCurveWidget(QWidget):
                 self.update()
                 return
 
-    def mouseDoubleClickEvent(self, e):
-        if self.channel == "param":
-            return
-        pos = e.position().toPoint()
-        pts_w = self._curve_widget_pts(self.channel)
-        # Remove interior point on double-click
-        for i, p in enumerate(pts_w):
-            if (pos - p).manhattanLength() < 14:
-                pts = self.point_curves[self.channel]
-                if 0 < i < len(pts) - 1:
-                    pts.pop(i)
-                    self._emit_points()
-                    self.update()
-                return
-        # Add point
-        w, h = self.width(), self.height()
-        margin = self._margin()
-        xn = max(0.0, min(1.0, (e.position().x() - margin) / max(w - 2 * margin, 1)))
-        yn = max(0.0, min(1.0, 1.0 - (e.position().y() - margin) / max(h - 2 * margin, 1)))
-        pts = self.point_curves[self.channel]
-        pts.append([xn, yn])
-        pts.sort(key=lambda t: t[0])
-        self._emit_points()
-        self.update()
-
     def mouseMoveEvent(self, e):
         if self._drag_idx is None:
             return
         h = self.height()
-        w = self.width()
-        margin = self._margin()
-        if self.channel == "param":
-            ynorm = max(0.02, min(0.98, (e.position().y() - margin) / max(h - 2 * margin, 1)))
-            base = [0.0, 0.25, 0.5, 0.75, 1.0][self._drag_idx]
-            val = max(-100.0, min(100.0, ((1.0 - ynorm) - base) / 0.45 * 100.0))
-            self.values[self._drag_idx] = val
-            self.update()
-            self.curveChanged.emit(*self.values)
-        else:
-            pts = self.point_curves[self.channel]
-            idx = self._drag_idx
-            if idx < 0 or idx >= len(pts):
-                return
-            xn = max(0.0, min(1.0, (e.position().x() - margin) / max(w - 2 * margin, 1)))
-            yn = max(0.0, min(1.0, 1.0 - (e.position().y() - margin) / max(h - 2 * margin, 1)))
-            # Lock endpoints in X
-            if idx == 0:
-                xn = 0.0
-            elif idx == len(pts) - 1:
-                xn = 1.0
-            else:
-                lo = pts[idx - 1][0] + 0.01
-                hi = pts[idx + 1][0] - 0.01
-                xn = max(lo, min(hi, xn))
-            pts[idx] = [xn, yn]
-            self.update()
-            self._emit_points()
+        margin = 12
+        ynorm = max(0.02, min(0.98, (e.position().y() - margin) / max(h - 2 * margin, 1)))
+        base = [0.0, 0.25, 0.5, 0.75, 1.0][self._drag_idx]
+        val = max(-100.0, min(100.0, ((1.0 - ynorm) - base) / 0.45 * 100.0))
+        self.values[self._drag_idx] = val
+        self.update()
+        self.curveChanged.emit(*self.values)
 
     def mouseReleaseEvent(self, e):
         self._drag_idx = None
-        self.update()
-
-    def reset_current(self):
-        if self.channel == "param":
-            self.values = [0.0, 0.0, 0.0, 0.0, 0.0]
-            self.curveChanged.emit(*self.values)
-        else:
-            self.point_curves[self.channel] = [[0.0, 0.0], [1.0, 1.0]]
-            self._emit_points()
         self.update()
 
 
@@ -478,7 +336,6 @@ class ImageCanvas(QWidget):
     brushStrokeFinished = pyqtSignal()
     brushMaskChanged = pyqtSignal()
     horizonLineFinished = pyqtSignal(float)  # angle degrees
-    keystoneChanged = pyqtSignal(list)  # 4×[x,y] normalized TL,TR,BR,BL
     
     MODE_NORMAL = 0
     MODE_SPLIT = 1
@@ -502,9 +359,6 @@ class ImageCanvas(QWidget):
         self._space_down = False
         self.compare_mode = self.MODE_NORMAL
         self._split_ratio = 0.5
-        self.keystone_mode = False
-        self.keystone_corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-        self._keystone_drag = -1
         
         # Control Point state
         self.control_points = []
@@ -522,9 +376,6 @@ class ImageCanvas(QWidget):
         self.selected_brush = -1
         self.brush_radius = 0.05  # normalized
         self.brush_hardness = 0.7
-        self.brush_flow = 1.0       # 0..1 per dab
-        self.brush_opacity = 1.0    # 0..1 overall on new masks
-        self.brush_paint_mode = "add"  # add | subtract | intersect
         self._brush_painting = False
         self._brush_current_strokes = []
         self.show_brush_mask = True
@@ -564,38 +415,9 @@ class ImageCanvas(QWidget):
 
     def set_crop_mode(self, enabled):
         self.crop_mode = enabled
-        if enabled:
-            self.keystone_mode = False
         self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
         self._drag_start = None
         self._drag_rect = None
-        self.update()
-
-    def set_keystone_mode(self, enabled, corners=None):
-        self.keystone_mode = bool(enabled)
-        if corners and len(corners) == 4:
-            self.keystone_corners = [[float(c[0]), float(c[1])] for c in corners]
-        elif enabled and (
-            not getattr(self, "keystone_corners", None)
-            or len(self.keystone_corners) != 4
-        ):
-            self.keystone_corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-        if enabled:
-            self.crop_mode = False
-            self.brush_mode = False
-            self.gradient_mode = False
-            self.horizon_line_mode = False
-            self.setCursor(Qt.CursorShape.CrossCursor)
-        else:
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-        self._keystone_drag = -1
-        self.update()
-
-    def set_keystone_corners(self, corners):
-        if corners and len(corners) == 4:
-            self.keystone_corners = [[float(c[0]), float(c[1])] for c in corners]
-        else:
-            self.keystone_corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
         self.update()
 
     def set_compare_mode(self, mode):
@@ -647,11 +469,7 @@ class ImageCanvas(QWidget):
         ix0, iy0, sw, sh = rect.left(), rect.top(), rect.width(), rect.height()
         nx = max(0.0, min(1.0, (pos.x() - ix0) / max(sw, 1)))
         ny = max(0.0, min(1.0, (pos.y() - iy0) / max(sh, 1)))
-        self._brush_current_strokes.append({
-            "x": nx, "y": ny, "r": self.brush_radius,
-            "flow": float(getattr(self, "brush_flow", 1.0)),
-            "mode": "subtract" if getattr(self, "brush_erase", False) else getattr(self, "brush_paint_mode", "add"),
-        })
+        self._brush_current_strokes.append({"x": nx, "y": ny, "r": self.brush_radius})
         self.update()
 
     def set_show_grid(self, enabled: bool):
@@ -1071,28 +889,6 @@ class ImageCanvas(QWidget):
             painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
             painter.setPen(QPen(QColor(255, 220, 80), 1, Qt.PenStyle.DashLine))
             painter.drawRect(self._drag_rect)
-
-        # Four-corner keystone overlay
-        if getattr(self, "keystone_mode", False) and self._pixmap is not None:
-            rect = self.image_rect()
-            if not rect.isEmpty():
-                ix0, iy0, sw, sh = rect.left(), rect.top(), rect.width(), rect.height()
-                corners = getattr(self, "keystone_corners", None) or [
-                    [0, 0], [1, 0], [1, 1], [0, 1]
-                ]
-                pts = [
-                    QPoint(int(ix0 + c[0] * sw), int(iy0 + c[1] * sh))
-                    for c in corners
-                ]
-                painter.setPen(QPen(QColor(80, 220, 160), 2))
-                for i in range(4):
-                    painter.drawLine(pts[i], pts[(i + 1) % 4])
-                labels = ("TL", "TR", "BR", "BL")
-                for i, p in enumerate(pts):
-                    painter.setBrush(QBrush(QColor(80, 220, 160)))
-                    painter.setPen(QPen(QColor(255, 255, 255), 1))
-                    painter.drawEllipse(p, 7, 7)
-                    painter.drawText(p.x() + 10, p.y() - 6, labels[i])
         painter.end()
 
     def mouseDoubleClickEvent(self, e):
@@ -1219,23 +1015,6 @@ class ImageCanvas(QWidget):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
 
-        # Keystone corner drag
-        if (
-            getattr(self, "keystone_mode", False)
-            and e.button() == Qt.MouseButton.LeftButton
-            and self._pixmap is not None
-        ):
-            rect = self.image_rect()
-            if not rect.isEmpty():
-                ix0, iy0, sw, sh = rect.left(), rect.top(), rect.width(), rect.height()
-                click_pos = e.position().toPoint()
-                for i, c in enumerate(self.keystone_corners):
-                    cx = ix0 + c[0] * sw
-                    cy = iy0 + c[1] * sh
-                    if math.hypot(click_pos.x() - cx, click_pos.y() - cy) < 14:
-                        self._keystone_drag = i
-                        return
-
         # 2. Control point click check
         if e.button() == Qt.MouseButton.LeftButton and self._pixmap is not None:
             rect = self.image_rect()
@@ -1357,19 +1136,6 @@ class ImageCanvas(QWidget):
                     self.update()
                     return
 
-        # Keystone corner drag
-        if getattr(self, "_keystone_drag", -1) >= 0 and self.keystone_mode:
-            rect = self.image_rect()
-            if not rect.isEmpty():
-                ix0, iy0, sw, sh = rect.left(), rect.top(), rect.width(), rect.height()
-                pos = e.position().toPoint()
-                nx = max(-0.2, min(1.2, (pos.x() - ix0) / max(sw, 1)))
-                ny = max(-0.2, min(1.2, (pos.y() - iy0) / max(sh, 1)))
-                i = self._keystone_drag
-                self.keystone_corners[i] = [nx, ny]
-                self.update()
-            return
-
         # Dragging control point center
         if self._dragging_point:
             rect = self.image_rect()
@@ -1454,9 +1220,6 @@ class ImageCanvas(QWidget):
                 mask = {
                     "strokes": list(self._brush_current_strokes),
                     "hardness": self.brush_hardness,
-                    "flow": float(getattr(self, "brush_flow", 1.0)),
-                    "opacity": float(getattr(self, "brush_opacity", 1.0)),
-                    "mode": getattr(self, "brush_paint_mode", "add"),
                     "exposure": 0.0, "contrast": 0.0, "saturation": 0.0,
                     "clarity": 0.0, "temperature": 0.0,
                 }
@@ -1489,11 +1252,6 @@ class ImageCanvas(QWidget):
             self._dragging_point = False
             self._resizing_point = False
             self.controlPointDragFinished.emit()
-            return
-        if getattr(self, "_keystone_drag", -1) >= 0:
-            self._keystone_drag = -1
-            self.keystoneChanged.emit([list(c) for c in self.keystone_corners])
-            self.update()
             return
         if self.crop_mode and self._drag_rect is not None:
             rect = self._drag_rect
@@ -1612,14 +1370,12 @@ class ColorWheelWidget(QWidget):
 # ----------------------------------------------------------------------
 
 class HistoryWidget(QWidget):
-    """Edit history — click to restore; right-click for preview / copy settings."""
+    """Simple edit history — click an entry to restore that recipe snapshot."""
     restoreRequested = pyqtSignal(int)  # index
-    previewRequested = pyqtSignal(int)  # before/after vs current
-    copySettingsRequested = pyqtSignal(int)  # copy recipe into clipboard
 
     def __init__(self):
         super().__init__()
-        from PyQt6.QtWidgets import QListWidget, QVBoxLayout, QMenu
+        from PyQt6.QtWidgets import QListWidget, QVBoxLayout, QLabel
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.list = QListWidget()
@@ -1630,8 +1386,6 @@ class HistoryWidget(QWidget):
             "QListWidget::item:selected { background:#2a5080; }"
         )
         self.list.itemClicked.connect(self._on_click)
-        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.list)
         self._entries = []  # list of (label, recipe_dict)
 
@@ -1658,34 +1412,9 @@ class HistoryWidget(QWidget):
         if 0 <= row < len(self._entries):
             self.restoreRequested.emit(row)
 
-    def _on_context_menu(self, pos):
-        item = self.list.itemAt(pos)
-        if item is None:
-            return
-        row = self.list.row(item)
-        if not (0 <= row < len(self._entries)):
-            return
-        from PyQt6.QtWidgets import QMenu
-        menu = QMenu(self)
-        act_restore = menu.addAction("Restore this state")
-        act_preview = menu.addAction("Preview before / after…")
-        act_copy = menu.addAction("Copy settings from this entry")
-        chosen = menu.exec(self.list.mapToGlobal(pos))
-        if chosen is act_restore:
-            self.restoreRequested.emit(row)
-        elif chosen is act_preview:
-            self.previewRequested.emit(row)
-        elif chosen is act_copy:
-            self.copySettingsRequested.emit(row)
-
     def get_recipe_dict(self, index: int):
         if 0 <= index < len(self._entries):
             return self._entries[index][1]
-        return None
-
-    def get_label(self, index: int):
-        if 0 <= index < len(self._entries):
-            return self._entries[index][0]
         return None
 
     def current_index(self) -> int:
@@ -1709,181 +1438,3 @@ class HistoryWidget(QWidget):
         if 0 <= row < len(self._entries) - 1:
             return row + 1
         return None
-
-
-# ---------------------------------------------------------------------------
-# Lightroom-style HSL panel: Hue / Saturation / Luminance / All tabs, each
-# showing all 8 color-band rows (Red..Magenta) at once.
-# ---------------------------------------------------------------------------
-
-class HSLRow(QWidget):
-    """One color-band row: colored label, slider (-100..100), numeric value.
-    Double-click the slider to reset that band to 0."""
-    valueChanged = pyqtSignal(int, float)  # color_index, value
-
-    NAMES = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
-    COLORS = [
-        QColor(220, 70, 70), QColor(224, 140, 50), QColor(210, 190, 50),
-        QColor(90, 185, 90), QColor(60, 190, 190), QColor(90, 130, 224),
-        QColor(150, 100, 214), QColor(214, 90, 160),
-    ]
-
-    def __init__(self, color_index: int, value: float = 0.0):
-        super().__init__()
-        self.color_index = color_index
-        color = self.COLORS[color_index]
-        c = f"rgb({color.red()},{color.green()},{color.blue()})"
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 1, 0, 1)
-        layout.setSpacing(6)
-
-        name_lbl = QLabel(self.NAMES[color_index])
-        name_lbl.setFixedWidth(56)
-        name_lbl.setStyleSheet(f"color: {c}; font-size: 11px;")
-        layout.addWidget(name_lbl)
-
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(-100, 100)
-        self.slider.setValue(int(round(value)))
-        self.slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{
-                height: 3px; background: #3a3a3a; border-radius: 1px;
-            }}
-            QSlider::handle:horizontal {{
-                background: {c}; width: 12px; height: 12px; margin: -5px 0;
-                border-radius: 6px; border: 1px solid #1a1a1a;
-            }}
-            QSlider::sub-page:horizontal {{ background: {c}; border-radius: 1px; }}
-            QSlider::add-page:horizontal {{ background: #3a3a3a; border-radius: 1px; }}
-        """)
-        self.slider.valueChanged.connect(self._on_slide)
-        self.slider.mouseDoubleClickEvent = self._reset
-        layout.addWidget(self.slider, 1)
-
-        self.value_lbl = QLabel(self._fmt(value))
-        self.value_lbl.setFixedWidth(30)
-        self.value_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.value_lbl.setStyleSheet("color:#ccc; font-size: 11px;")
-        layout.addWidget(self.value_lbl)
-
-    @staticmethod
-    def _fmt(v) -> str:
-        v = int(round(v))
-        return f"+{v}" if v > 0 else str(v)
-
-    def _on_slide(self, val):
-        self.value_lbl.setText(self._fmt(val))
-        self.valueChanged.emit(self.color_index, float(val))
-
-    def _reset(self, event):
-        self.slider.setValue(0)
-
-    def set_value(self, value):
-        self.slider.blockSignals(True)
-        self.slider.setValue(int(round(value)))
-        self.slider.blockSignals(False)
-        self.value_lbl.setText(self._fmt(value))
-
-
-class HSLGroup(QWidget):
-    """8 stacked HSLRows (Red..Magenta) for one channel type."""
-    valueChanged = pyqtSignal(int, float)  # color_index, value
-
-    def __init__(self, title: Optional[str] = None):
-        super().__init__()
-        v = QVBoxLayout(self)
-        v.setContentsMargins(4, 4, 4, 6)
-        v.setSpacing(3)
-        if title:
-            head = QLabel(title)
-            head.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            head.setStyleSheet(
-                "color:#ddd; font-size:12px; font-weight:600; padding-bottom:2px;"
-            )
-            v.addWidget(head)
-        self.rows = []
-        for i in range(8):
-            row = HSLRow(i, 0.0)
-            row.valueChanged.connect(self.valueChanged)
-            v.addWidget(row)
-            self.rows.append(row)
-
-    def set_values(self, values):
-        for i, row in enumerate(self.rows):
-            row.set_value(values[i] if i < len(values) else 0.0)
-
-
-class HSLPanelWidget(QWidget):
-    """Lightroom-style HSL / Color panel: Hue | Saturation | Luminance | All
-    tabs, each showing all 8 color-band rows. Matches the classic ACR/LR HSL
-    panel layout."""
-    hueChanged = pyqtSignal(int, float)  # color_index, value
-    satChanged = pyqtSignal(int, float)
-    lumChanged = pyqtSignal(int, float)
-
-    def __init__(self):
-        super().__init__()
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(4)
-
-        tab_row = QHBoxLayout()
-        tab_row.setSpacing(2)
-        self._btn_group = QButtonGroup(self)
-        self._btn_group.setExclusive(True)
-        for i, name in enumerate(["Hue", "Saturation", "Luminance", "All"]):
-            btn = QPushButton(name)
-            btn.setCheckable(True)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: transparent; color:#999; border:none;
-                    border-bottom: 2px solid transparent; padding: 5px 8px; font-size: 11px;
-                }
-                QPushButton:checked { color:#fff; border-bottom: 2px solid #2a6ad4; font-weight:600; }
-                QPushButton:hover:!checked { color:#ccc; }
-            """)
-            self._btn_group.addButton(btn, i)
-            tab_row.addWidget(btn)
-            if i == 0:
-                btn.setChecked(True)
-        tab_row.addStretch(1)
-        outer.addLayout(tab_row)
-
-        self.stack = QStackedWidget()
-        outer.addWidget(self.stack)
-
-        self.hue_group = HSLGroup()
-        self.sat_group = HSLGroup()
-        self.lum_group = HSLGroup()
-        self.hue_group.valueChanged.connect(self.hueChanged)
-        self.sat_group.valueChanged.connect(self.satChanged)
-        self.lum_group.valueChanged.connect(self.lumChanged)
-        self.stack.addWidget(self.hue_group)
-        self.stack.addWidget(self.sat_group)
-        self.stack.addWidget(self.lum_group)
-
-        all_page = QWidget()
-        all_v = QVBoxLayout(all_page)
-        all_v.setContentsMargins(0, 0, 0, 0)
-        all_v.setSpacing(10)
-        self.hue_group_all = HSLGroup("Hue")
-        self.sat_group_all = HSLGroup("Saturation")
-        self.lum_group_all = HSLGroup("Luminance")
-        self.hue_group_all.valueChanged.connect(self.hueChanged)
-        self.sat_group_all.valueChanged.connect(self.satChanged)
-        self.lum_group_all.valueChanged.connect(self.lumChanged)
-        all_v.addWidget(self.hue_group_all)
-        all_v.addWidget(self.sat_group_all)
-        all_v.addWidget(self.lum_group_all)
-        self.stack.addWidget(all_page)
-
-        self._btn_group.idClicked.connect(self.stack.setCurrentIndex)
-
-    def set_values(self, hue, sat, lum):
-        self.hue_group.set_values(hue)
-        self.sat_group.set_values(sat)
-        self.lum_group.set_values(lum)
-        self.hue_group_all.set_values(hue)
-        self.sat_group_all.set_values(sat)
-        self.lum_group_all.set_values(lum)

@@ -6,6 +6,7 @@ Not a replacement for dedicated tools (PTGui, Hugin) on hard sets.
 """
 from __future__ import annotations
 
+import os
 from typing import List, Optional, Tuple
 
 import cv2
@@ -73,11 +74,53 @@ _STATUS_NAMES = {
 }
 
 
+def order_paths_by_capture_time(paths: List[str]) -> List[str]:
+    """Sort image paths by EXIF/capture datetime (then filename)."""
+    from catalog import resolve_capture_datetime
+
+    keyed = []
+    for p in paths:
+        try:
+            dt, _ = resolve_capture_datetime(p)
+            keyed.append((dt, os.path.basename(p).lower(), p))
+        except Exception:
+            keyed.append((None, os.path.basename(p).lower(), p))
+    # None datetimes last
+    keyed.sort(key=lambda t: (t[0] is None, t[0] or 0, t[1]))
+    return [p for _dt, _n, p in keyed]
+
+
+def match_exposure_wb(images: List[np.ndarray], ref_idx: int = 0) -> List[np.ndarray]:
+    """Simple per-channel gain match toward the reference frame (mean RGB).
+
+    Helps OpenCV stitch when brackets or auto-exposure drifted between frames.
+    """
+    if not images or ref_idx < 0 or ref_idx >= len(images):
+        return images
+    ref = images[ref_idx].astype(np.float32)
+    ref_mean = ref.reshape(-1, ref.shape[-1]).mean(axis=0) + 1e-3
+    out = []
+    for i, img in enumerate(images):
+        if i == ref_idx:
+            out.append(img)
+            continue
+        x = img.astype(np.float32)
+        mean = x.reshape(-1, x.shape[-1]).mean(axis=0) + 1e-3
+        gains = ref_mean / mean
+        # Soften extreme gains
+        gains = np.clip(gains, 0.5, 2.0)
+        y = np.clip(x * gains, 0, 255).astype(np.uint8)
+        out.append(y)
+    return out
+
+
 def stitch_panorama(
     paths: List[str],
     mode: str = "panoramas",
     max_dim: int = 0,
     try_use_gpu: bool = False,
+    match_exposure: bool = True,
+    order_by_time: bool = False,
     progress_cb=None,
 ) -> Tuple[np.ndarray, dict]:
     """
@@ -93,11 +136,20 @@ def stitch_panorama(
         if progress_cb:
             progress_cb(msg, frac)
 
+    ordered = list(paths)
+    if order_by_time:
+        prog("Ordering by capture time…", 0.02)
+        ordered = order_paths_by_capture_time(ordered)
+
     prog("Loading frames…", 0.05)
     images = []
-    for i, p in enumerate(paths):
+    for i, p in enumerate(ordered):
         images.append(load_pano_frame(p, max_dim=max_dim))
-        prog(f"Loaded {i + 1}/{len(paths)}", 0.05 + 0.25 * (i + 1) / len(paths))
+        prog(f"Loaded {i + 1}/{len(ordered)}", 0.05 + 0.25 * (i + 1) / len(ordered))
+
+    if match_exposure and len(images) >= 2:
+        prog("Matching exposure / WB…", 0.32)
+        images = match_exposure_wb(images, ref_idx=0)
 
     prog("Stitching (OpenCV)…", 0.4)
     stitcher = _make_stitcher(mode)
@@ -110,12 +162,19 @@ def stitch_panorama(
     status_i = int(status) if status is not None else -1
     name = _STATUS_NAMES.get(status_i, f"status={status_i}")
     report = {
-        "frames": len(paths),
+        "frames": len(ordered),
         "mode": mode,
         "max_dim": max_dim,
         "status": status_i,
         "status_name": name,
-        "paths": list(paths),
+        "paths": list(ordered),
+        "match_exposure": bool(match_exposure),
+        "order_by_time": bool(order_by_time),
+        "projection_note": (
+            "OpenCV Stitcher_PANORAMA uses a spherical-like projection for wide "
+            "horizons; SCANS is closer to a planar/cylindrical flat-copy. "
+            "For true cylindrical control use Hugin/PTGui."
+        ),
     }
 
     if status_i != 0 and getattr(cv2, "Stitcher_OK", 0) != status_i:

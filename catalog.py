@@ -13,10 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from imaging import IMAGE_EXTS, is_raw, extract_exif, safe_pil_open
-import logging
-
-log = logging.getLogger(__name__)
+from imaging import IMAGE_EXTS, is_raw, extract_exif
 
 # Default DB location
 def default_db_path() -> str:
@@ -120,31 +117,6 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
-
-CREATE TABLE IF NOT EXISTS collections (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    parent_id INTEGER,
-    created_ts REAL,
-    UNIQUE(name, parent_id)
-);
-
-CREATE TABLE IF NOT EXISTS collection_members (
-    collection_id INTEGER NOT NULL,
-    path TEXT NOT NULL,
-    PRIMARY KEY (collection_id, path)
-);
-
-CREATE TABLE IF NOT EXISTS virtual_copies (
-    id INTEGER PRIMARY KEY,
-    master_path TEXT NOT NULL,
-    name TEXT,
-    recipe_json TEXT,
-    created_ts REAL,
-    rating INTEGER DEFAULT 0,
-    reject INTEGER DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_vc_master ON virtual_copies(master_path);
 """
 
 
@@ -172,60 +144,33 @@ class Catalog:
         # (column_name, SQL type + default)
         wanted = [
             ("keywords", "TEXT DEFAULT ''"),
-            ("people", "TEXT DEFAULT ''"),  # face / person tags, comma-separated
-            ("color_label", "TEXT DEFAULT ''"),
-            ("content_hash", "TEXT DEFAULT ''"),  # short hash for duplicate detection
         ]
         for name, decl in wanted:
             if name not in cols:
                 try:
                     self._conn.execute(f"ALTER TABLE images ADD COLUMN {name} {decl}")
                 except Exception:
-                    log.debug("_migrate: non-critical failure, continuing", exc_info=True)
+                    pass
         # Indexes that may depend on migrated columns
         for sql in (
             "CREATE INDEX IF NOT EXISTS idx_images_keywords ON images(keywords)",
-            "CREATE INDEX IF NOT EXISTS idx_images_people ON images(people)",
-            "CREATE INDEX IF NOT EXISTS idx_images_content_hash ON images(content_hash)",
             "CREATE INDEX IF NOT EXISTS idx_images_date_key ON images(date_key)",
             "CREATE INDEX IF NOT EXISTS idx_images_folder ON images(folder)",
             "CREATE INDEX IF NOT EXISTS idx_images_year_month ON images(year, month)",
             "CREATE INDEX IF NOT EXISTS idx_images_rating ON images(rating)",
             "CREATE INDEX IF NOT EXISTS idx_images_reject ON images(reject)",
-            """CREATE TABLE IF NOT EXISTS collections (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                parent_id INTEGER,
-                created_ts REAL,
-                UNIQUE(name, parent_id)
-            )""",
-            """CREATE TABLE IF NOT EXISTS collection_members (
-                collection_id INTEGER NOT NULL,
-                path TEXT NOT NULL,
-                PRIMARY KEY (collection_id, path)
-            )""",
-            """CREATE TABLE IF NOT EXISTS virtual_copies (
-                id INTEGER PRIMARY KEY,
-                master_path TEXT NOT NULL,
-                name TEXT,
-                recipe_json TEXT,
-                created_ts REAL,
-                rating INTEGER DEFAULT 0,
-                reject INTEGER DEFAULT 0
-            )""",
-            "CREATE INDEX IF NOT EXISTS idx_vc_master ON virtual_copies(master_path)",
         ):
             try:
                 self._conn.execute(sql)
             except Exception:
-                log.debug("_migrate: non-critical failure, continuing", exc_info=True)
+                pass
         self._conn.commit()
 
     def close(self):
         try:
             self._conn.close()
         except Exception:
-            log.debug("close: non-critical failure, continuing", exc_info=True)
+            pass
 
     def connection(self) -> sqlite3.Connection:
         return self._conn
@@ -258,24 +203,19 @@ class Catalog:
             "exif_datetime", "date_key", "year", "month", "day",
             "camera", "lens", "iso", "aperture", "shutter", "focal",
             "is_raw", "width", "height", "last_scan_ts", "date_source",
-            "content_hash",
         ]
-        # Preserve rating/reject/keywords/people on update
+        # Preserve rating/reject on update
         existing = self._conn.execute(
-            "SELECT rating, reject, keywords, people, color_label FROM images WHERE path = ?",
-            (record["path"],),
+            "SELECT rating, reject FROM images WHERE path = ?", (record["path"],)
         ).fetchone()
         rating = existing["rating"] if existing else record.get("rating", 0)
         reject = existing["reject"] if existing else record.get("reject", 0)
-        keywords = (existing["keywords"] if existing else "") or record.get("keywords", "")
-        people = (existing["people"] if existing else "") or record.get("people", "")
-        color_label = (existing["color_label"] if existing else "") or record.get("color_label", "")
 
-        values = [record.get(c) for c in cols] + [rating, reject, keywords, people, color_label]
+        values = [record.get(c) for c in cols] + [rating, reject]
         self._conn.execute(
             f"""
-            INSERT INTO images ({", ".join(cols)}, rating, reject, keywords, people, color_label)
-            VALUES ({", ".join("?" for _ in cols)}, ?, ?, ?, ?, ?)
+            INSERT INTO images ({", ".join(cols)}, rating, reject)
+            VALUES ({", ".join("?" for _ in cols)}, ?, ?)
             ON CONFLICT(path) DO UPDATE SET
               folder=excluded.folder,
               filename=excluded.filename,
@@ -296,8 +236,7 @@ class Catalog:
               width=excluded.width,
               height=excluded.height,
               last_scan_ts=excluded.last_scan_ts,
-              date_source=excluded.date_source,
-              content_hash=excluded.content_hash
+              date_source=excluded.date_source
             """,
             values,
         )
@@ -314,10 +253,11 @@ class Catalog:
         date_key = dt.strftime("%Y-%m-%d")
         width = height = None
         try:
-            with safe_pil_open(path) as im:
+            from PIL import Image
+            with Image.open(path) as im:
                 width, height = im.size
         except Exception:
-            log.debug("build_record: non-critical failure, continuing", exc_info=True)
+            pass
         return {
             "path": path,
             "folder": os.path.dirname(path),
@@ -342,27 +282,7 @@ class Catalog:
             "date_source": source,
             "rating": 0,
             "reject": 0,
-            "content_hash": self._quick_content_hash(path, st.st_size, st.st_mtime),
         }
-
-    @staticmethod
-    def _quick_content_hash(path: str, size: int, mtime: float) -> str:
-        """Fast fingerprint: size + sample of file head/mid/tail (not cryptographic)."""
-        h = hashlib.sha1()
-        h.update(f"{size}|".encode())
-        try:
-            with open(path, "rb") as f:
-                head = f.read(65536)
-                h.update(head)
-                if size > 131072:
-                    f.seek(max(0, size // 2 - 32768))
-                    h.update(f.read(65536))
-                if size > 65536:
-                    f.seek(max(0, size - 65536))
-                    h.update(f.read(65536))
-        except Exception:
-            h.update(f"{mtime}".encode())
-        return h.hexdigest()[:20]
 
     def scan_folder(
         self,
@@ -412,9 +332,8 @@ class Catalog:
                     self.commit()
                 if progress_cb:
                     progress_cb(stats, path)
-            except Exception as exc:
+            except Exception:
                 stats["skipped"] += 1
-                stats.setdefault("errors", []).append({"path": path, "error": str(exc)})
                 if progress_cb:
                     progress_cb(stats, path)
         self.commit()
@@ -535,265 +454,17 @@ class Catalog:
         )
         self._conn.commit()
 
-    def set_people(self, path: str, people: str):
-        """Face / person tags (comma-separated names)."""
-        self._conn.execute(
-            "UPDATE images SET people = ? WHERE path = ?",
-            (people.strip(), path),
-        )
-        self._conn.commit()
-
     def search(self, query: str, include_rejected: bool = False):
-        """Simple search across filename, keywords, people, camera, folder."""
+        """Simple search across filename, keywords, camera, folder."""
         q = f"%{(query or '').strip()}%"
         if not query or not query.strip():
             return self.images_for_date(include_rejected=include_rejected)
         where = [
-            "(filename LIKE ? OR keywords LIKE ? OR people LIKE ? OR camera LIKE ? OR folder LIKE ? OR path LIKE ?)"
+            "(filename LIKE ? OR keywords LIKE ? OR camera LIKE ? OR folder LIKE ? OR path LIKE ?)"
         ]
-        params = [q, q, q, q, q, q]
+        params = [q, q, q, q, q]
         if not include_rejected:
             where.append("reject = 0")
         sql = f"SELECT * FROM images WHERE {' AND '.join(where)} ORDER BY exif_datetime DESC, filename ASC"
         rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
-
-    # ----- collections -----
-    def create_collection(self, name: str, parent_id: Optional[int] = None) -> int:
-        name = (name or "").strip() or "Untitled"
-        cur = self._conn.execute(
-            "INSERT INTO collections(name, parent_id, created_ts) VALUES (?, ?, ?)",
-            (name, parent_id, time.time()),
-        )
-        self._conn.commit()
-        return int(cur.lastrowid)
-
-    def list_collections(self) -> List[Dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT c.*, (SELECT COUNT(*) FROM collection_members m WHERE m.collection_id = c.id) AS count "
-            "FROM collections c ORDER BY c.name"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-    def rename_collection(self, collection_id: int, name: str):
-        self._conn.execute(
-            "UPDATE collections SET name = ? WHERE id = ?",
-            ((name or "").strip() or "Untitled", collection_id),
-        )
-        self._conn.commit()
-
-    def delete_collection(self, collection_id: int):
-        self._conn.execute("DELETE FROM collection_members WHERE collection_id = ?", (collection_id,))
-        self._conn.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
-        self._conn.commit()
-
-    def add_to_collection(self, collection_id: int, paths: Iterable[str]):
-        for p in paths:
-            try:
-                self._conn.execute(
-                    "INSERT OR IGNORE INTO collection_members(collection_id, path) VALUES (?, ?)",
-                    (collection_id, p),
-                )
-            except Exception:
-                log.debug("add_to_collection: non-critical failure, continuing", exc_info=True)
-        self._conn.commit()
-
-    def remove_from_collection(self, collection_id: int, paths: Iterable[str]):
-        for p in paths:
-            self._conn.execute(
-                "DELETE FROM collection_members WHERE collection_id = ? AND path = ?",
-                (collection_id, p),
-            )
-        self._conn.commit()
-
-    def images_in_collection(self, collection_id: int, include_rejected: bool = False) -> List[Dict[str, Any]]:
-        where = "m.collection_id = ?"
-        params: List[Any] = [collection_id]
-        if not include_rejected:
-            where += " AND COALESCE(i.reject, 0) = 0"
-        sql = (
-            f"SELECT i.* FROM collection_members m "
-            f"JOIN images i ON i.path = m.path "
-            f"WHERE {where} ORDER BY i.exif_datetime DESC, i.filename ASC"
-        )
-        rows = self._conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
-
-    # ----- duplicates -----
-    def find_duplicate_groups(self, min_group_size: int = 2) -> List[List[Dict[str, Any]]]:
-        """Group images that share the same content_hash (and non-empty hash)."""
-        rows = self._conn.execute(
-            """
-            SELECT content_hash, COUNT(*) AS n FROM images
-            WHERE content_hash IS NOT NULL AND content_hash != ''
-            GROUP BY content_hash HAVING n >= ?
-            ORDER BY n DESC
-            """,
-            (min_group_size,),
-        ).fetchall()
-        groups = []
-        for row in rows:
-            members = self._conn.execute(
-                "SELECT * FROM images WHERE content_hash = ? ORDER BY path",
-                (row["content_hash"],),
-            ).fetchall()
-            groups.append([dict(m) for m in members])
-        return groups
-
-    # ----- virtual copies -----
-    def create_virtual_copy(
-        self, master_path: str, name: str = "", recipe_json: str = ""
-    ) -> int:
-        cur = self._conn.execute(
-            """
-            INSERT INTO virtual_copies(master_path, name, recipe_json, created_ts)
-            VALUES (?, ?, ?, ?)
-            """,
-            (master_path, name or "Copy", recipe_json or "", time.time()),
-        )
-        self._conn.commit()
-        return int(cur.lastrowid)
-
-    def list_virtual_copies(self, master_path: Optional[str] = None) -> List[Dict[str, Any]]:
-        if master_path:
-            rows = self._conn.execute(
-                "SELECT * FROM virtual_copies WHERE master_path = ? ORDER BY created_ts",
-                (master_path,),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM virtual_copies ORDER BY created_ts DESC"
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def get_virtual_copy(self, vc_id: int) -> Optional[Dict[str, Any]]:
-        row = self._conn.execute(
-            "SELECT * FROM virtual_copies WHERE id = ?", (vc_id,)
-        ).fetchone()
-        return dict(row) if row else None
-
-    def update_virtual_copy_recipe(self, vc_id: int, recipe_json: str):
-        self._conn.execute(
-            "UPDATE virtual_copies SET recipe_json = ? WHERE id = ?",
-            (recipe_json, vc_id),
-        )
-        self._conn.commit()
-
-    def delete_virtual_copy(self, vc_id: int):
-        self._conn.execute("DELETE FROM virtual_copies WHERE id = ?", (vc_id,))
-        self._conn.commit()
-
-    def list_people_tags(self) -> List[str]:
-        """Unique person names appearing in the people column."""
-        rows = self._conn.execute(
-            "SELECT people FROM images WHERE people IS NOT NULL AND people != ''"
-        ).fetchall()
-        names = set()
-        for r in rows:
-            for part in str(r["people"]).split(","):
-                p = part.strip()
-                if p:
-                    names.add(p)
-        return sorted(names, key=str.lower)
-
-
-def list_importable_files(source_dir: str, recursive: bool = True) -> List[str]:
-    """Image paths under source_dir suitable for import."""
-    source_dir = os.path.abspath(source_dir)
-    exts = tuple(e.lower() for e in IMAGE_EXTS)
-    out: List[str] = []
-    if recursive:
-        for dirpath, _dns, filenames in os.walk(source_dir):
-            for name in filenames:
-                if name.lower().endswith(exts):
-                    out.append(os.path.join(dirpath, name))
-    else:
-        for name in os.listdir(source_dir):
-            p = os.path.join(source_dir, name)
-            if os.path.isfile(p) and name.lower().endswith(exts):
-                out.append(p)
-    out.sort()
-    return out
-
-
-def format_import_name(
-    src_path: str,
-    sequence: int,
-    pattern: str = "keep",
-    capture_dt: Optional[datetime] = None,
-) -> str:
-    """Build destination filename from pattern.
-
-    pattern:
-      keep — original basename
-      date_seq — YYYYMMDD_0001.ext
-      date_orig — YYYYMMDD_originalname.ext
-    """
-    base = os.path.basename(src_path)
-    stem, ext = os.path.splitext(base)
-    if capture_dt is None:
-        capture_dt, _ = resolve_capture_datetime(src_path)
-    date_s = capture_dt.strftime("%Y%m%d")
-    if pattern == "date_seq":
-        return f"{date_s}_{sequence:04d}{ext.lower()}"
-    if pattern == "date_orig":
-        return f"{date_s}_{stem}{ext.lower()}"
-    return base
-
-
-def import_photos(
-    sources: List[str],
-    dest_dir: str,
-    mode: str = "copy",
-    rename_pattern: str = "keep",
-    subfolder_by_date: bool = True,
-    progress_cb=None,
-    should_cancel=None,
-) -> Dict[str, Any]:
-    """Copy or move images into dest_dir with optional rename / date folders.
-
-    Returns stats: {ok, failed, skipped, paths: [dest paths]}.
-    """
-    import shutil
-
-    dest_dir = os.path.abspath(dest_dir)
-    os.makedirs(dest_dir, exist_ok=True)
-    stats: Dict[str, Any] = {"ok": 0, "failed": 0, "skipped": 0, "paths": []}
-    seq = 1
-    for i, src in enumerate(sources):
-        if should_cancel and should_cancel():
-            break
-        if progress_cb:
-            try:
-                progress_cb(i, len(sources), src)
-            except Exception:
-                log.debug("import_photos: non-critical failure, continuing", exc_info=True)
-        try:
-            if not os.path.isfile(src):
-                stats["skipped"] += 1
-                continue
-            dt, _ = resolve_capture_datetime(src)
-            name = format_import_name(src, seq, rename_pattern, dt)
-            if subfolder_by_date:
-                sub = os.path.join(dest_dir, dt.strftime("%Y"), dt.strftime("%Y-%m-%d"))
-                os.makedirs(sub, exist_ok=True)
-                dest = os.path.join(sub, name)
-            else:
-                dest = os.path.join(dest_dir, name)
-            # Avoid overwrite: unique suffix
-            if os.path.exists(dest):
-                stem, ext = os.path.splitext(dest)
-                n = 1
-                while os.path.exists(f"{stem}_{n}{ext}"):
-                    n += 1
-                dest = f"{stem}_{n}{ext}"
-            if mode == "move":
-                shutil.move(src, dest)
-            else:
-                shutil.copy2(src, dest)
-            stats["ok"] += 1
-            stats["paths"].append(dest)
-            seq += 1
-        except Exception:
-            stats["failed"] += 1
-    return stats

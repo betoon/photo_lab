@@ -73,3 +73,69 @@ def configure_logging(level: int = logging.INFO, console: bool = True) -> str:
 def current_log_path() -> str:
     """Path to the active (or about-to-be-active) log file."""
     return os.path.join(log_dir(), _LOG_FILENAME)
+
+
+def recent_log_lines(max_lines: int = 50) -> list:
+    """Return the last *max_lines* lines from the active log file (best-effort)."""
+    path = current_log_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        return [ln.rstrip("\n") for ln in lines[-max(1, int(max_lines)):]]
+    except Exception:
+        return []
+
+
+def system_info_text() -> str:
+    """Short environment snapshot for problem reports."""
+    import platform
+    lines = [
+        f"Platform: {platform.platform()}",
+        f"Python: {sys.version.split()[0]} ({sys.executable})",
+        f"Machine: {platform.machine()}",
+        f"Processor: {platform.processor() or '—'}",
+    ]
+    try:
+        import cv2
+        lines.append(f"OpenCV: {cv2.__version__}")
+    except Exception:
+        lines.append("OpenCV: not available")
+    try:
+        import numpy as np
+        lines.append(f"NumPy: {np.__version__}")
+    except Exception:
+        lines.append("NumPy: not available")
+    try:
+        import rawpy
+        lines.append(f"rawpy: {getattr(rawpy, '__version__', 'present')}")
+    except Exception:
+        lines.append("rawpy: not installed")
+    try:
+        from PyQt6.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
+        lines.append(f"Qt: {QT_VERSION_STR}  ·  PyQt6: {PYQT_VERSION_STR}")
+    except Exception:
+        lines.append("PyQt6: unknown")
+    lines.append(f"Log file: {current_log_path()}")
+    return "\n".join(lines)
+
+
+def build_problem_report(extra_console_lines=None, max_log_lines: int = 50) -> str:
+    """Assemble system info + log tail + optional UI console lines."""
+    parts = [
+        "PhotoLab problem report",
+        "=" * 40,
+        system_info_text(),
+        "",
+        f"--- Last {max_log_lines} log file lines ---",
+    ]
+    log_lines = recent_log_lines(max_log_lines)
+    parts.extend(log_lines if log_lines else ["(log file empty or unavailable)"])
+    if extra_console_lines:
+        parts.append("")
+        parts.append("--- Debug console (UI) ---")
+        parts.extend(list(extra_console_lines)[-max_log_lines:])
+    parts.append("")
+    parts.append("--- End of report ---")
+    return "\n".join(parts)

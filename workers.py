@@ -10,9 +10,23 @@ from PyQt6.QtGui import QPixmap
 
 from imaging import apply_recipe, load_image, is_raw, _silent_imread, extract_embedded_preview
 from qt_utils import cv_to_qpixmap
-import logging
 
-log = logging.getLogger(__name__)
+import threading
+
+_HEAVY_SEM = threading.Semaphore(2)
+_HEAVY_LIMIT = 2
+
+
+def set_max_concurrent_workers(n: int) -> None:
+    """Max concurrent heavy jobs (RAW load / export), 1–8."""
+    global _HEAVY_SEM, _HEAVY_LIMIT
+    n = max(1, min(8, int(n)))
+    _HEAVY_LIMIT = n
+    _HEAVY_SEM = threading.Semaphore(n)
+
+
+def get_max_concurrent_workers() -> int:
+    return int(_HEAVY_LIMIT)
 
 
 class ThumbnailWorker(QThread):
@@ -21,9 +35,15 @@ class ThumbnailWorker(QThread):
     def __init__(self, paths):
         super().__init__()
         self.paths = paths
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
 
     def run(self):
         for p in self.paths:
+            if self._cancel:
+                break
             try:
                 # Prefer embedded JPEG from RAW — much faster than full decode
                 img = extract_embedded_preview(p, max_side=120)
@@ -39,7 +59,8 @@ class ExportWorker(QThread):
     failed = pyqtSignal(str)
 
     def __init__(self, path, recipe, out_path, wb_multipliers=None,
-                 watermark_text="", watermark_opacity=0.45, max_dim=0, jpeg_quality=92):
+                 watermark_text="", watermark_opacity=0.45, max_dim=0, jpeg_quality=92,
+                 export_16bit=False):
         super().__init__()
         self.path = path
         self.recipe = recipe
@@ -49,24 +70,31 @@ class ExportWorker(QThread):
         self.watermark_opacity = watermark_opacity
         self.max_dim = max_dim
         self.jpeg_quality = jpeg_quality
+        self.export_16bit = export_16bit
 
     def run(self):
         try:
+            import numpy as np
             from imaging import apply_watermark
-            img, meta = load_image(self.path, use_camera_wb=True)
-            multipliers = self.wb_multipliers or meta.get("wb_multipliers")
-            out = apply_recipe(img, self.recipe, wb_multipliers=multipliers, meta=meta)
-            if self.max_dim and max(out.shape[:2]) > self.max_dim:
-                h, w = out.shape[:2]
-                scale = self.max_dim / max(h, w)
-                out = cv2.resize(out, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-            if self.watermark_text:
-                out = apply_watermark(out, self.watermark_text, opacity=self.watermark_opacity)
-            ext = self.out_path.lower().rsplit(".", 1)[-1]
-            if ext in ("jpg", "jpeg"):
-                cv2.imwrite(self.out_path, out, [cv2.IMWRITE_JPEG_QUALITY, int(self.jpeg_quality)])
-            else:
-                cv2.imwrite(self.out_path, out)
+            with _HEAVY_SEM:
+                bps = 16 if self.export_16bit else None
+                img, meta = load_image(self.path, use_camera_wb=True, output_bps=bps)
+                multipliers = self.wb_multipliers or meta.get("wb_multipliers")
+                out = apply_recipe(img, self.recipe, wb_multipliers=multipliers, meta=meta)
+                if self.max_dim and max(out.shape[:2]) > self.max_dim:
+                    h, w = out.shape[:2]
+                    scale = self.max_dim / max(h, w)
+                    out = cv2.resize(out, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+                if self.watermark_text:
+                    out = apply_watermark(out, self.watermark_text, opacity=self.watermark_opacity)
+                ext = self.out_path.lower().rsplit(".", 1)[-1]
+                if ext in ("jpg", "jpeg"):
+                    cv2.imwrite(self.out_path, out, [cv2.IMWRITE_JPEG_QUALITY, int(self.jpeg_quality)])
+                elif ext in ("tif", "tiff") and self.export_16bit:
+                    u16 = (out.astype(np.float32) / 255.0 * 65535.0).astype(np.uint16)
+                    cv2.imwrite(self.out_path, u16)
+                else:
+                    cv2.imwrite(self.out_path, out)
             self.finished_ok.emit(self.out_path)
         except Exception as e:
             self.failed.emit(str(e))
@@ -83,7 +111,8 @@ class LoadImageWorker(QThread):
 
     def run(self):
         try:
-            img, meta = load_image(self.path, use_camera_wb=True)
+            with _HEAVY_SEM:
+                img, meta = load_image(self.path, use_camera_wb=True)
             self.loaded.emit(self.path, img, meta)
         except Exception as e:
             self.failed.emit(self.path, str(e))
@@ -184,7 +213,7 @@ class CatalogThumbWorker(QThread):
                 try:
                     pix.save(cache, "JPEG", 85)
                 except Exception:
-                    log.debug("run: non-critical failure, continuing", exc_info=True)
+                    pass
                 self.thumb_ready.emit(path, pix)
             except Exception:
                 continue
@@ -340,51 +369,5 @@ class PanoramaWorker(QThread):
                 cv2.imwrite(self.out_path, result)
             report["out_path"] = self.out_path
             self.finished_ok.emit(self.out_path, report)
-        except Exception as e:
-            self.failed.emit(str(e))
-
-
-class ImportWorker(QThread):
-    """Copy/move files into a destination with rename rules."""
-    progress = pyqtSignal(int, int, str)  # index, total, src
-    finished_ok = pyqtSignal(dict)
-    failed = pyqtSignal(str)
-
-    def __init__(
-        self,
-        sources,
-        dest_dir,
-        mode="copy",
-        rename_pattern="keep",
-        subfolder_by_date=True,
-    ):
-        super().__init__()
-        self.sources = list(sources)
-        self.dest_dir = dest_dir
-        self.mode = mode
-        self.rename_pattern = rename_pattern
-        self.subfolder_by_date = subfolder_by_date
-        self._cancel = False
-
-    def cancel(self):
-        self._cancel = True
-
-    def run(self):
-        try:
-            from catalog import import_photos
-
-            def cb(i, n, src):
-                self.progress.emit(i, n, src)
-
-            stats = import_photos(
-                self.sources,
-                self.dest_dir,
-                mode=self.mode,
-                rename_pattern=self.rename_pattern,
-                subfolder_by_date=self.subfolder_by_date,
-                progress_cb=cb,
-                should_cancel=lambda: self._cancel,
-            )
-            self.finished_ok.emit(stats)
         except Exception as e:
             self.failed.emit(str(e))

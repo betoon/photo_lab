@@ -1,8 +1,6 @@
 """
 Panorama to Video - Brian E. Toon, 2026, V2.6
 """
-from imaging import safe_pil_open
-
 import os
 import time
 import json
@@ -15,9 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 import cv2
 import numpy as np
 from PIL import Image, ImageTk, ImageDraw
-import logging
-
-log = logging.getLogger(__name__)
+Image.MAX_IMAGE_PIXELS = None
 
 # ---------------------------------------------------------------------------
 # Feature #1: detect available hardware-accelerated encoders at startup so the
@@ -50,7 +46,7 @@ def _probe_available_encoders() -> list[tuple[str, str]]:
             if codec_id in out:
                 available.append((codec_id, label))
     except Exception:
-        log.debug("_probe_available_encoders: non-critical failure, continuing", exc_info=True)
+        pass
     return available
 
 AVAILABLE_ENCODERS: list[tuple[str, str]] = _probe_available_encoders()
@@ -672,8 +668,7 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
             writer.release()
             if os.path.exists(temp_master_path):
                 try: os.remove(temp_master_path)
-                except Exception:
-                    log.debug("non-critical failure, continuing", exc_info=True)
+                except Exception: pass  # Fix #3
             raise RenderCancelled("Render cancelled by user.")
 
     def _apply_fade(frame, fc):
@@ -799,12 +794,10 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
             except Exception:
                 tail = "(log unavailable)"
             try: os.remove(stderr_log_path)
-            except Exception:
-                log.debug("non-critical failure, continuing", exc_info=True)
+            except Exception: pass  # Fix #3
             raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=tail)
         try: os.remove(stderr_log_path)
-        except Exception:
-            log.debug("non-critical failure, continuing", exc_info=True)
+        except Exception: pass  # Fix #3
         if progress_callback: progress_callback(1.0)
     except RenderCancelled:
         raise
@@ -816,8 +809,7 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
     finally:
         if os.path.exists(temp_master_path):
             try: os.remove(temp_master_path)
-            except Exception:
-                log.debug("non-critical failure, continuing", exc_info=True)
+            except Exception: pass  # Fix #3
     return output_path
 
 class PanoramaToVideoApp:
@@ -828,15 +820,18 @@ class PanoramaToVideoApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Brian E. Toon, 2026, V2.5")
+        self.root.title("PhotoLab — Panorama to Video")
         self.root.geometry("1180x760")
         self.root.minsize(880, 600)
+        self.root.configure(bg="#121212")
+        self._apply_photolab_theme()
         self.preview_running = False
         self.preview_img_cache = None
+        self._render_t0 = None
 
-        self.canvas = tk.Canvas(self.root, bg="#f8fafc", highlightthickness=0)
+        self.canvas = tk.Canvas(self.root, bg="#121212", highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = tk.Frame(self.canvas, bg="#f8fafc")
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#1a1a1a")
 
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
@@ -905,7 +900,7 @@ class PanoramaToVideoApp:
         self._custom_lut_full_path = None
         self.cancel_event = None
         self.rendering = False
-        self._preview_placeholder_img = ImageTk.PhotoImage(Image.new("RGB", (720, 180), "#e2e8f0"))
+        self._preview_placeholder_img = ImageTk.PhotoImage(Image.new("RGB", (720, 180), "#2a2a2a"))
         self._preview_thumb_img = None
         self.preview_display_size = None
         self.start_focus = None
@@ -1017,7 +1012,7 @@ class PanoramaToVideoApp:
             with open(SETTINGS_PATH, "w") as f:
                 json.dump(self._collect_settings(include_paths=True), f, indent=2)
         except Exception as e:
-            log.warning("Could not save session settings: %s", e)
+            print(f"Could not save session settings: {e}")
         self.root.destroy()
 
     def _load_session_settings(self):
@@ -1027,17 +1022,48 @@ class PanoramaToVideoApp:
                     d = json.load(f)
                 self._apply_settings(d)
             except Exception as e:
-                log.warning("Could not restore last session: %s", e)
+                print(f"Could not restore last session: {e}")
 
     def _on_canvas_configure(self, event):
         self.canvas.itemconfig(self.canvas_window, width=event.width)
 
+    def _apply_photolab_theme(self):
+        """Match PhotoLab dark UI (PyQt #121212 / #2a5080 accent)."""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        bg = "#1a1a1a"
+        bg2 = "#121212"
+        fg = "#ddd"
+        accent = "#2a5080"
+        style.configure(".", background=bg, foreground=fg, fieldbackground="#222",
+                        troughcolor="#2a2a2a", bordercolor="#2b2b2b")
+        style.configure("TFrame", background=bg)
+        style.configure("TLabel", background=bg, foreground=fg)
+        style.configure("TButton", background="#2a2a2a", foreground=fg, padding=6)
+        style.map("TButton",
+                  background=[("active", accent), ("disabled", "#333")],
+                  foreground=[("disabled", "#777")])
+        style.configure("TEntry", fieldbackground="#222", foreground=fg, insertcolor=fg)
+        style.configure("TCombobox", fieldbackground="#222", foreground=fg, background="#222")
+        style.map("TCombobox", fieldbackground=[("readonly", "#222")],
+                  foreground=[("readonly", fg)])
+        style.configure("TCheckbutton", background=bg, foreground=fg)
+        style.configure("TRadiobutton", background=bg, foreground=fg)
+        style.configure("Horizontal.TScale", background=bg, troughcolor="#2a2a2a")
+        style.configure("TProgressbar", background=accent, troughcolor="#2a2a2a",
+                        bordercolor="#2b2b2b", lightcolor=accent, darkcolor=accent)
+        style.configure("Vertical.TScrollbar", background="#2a2a2a", troughcolor=bg2,
+                        arrowcolor=fg)
+
     def _make_slider_row(self, parent, label, float_var, string_var, from_, to, slide_cmd):
         """Fix #8: factory that builds the label + Scale + Entry triplet used by
         every slider row so the pattern isn't copy-pasted 13 times."""
-        r = tk.Frame(parent, bg="#f8fafc")
+        r = tk.Frame(parent, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text=label, width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text=label, width=22, bg="#1a1a1a", fg="#ccc").pack(side="left")
         scale = ttk.Scale(r, from_=from_, to=to, variable=float_var,
                           command=slide_cmd, length=200)
         scale.pack(side="left", padx=8)
@@ -1049,32 +1075,32 @@ class PanoramaToVideoApp:
         self.scrollable_frame.grid_columnconfigure(0, weight=1, uniform="settingscol")
         self.scrollable_frame.grid_columnconfigure(1, weight=1, uniform="settingscol")
 
-        header_wrap = tk.Frame(self.scrollable_frame, bg="#5b9bd5")
+        header_wrap = tk.Frame(self.scrollable_frame, bg="#2a5080")
         header_wrap.grid(row=0, column=0, columnspan=2, sticky="ew")
-        header = tk.Label(header_wrap, text="Panorama To Video Conversion", font=("Segoe UI", 14, "bold"), bg="#cfe2f7", fg="#0b3d68", pady=8)
+        header = tk.Label(header_wrap, text="Panorama to Video", font=("Segoe UI", 14, "bold"), bg="#1e2a3a", fg="#9cf", pady=8)
         header.pack(fill="x", side="top")
-        tk.Frame(header_wrap, bg="#5b9bd5", height=2).pack(fill="x", side="top")
+        tk.Frame(header_wrap, bg="#2a5080", height=2).pack(fill="x", side="top")
 
-        f = tk.LabelFrame(self.scrollable_frame, text="Select Panorama Image", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        f = tk.LabelFrame(self.scrollable_frame, text="Select Panorama Image", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         f.grid(row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=5)
         ttk.Entry(f, textvariable=self.image_path, width=85).pack(side="left", padx=8, pady=6, fill="x", expand=True)
         ttk.Button(f, text="Browse...", command=self.browse_image).pack(side="left", padx=5)
 
-        out = tk.LabelFrame(self.scrollable_frame, text="Output Folder", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        out = tk.LabelFrame(self.scrollable_frame, text="Output Folder", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         out.grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=5)
-        r = tk.Frame(out, bg="#f8fafc")
+        r = tk.Frame(out, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=(6, 0))
         ttk.Entry(r, textvariable=self.output_folder, width=85).pack(side="left", fill="x", expand=True)
         ttk.Button(r, text="Browse...", command=self.browse_output_folder).pack(side="left", padx=5)
-        r2 = tk.Frame(out, bg="#f8fafc")
+        r2 = tk.Frame(out, bg="#1a1a1a")
         r2.pack(fill="x", padx=8, pady=(2, 6))
         ttk.Button(r2, text="Same as Source", command=self.use_source_as_output_folder).pack(side="left")
 
-        self.preview_label = ttk.Label(self.scrollable_frame, image=self._preview_placeholder_img, text="No image selected", compound="center", anchor="center", background="#f8fafc")
+        self.preview_label = ttk.Label(self.scrollable_frame, image=self._preview_placeholder_img, text="No image selected", compound="center", anchor="center", background="#1a1a1a")
         self.preview_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 2))
         self.preview_label.bind("<Button-1>", self.set_start_focus_from_preview)
 
-        focus_bar = tk.Frame(self.scrollable_frame, bg="#f8fafc")
+        focus_bar = tk.Frame(self.scrollable_frame, bg="#1a1a1a")
         focus_bar.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 4))
         ttk.Radiobutton(focus_bar, text="Click Sets Start", variable=self.focus_mode_var, value="Start").pack(side="left", padx=14)
         ttk.Radiobutton(focus_bar, text="Click Sets End", variable=self.focus_mode_var, value="End").pack(side="left", padx=14)
@@ -1082,112 +1108,112 @@ class PanoramaToVideoApp:
         ttk.Button(focus_bar, text="Clear Focus Points", command=self.clear_focus_points).pack(side="left", padx=14)
 
         # ---- Left column: Video Settings / Intro Zoom Out / Audio Track & Fades ----
-        s = tk.LabelFrame(self.scrollable_frame, text="Video Settings", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        s = tk.LabelFrame(self.scrollable_frame, text="Video Settings", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         s.grid(row=5, column=0, sticky="new", padx=8, pady=(5, 1))
 
         for label, var in [("Duration (seconds):", self.duration_var), ("Frame rate (fps):", self.fps_var)]:
-            r = tk.Frame(s, bg="#f8fafc")
+            r = tk.Frame(s, bg="#1a1a1a")
             r.pack(fill="x", padx=8, pady=2)
-            tk.Label(r, text=label, width=22, bg="#f8fafc").pack(side="left")
+            tk.Label(r, text=label, width=22, bg="#1a1a1a", fg="#ccc").pack(side="left")
             ttk.Entry(r, textvariable=var, width=10).pack(side="left")
 
-        r = tk.Frame(s, bg="#f8fafc")
+        r = tk.Frame(s, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="Resolution:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Resolution:", width=22, bg="#1a1a1a").pack(side="left")
         combo = ttk.Combobox(r, textvariable=self.resolution_var, values=list(self.RESOLUTION_PRESETS.keys()), state="readonly", width=20)
         combo.pack(side="left")
         combo.bind("<<ComboboxSelected>>", self._on_resolution_change)
         self.height_entry = ttk.Entry(r, textvariable=self.height_var, width=8, state="disabled")
         self.height_entry.pack(side="left", padx=10)
-        tk.Label(r, text="px", bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="px", bg="#1a1a1a").pack(side="left")
 
         for label, var, vals in [("Aspect ratio:", self.aspect_var, ["16:9","9:16","4:3","21:9","1:1"]),
                                  ("FFmpeg Encoder:", self.codec_var, ["libx264","libx265"])]:
-            r = tk.Frame(s, bg="#f8fafc")
+            r = tk.Frame(s, bg="#1a1a1a")
             r.pack(fill="x", padx=8, pady=2)
-            tk.Label(r, text=label, width=22, bg="#f8fafc").pack(side="left")
+            tk.Label(r, text=label, width=22, bg="#1a1a1a", fg="#ccc").pack(side="left")
             ttk.Combobox(r, textvariable=var, values=vals, state="readonly", width=12).pack(side="left")
 
-        intro = tk.LabelFrame(self.scrollable_frame, text="Intro Zoom Out", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        intro = tk.LabelFrame(self.scrollable_frame, text="Intro Zoom Out", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         intro.grid(row=6, column=0, sticky="new", padx=8, pady=(1, 1))
-        tk.Checkbutton(intro, text="Enable deep-point zoom out (starts at D, then widens)", variable=self.intro_zoom_var, bg="#f8fafc").pack(anchor="w", padx=8, pady=1)
+        tk.Checkbutton(intro, text="Enable deep-point zoom out (starts at D, then widens)", variable=self.intro_zoom_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#fff").pack(anchor="w", padx=8, pady=1)
 
         for label, fvar, svar, minv, maxv in [
             ("Deep zoom-out duration (sec):", self.intro_duration_float, self.intro_duration_var, 0.5, 30.0),
             ("Deep starting zoom (x):", self.intro_level_float, self.intro_level_var, 1.1, 8.0)
         ]:
-            r = tk.Frame(intro, bg="#f8fafc")
+            r = tk.Frame(intro, bg="#1a1a1a")
             r.pack(fill="x", padx=8, pady=1)
-            tk.Label(r, text=label, width=22, bg="#f8fafc").pack(side="left")
+            tk.Label(r, text=label, width=22, bg="#1a1a1a", fg="#ccc").pack(side="left")
             ttk.Scale(r, from_=minv, to=maxv, variable=fvar, command=lambda v, sv=svar: sv.set(f"{float(v):.2f}"), length=200).pack(side="left", padx=8)
             ttk.Entry(r, textvariable=svar, width=8).pack(side="left")
         ttk.Button(intro, text="Show Deep Start Frame", command=self.show_deep_start_frame).pack(anchor="w", padx=8, pady=(2, 4))
 
-        vfade = tk.LabelFrame(self.scrollable_frame, text="Video Fade In/Out", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        vfade = tk.LabelFrame(self.scrollable_frame, text="Video Fade In/Out", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         vfade.grid(row=7, column=0, sticky="new", padx=8, pady=(1, 5))
-        tk.Checkbutton(vfade, text="Fade in from black at start", variable=self.video_fade_in_var, bg="#f8fafc").pack(anchor="w", padx=8, pady=1)
-        r = tk.Frame(vfade, bg="#f8fafc")
+        tk.Checkbutton(vfade, text="Fade in from black at start", variable=self.video_fade_in_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#fff").pack(anchor="w", padx=8, pady=1)
+        r = tk.Frame(vfade, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=(0, 2))
-        tk.Label(r, text="Fade In Duration:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Fade In Duration:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Scale(r, from_=0.0, to=4.0, variable=self.video_fade_in_sec_var, command=self._on_video_fade_in_slide, length=200).pack(side="left", padx=8)
         ttk.Entry(r, textvariable=self.video_fade_in_string_var, width=8).pack(side="left")
 
-        tk.Checkbutton(vfade, text="Fade out to black at end", variable=self.video_fade_out_var, bg="#f8fafc").pack(anchor="w", padx=8, pady=1)
-        r = tk.Frame(vfade, bg="#f8fafc")
+        tk.Checkbutton(vfade, text="Fade out to black at end", variable=self.video_fade_out_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#fff").pack(anchor="w", padx=8, pady=1)
+        r = tk.Frame(vfade, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=(0, 2))
-        tk.Label(r, text="Fade Out Duration:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Fade Out Duration:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Scale(r, from_=0.0, to=5.0, variable=self.video_fade_out_sec_var, command=self._on_video_fade_out_slide, length=200).pack(side="left", padx=8)
         ttk.Entry(r, textvariable=self.video_fade_out_string_var, width=8).pack(side="left")
 
-        audio = tk.LabelFrame(self.scrollable_frame, text="Audio Track & Fades", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        audio = tk.LabelFrame(self.scrollable_frame, text="Audio Track & Fades", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         audio.grid(row=8, column=0, sticky="new", padx=8, pady=5)
-        tk.Checkbutton(audio, text="Audio fade in at start", variable=self.fade_in_var, bg="#f8fafc").pack(anchor="w", padx=8, pady=1)
-        r = tk.Frame(audio, bg="#f8fafc")
+        tk.Checkbutton(audio, text="Audio fade in at start", variable=self.fade_in_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#fff").pack(anchor="w", padx=8, pady=1)
+        r = tk.Frame(audio, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=(0, 2))
-        tk.Label(r, text="Fade In Duration:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Fade In Duration:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Scale(r, from_=0.0, to=4.0, variable=self.fade_in_sec_var, command=self._on_fade_in_slide, length=200).pack(side="left", padx=8)
         ttk.Entry(r, textvariable=self.fade_in_string_var, width=8).pack(side="left")
 
-        tk.Checkbutton(audio, text="Audio fade out at end", variable=self.fade_out_var, bg="#f8fafc").pack(anchor="w", padx=8, pady=1)
-        r = tk.Frame(audio, bg="#f8fafc")
+        tk.Checkbutton(audio, text="Audio fade out at end", variable=self.fade_out_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#fff").pack(anchor="w", padx=8, pady=1)
+        r = tk.Frame(audio, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=(0, 2))
-        tk.Label(r, text="Fade Out Duration:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Fade Out Duration:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Scale(r, from_=0.0, to=5.0, variable=self.fade_out_sec_var, command=self._on_fade_out_slide, length=200).pack(side="left", padx=8)
         ttk.Entry(r, textvariable=self.fade_out_string_var, width=8).pack(side="left")
 
-        r = tk.Frame(audio, bg="#f8fafc")
+        r = tk.Frame(audio, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="Audio Quality:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Audio Quality:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Combobox(r, textvariable=self.audio_bitrate_var, values=["64k", "128k", "192k", "256k", "320k"], state="readonly", width=12).pack(side="left")
 
-        r = tk.Frame(audio, bg="#f8fafc")
+        r = tk.Frame(audio, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
         ttk.Button(r, text="Add Music Track", command=self.browse_audio).pack(side="left", padx=5)
         self.sync_btn = ttk.Button(r, text="Sync Duration to Audio", command=self.sync_duration_to_audio, state="disabled")
         self.sync_btn.pack(side="left", padx=5)
-        ttk.Label(r, textvariable=self.audio_path, background="#f8fafc").pack(side="left", padx=10)
+        ttk.Label(r, textvariable=self.audio_path, background="#1a1a1a").pack(side="left", padx=10)
 
         # ---- Right column: Camera Motion / Film Look / Video Quality Calibration ----
-        kb = tk.LabelFrame(self.scrollable_frame, text="Camera Motion (Ken Burns)", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        kb = tk.LabelFrame(self.scrollable_frame, text="Camera Motion (Ken Burns)", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         kb.grid(row=5, column=1, sticky="new", padx=8, pady=5)
-        tk.Checkbutton(kb, text="Enable Ken Burns effect", variable=self.ken_burns_var, bg="#f8fafc").pack(anchor="w", padx=8, pady=2)
+        tk.Checkbutton(kb, text="Enable Ken Burns effect", variable=self.ken_burns_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#fff").pack(anchor="w", padx=8, pady=2)
 
-        r = tk.Frame(kb, bg="#f8fafc")
+        r = tk.Frame(kb, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="Motion Preset:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Motion Preset:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Combobox(r, textvariable=self.motion_preset_var, values=["Gentle Documentary", "Slow Reveal", "Dramatic Push-In", "Old Film Projector", "Social Media Reel"], state="readonly", width=20).pack(side="left")
         ttk.Button(r, text="Apply", command=self.apply_motion_preset).pack(side="left", padx=8)
         ttk.Button(r, text="Suggest Duration", command=self.suggest_duration_from_motion).pack(side="left", padx=8)
 
-        r = tk.Frame(kb, bg="#f8fafc")
+        r = tk.Frame(kb, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="Motion Style:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Motion Style:", width=22, bg="#1a1a1a").pack(side="left")
         self.motion_style_combo = ttk.Combobox(r, textvariable=self.ken_style_var, values=["Slow Zoom In", "Cinematic Drift", "Dramatic Push", "Subtle Push", "Zoom Out", "3D Drift"], state="readonly", width=18)
         self.motion_style_combo.pack(side="left")
 
-        r = tk.Frame(kb, bg="#f8fafc")
+        r = tk.Frame(kb, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="Easing Curve:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Easing Curve:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Combobox(r, textvariable=self.easing_var, values=["Smoothstep", "Cubic", "Exponential", "Bounce", "Elastic"], state="readonly", width=18).pack(side="left")
 
         self.zoom_scale, self.zoom_entry = self._make_slider_row(
@@ -1197,30 +1223,30 @@ class PanoramaToVideoApp:
             kb, "Motion Blur:", self.motion_blur_var, self.motion_blur_string_var,
             0.0, 0.8, self._on_motion_blur_slide)
 
-        tk.Checkbutton(kb, text="Reverse pan direction", variable=self.reverse_pan_var, bg="#f8fafc").pack(anchor="w", padx=8, pady=2)
+        tk.Checkbutton(kb, text="Reverse pan direction", variable=self.reverse_pan_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#fff").pack(anchor="w", padx=8, pady=2)
 
-        film = tk.LabelFrame(self.scrollable_frame, text="Film Look & Aging", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        film = tk.LabelFrame(self.scrollable_frame, text="Film Look & Aging", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         film.grid(row=6, column=1, sticky="new", padx=8, pady=5)
 
-        r = tk.Frame(film, bg="#f8fafc")
+        r = tk.Frame(film, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="Film Look:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Film Look:", width=22, bg="#1a1a1a").pack(side="left")
         self.cinematic_combo = ttk.Combobox(r, textvariable=self.cinematic_look_var, values=FILM_LOOK_CHOICES, state="readonly", width=20)
         self.cinematic_combo.pack(side="left")
 
-        r = tk.Frame(film, bg="#f8fafc")
+        r = tk.Frame(film, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Button(r, text="Load Custom LUT (.cube)...", command=self.browse_custom_lut).pack(side="left", padx=(0, 8))
-        ttk.Label(r, textvariable=self.custom_lut_path, background="#f8fafc").pack(side="left")
+        ttk.Label(r, textvariable=self.custom_lut_path, background="#1a1a1a").pack(side="left")
 
         self.look_strength_scale, self.look_strength_entry = self._make_slider_row(
             film, "Look Strength:", self.look_strength_var, self.look_strength_string_var,
             0.0, 1.0, self._on_look_strength_slide)
 
-        r = tk.Frame(film, bg="#f8fafc")
+        r = tk.Frame(film, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text="Film Damage:", width=22, bg="#f8fafc").pack(side="left")
+        tk.Label(r, text="Film Damage:", width=22, bg="#1a1a1a").pack(side="left")
         ttk.Combobox(r, textvariable=self.film_effect_var, values=FILM_EFFECT_CHOICES, state="readonly", width=20).pack(side="left")
 
         self.film_effect_strength_scale, self.film_effect_strength_entry = self._make_slider_row(
@@ -1241,7 +1267,7 @@ class PanoramaToVideoApp:
             film, "Vignette:", self.vignette_var, self.vignette_string_var,
             0.0, 1.0, self._on_vignette_slide)
 
-        video = tk.LabelFrame(self.scrollable_frame, text="Video Quality Calibration", bg="#f8fafc", fg="#1e40af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
+        video = tk.LabelFrame(self.scrollable_frame, text="Video Quality Calibration", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="groove", borderwidth=1)
         video.grid(row=7, column=1, sticky="new", padx=8, pady=5)
 
         self._make_slider_row(
@@ -1249,18 +1275,19 @@ class PanoramaToVideoApp:
             15, 35, self._on_crf_slide)
 
         # ---- Bottom: actions, progress, status (full width) ----
-        btns = tk.Frame(self.scrollable_frame, bg="#f8fafc")
+        btns = tk.Frame(self.scrollable_frame, bg="#1a1a1a")
         btns.grid(row=9, column=0, columnspan=2, pady=(10, 3))
         self.preview_btn = ttk.Button(btns, text="Live Canvas Preview", command=self.toggle_live_preview)
-        self.preview_btn.pack(side="left", padx=15)
-        ttk.Button(btns, text="Export Preview Frame", command=self.export_preview_frame).pack(side="left", padx=15)
-        ttk.Button(btns, text="Render 3 Sec Test", command=self.on_generate_test_clip).pack(side="left", padx=15)
+        self.preview_btn.pack(side="left", padx=10)
+        ttk.Button(btns, text="Refresh Still Preview", command=self._refresh_still_preview).pack(side="left", padx=10)
+        ttk.Button(btns, text="Export Preview Frame", command=self.export_preview_frame).pack(side="left", padx=10)
+        ttk.Button(btns, text="Render 3 Sec Test", command=self.on_generate_test_clip).pack(side="left", padx=10)
         self.generate_btn = ttk.Button(btns, text="Create Video File", command=self.on_generate)
-        self.generate_btn.pack(side="left", padx=15)
+        self.generate_btn.pack(side="left", padx=10)
         self.cancel_btn = ttk.Button(btns, text="Cancel Render", command=self.cancel_render, state="disabled")
-        self.cancel_btn.pack(side="left", padx=15)
+        self.cancel_btn.pack(side="left", padx=10)
 
-        btns2 = tk.Frame(self.scrollable_frame, bg="#f8fafc")
+        btns2 = tk.Frame(self.scrollable_frame, bg="#1a1a1a")
         btns2.grid(row=10, column=0, columnspan=2, pady=(0, 6))
         ttk.Button(btns2, text="Save Preset...", command=self.save_preset).pack(side="left", padx=15)
         ttk.Button(btns2, text="Load Preset...", command=self.load_preset).pack(side="left", padx=15)
@@ -1268,7 +1295,10 @@ class PanoramaToVideoApp:
         self.progress = ttk.Progressbar(self.scrollable_frame, mode="determinate", length=700)
         self.progress.grid(row=11, column=0, columnspan=2, pady=6, padx=20)
 
-        self.status_label = tk.Label(self.scrollable_frame, text="Ready", font=("Segoe UI", 10), bg="#f8fafc")
+        self.status_label = tk.Label(
+            self.scrollable_frame, text="Ready", font=("Segoe UI", 10),
+            bg="#1a1a1a", fg="#9cf",
+        )
         self.status_label.grid(row=12, column=0, columnspan=2, pady=4)
 
 
@@ -1304,15 +1334,15 @@ class PanoramaToVideoApp:
         if not path or not os.path.isfile(path):
             return
         try:
-            with safe_pil_open(path) as img:
-                img.thumbnail((720, 180))
-                self.preview_display_size = img.size
+            img = Image.open(path)
+            img.thumbnail((720, 180))
+            self.preview_display_size = img.size
             # Fix #2: draw overlay only once; previously it was applied twice,
             # causing circles and lines to be rendered on top of each other.
-                self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-                self.preview_label.config(image=self._preview_thumb_img, text="")
+            self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+            self.preview_label.config(image=self._preview_thumb_img, text="")
         except Exception:
-            log.debug("_refresh_still_preview: non-critical failure, continuing", exc_info=True)
+            pass
 
     def clear_focus_points(self):
         self.start_focus = None
@@ -1452,13 +1482,13 @@ class PanoramaToVideoApp:
         self.image_path.set(path)
         self.stop_live_preview()
         try:
-            with safe_pil_open(path) as img:
-                img.thumbnail((720, 180))
-                self.preview_display_size = img.size
-                self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-                self.preview_label.config(image=self._preview_thumb_img, text="")
+            img = Image.open(path)
+            img.thumbnail((720, 180))
+            self.preview_display_size = img.size
+            self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+            self.preview_label.config(image=self._preview_thumb_img, text="")
         except Exception:
-            log.debug("load_image_path: non-critical failure, continuing", exc_info=True)
+            pass
         if output_folder and os.path.isdir(output_folder):
             self.output_folder.set(output_folder)
         else:
@@ -1544,13 +1574,12 @@ class PanoramaToVideoApp:
         path = self.image_path.get().strip()
         if path and os.path.isfile(path):
             try:
-                with safe_pil_open(path) as img:
-                    img.thumbnail((720, 180))
-                    self.preview_display_size = img.size
-                    self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-                    self.preview_label.config(image=self._preview_thumb_img, text="")
-            except Exception:
-                log.debug("non-critical failure, continuing", exc_info=True)
+                img = Image.open(path)
+                img.thumbnail((720, 180))
+                self.preview_display_size = img.size
+                self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+                self.preview_label.config(image=self._preview_thumb_img, text="")
+            except Exception: pass  # Fix #3
 
     def _live_preview_next_frame(self):
         if not self.preview_running or self.preview_img_cache is None:
@@ -1617,7 +1646,7 @@ class PanoramaToVideoApp:
             self.root.after(33, self._live_preview_next_frame)
         except Exception as e:
             self.stop_live_preview()
-            log.debug("Preview clock cycle recovery exception: %s", e)
+            print(f"Preview clock cycle recovery exception: {e}")
 
     def export_preview_frame(self):
         path = self.image_path.get().strip()
@@ -1810,13 +1839,13 @@ class PanoramaToVideoApp:
             if "image_path" in d and d["image_path"] and os.path.isfile(d["image_path"]):
                 self.image_path.set(d["image_path"])
                 try:
-                    with safe_pil_open(d["image_path"]) as img:
-                        img.thumbnail((720, 180))
-                        self.preview_display_size = img.size
-                        self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
-                        self.preview_label.config(image=self._preview_thumb_img, text="")
+                    img = Image.open(d["image_path"])
+                    img.thumbnail((720, 180))
+                    self.preview_display_size = img.size
+                    self._preview_thumb_img = ImageTk.PhotoImage(self._draw_focus_overlay(img))
+                    self.preview_label.config(image=self._preview_thumb_img, text="")
                 except Exception:
-                    log.debug("_apply_settings: non-critical failure, continuing", exc_info=True)
+                    pass
             if "output_folder" in d and d["output_folder"] and os.path.isdir(d["output_folder"]):
                 self.output_folder.set(d["output_folder"])
             if "audio_path" in d and d["audio_path"] and os.path.isfile(d["audio_path"]):
@@ -1839,7 +1868,7 @@ class PanoramaToVideoApp:
 
             self._on_resolution_change()
         except Exception as e:
-            log.warning("Settings apply warning: %s", e)
+            print(f"Settings apply warning: {e}")
 
     def save_preset(self):
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("Preset JSON", "*.json"), ("All Files", "*.*")], initialfile="pano_preset.json")
@@ -1920,7 +1949,8 @@ class PanoramaToVideoApp:
         if not output_path: return
 
         self.progress["value"] = 0
-        self.status_label.config(text="Rendering 3 second test..." if test_clip else "Rendering Frame Elements...")
+        self._render_t0 = time.time()
+        self.status_label.config(text="Rendering 3 second test..." if test_clip else "Rendering…")
         self.cancel_event = threading.Event()
         self.rendering = True
         self.generate_btn.config(state="disabled")
@@ -1937,7 +1967,26 @@ class PanoramaToVideoApp:
         self.on_generate(test_clip=True)
 
     def _worker(self, path, output_path, cancel_event, test_clip=False):
-        def progress(p): self.root.after(0, lambda: self.progress.configure(value=p*100))
+        def progress(p):
+            p = float(p or 0)
+            eta_s = ""
+            t0 = self._render_t0
+            if t0 and p > 0.02:
+                elapsed = time.time() - t0
+                remain = elapsed * (1.0 - p) / p
+                if remain < 90:
+                    eta_s = f"  ·  ETA {int(remain)}s"
+                else:
+                    eta_s = f"  ·  ETA {remain / 60.0:.1f} min"
+            pct = int(p * 100)
+            msg = f"Rendering… {pct}%{eta_s}"
+
+            def _ui():
+                self.progress.configure(value=p * 100)
+                self.status_label.config(text=msg)
+
+            self.root.after(0, _ui)
+
         try:
             # Fix #7: build a RenderSettings instead of 30+ positional args.
             aspect_parts = self.aspect_var.get().split(":")
@@ -2060,9 +2109,17 @@ def main(argv=None):
     if args.title:
         root.title(args.title)
     else:
-        root.title("Panorama to Video — Brian E. Toon")
+        root.title("PhotoLab — Panorama to Video")
     if args.image:
         app.load_image_path(args.image, output_folder=args.output_folder)
+        try:
+            note = "Loaded image"
+            low = (args.image or "").replace("\\", "/").lower()
+            if "photolab_graded" in low or "photolab_grade" in low:
+                note = "Loaded graded still from PhotoLab Develop"
+            app.status_label.config(text=note)
+        except Exception:
+            pass
     elif args.output_folder and os.path.isdir(args.output_folder):
         app.output_folder.set(args.output_folder)
     if args.preset and os.path.isfile(args.preset):
@@ -2071,7 +2128,7 @@ def main(argv=None):
                 app._apply_settings(json.load(f))
             app.status_label.config(text=f"Preset loaded: {os.path.basename(args.preset)}")
         except Exception as e:
-            log.warning("Preset load failed: %s", e)
+            print(f"Preset load failed: {e}")
     root.mainloop()
 
 if __name__ == "__main__":
