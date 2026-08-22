@@ -1,21 +1,14 @@
-# PhotoLab User Manual
 
+## Preferences & photolab.ini
 
-## Nice-to-have tools
+**File → Preferences…** (`Ctrl+,`) edits the user config file:
 
-### Map (GPS)
-**Image → Map (GPS)…** lists geotagged photos and opens a Leaflet map in your browser.
+`~/.photolab/photolab.ini` (Windows: `%USERPROFILE%\.photolab\photolab.ini`)
 
-### Slideshow
-**Image → Slideshow…** fullscreen. Space = pause, arrows = prev/next, **K** = Ken Burns on/off, Esc = exit.
+Sections: paths (plugin, docs, lensfun, ffmpeg, catalog, thumbs, export, scripts), performance, UI, licensing, integrations.
 
-### Print / PDF
-**Image → Print / PDF…** (Ctrl+P) — paper size, orientation, system print or high-quality PDF. Uses the current Develop recipe (enable Soft Proof for paper simulation).
+Empty path values mean automatic defaults. Template: `photolab.ini.example` in the app folder.
 
-### Scripts
-**Image → Run Script…** runs `scripts/*.py` with `--path` and `--recipe` (JSON). See `scripts/README.md`.
+Environment overrides (optional): `PHOTOLAB_API_KEY`, `PHOTOLAB_SERIAL`, `PHOTOLAB_PLUGIN_DIR`, `PHOTOLAB_FFMPEG`, `PHOTOLAB_CATALOG_DB`, `PHOTOLAB_LENSFUN_DIR`.
 
-### Culling keyboard
-- **0–5** rating · **X** reject · **U** pick · **←/→** prev/next  
-Documented under **Help → Keyboard Shortcuts**.
-
+Do not commit real API keys or serial numbers to git.

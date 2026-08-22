@@ -279,6 +279,8 @@ class PhotoLab(QMainWindow):
         add_action(file_m, "Import Preset Folder…", self.load_preset_folder)
         add_action(file_m, "Save Preset… (JSON)", self.save_preset)
         file_m.addSeparator()
+        add_action(file_m, "Preferences…", self.show_preferences, "Ctrl+,")
+        file_m.addSeparator()
         add_action(file_m, "Print", enabled=False, shortcut="Ctrl+P")
         file_m.addSeparator()
         add_action(file_m, "E&xit", self.close, "Ctrl+Q")
@@ -1253,7 +1255,7 @@ class PhotoLab(QMainWindow):
         self._add_slider(v, "vibrance", "Vibrancy", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "saturation", "Saturation", -100.0, 100.0, 1, 0, 0.0)
 
-        # HSL / Color / B&W — full 8-channel panel (Lightroom-style)
+        # HSL / Color — full 8-channel panel (Lightroom-style)
         box, v = collapsible_group("HSL / Color", layout)
         self._build_hsl_panel(v)
 
@@ -2359,12 +2361,16 @@ class PhotoLab(QMainWindow):
             r.curve_lights, r.curve_highlights,
         )
         # HSL channel sliders
-        self._sync_all_hsl_sliders_from_recipe(r)
+        if hasattr(self, "_sync_all_hsl_sliders_from_recipe"):
+            self._sync_all_hsl_sliders_from_recipe(r)
         idx = int(getattr(r, "hsl_active_channel", 0) or 0)
         if "_hsl_hue" in self.sliders:
-            self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx] if r.hsl_hue else 0)
-            self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx] if r.hsl_sat else 0)
-            self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx] if r.hsl_lum else 0)
+            try:
+                self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx] if r.hsl_hue else 0)
+                self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx] if r.hsl_sat else 0)
+                self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx] if r.hsl_lum else 0)
+            except Exception:
+                pass
         if hasattr(self, "soft_proof_cb"):
             self.soft_proof_cb.blockSignals(True)
             self.soft_proof_cb.setChecked(r.soft_proof)
@@ -2475,7 +2481,6 @@ class PhotoLab(QMainWindow):
         self.sync_sliders_to_recipe()
         self.render_preview()
         self.statusBar().showMessage(f"Restored history #{index + 1}")
-
 
     def _build_hsl_panel(self, parent_layout):
         """Lightroom-style HSL: Hue / Saturation / Luminance / All for 8 channels."""
@@ -2627,14 +2632,35 @@ class PhotoLab(QMainWindow):
         if hasattr(self, "hsl_tabs"):
             self.hsl_tabs.setCurrentIndex(3)  # All
         self.statusBar().showMessage(f"HSL channel: {names[idx]}")
-
-    def _on_hsl_slider(self, which: str, value: float):
-        # Legacy single-slider path (if old keys still present)
+    def _on_hsl_channel(self, idx: int):
         if self.current_path is None:
             return
         r = self.recipes[self.current_path]
-        idx = int(getattr(r, "hsl_active_channel", 0) or 0)
-        self._on_hsl_channel_value(which, idx, value)
+        r.hsl_active_channel = idx
+        names = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
+        self.hsl_channel_label.setText(f"Channel: {names[idx]}")
+        # Load channel values into sliders
+        self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx])
+        self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx])
+        self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx])
+
+    def _on_hsl_slider(self, which: str, value: float):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        idx = r.hsl_active_channel
+        def replace(tup, i, v):
+            lst = list(tup)
+            lst[i] = v
+            return tuple(lst)
+        if which == "hue":
+            r.hsl_hue = replace(r.hsl_hue, idx, value)
+        elif which == "sat":
+            r.hsl_sat = replace(r.hsl_sat, idx, value)
+        else:
+            r.hsl_lum = replace(r.hsl_lum, idx, value)
+        self._schedule_history(f"HSL {which}")
+        self.render_timer.start()
 
     def _on_soft_proof(self, checked: bool):
         if self.current_path is None:
@@ -4216,10 +4242,165 @@ class PhotoLab(QMainWindow):
         self.export_worker.failed.connect(lambda e: self.statusBar().showMessage(f"Export failed: {e}"))
         self.export_worker.start()
 
+
+
+    def show_preferences(self):
+        """Edit ~/.photolab/photolab.ini paths and options."""
+        from PyQt6.QtWidgets import (
+            QDialog, QFormLayout, QLineEdit, QSpinBox, QCheckBox,
+            QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QPushButton,
+            QTabWidget, QWidget, QVBoxLayout, QMessageBox,
+        )
+        from config import get_config, reload_config, user_ini_path
+
+        cfg = get_config()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Preferences")
+        dlg.resize(520, 420)
+        root = QVBoxLayout(dlg)
+        tabs = QTabWidget()
+        root.addWidget(tabs)
+
+        def path_row(parent_form, label, key, is_file=False):
+            row = QHBoxLayout()
+            edit = QLineEdit(cfg.path(key))
+            edit.setPlaceholderText("(auto)")
+            btn = QPushButton("…")
+            btn.setFixedWidth(32)
+
+            def browse():
+                if is_file:
+                    p, _ = QFileDialog.getOpenFileName(dlg, label, edit.text() or "")
+                else:
+                    p = QFileDialog.getExistingDirectory(dlg, label, edit.text() or "")
+                if p:
+                    edit.setText(p)
+
+            btn.clicked.connect(browse)
+            row.addWidget(edit, 1)
+            row.addWidget(btn)
+            parent_form.addRow(label, row)
+            return edit
+
+        # Paths tab
+        paths_w = QWidget()
+        pf = QFormLayout(paths_w)
+        e_plugin = path_row(pf, "Plugin / presets folder", "plugin_dir")
+        e_docs = path_row(pf, "Docs folder", "docs_dir")
+        e_lensfun = path_row(pf, "Lensfun folder", "lensfun_dir")
+        e_ffmpeg = path_row(pf, "ffmpeg executable", "ffmpeg", is_file=True)
+        e_catalog = path_row(pf, "Catalog database", "catalog_db", is_file=True)
+        e_thumbs = path_row(pf, "Thumb cache folder", "thumb_cache")
+        e_export = path_row(pf, "Default export folder", "export_default_dir")
+        e_scripts = path_row(pf, "Scripts folder", "scripts_dir")
+        tabs.addTab(paths_w, "Paths")
+
+        # Performance
+        perf_w = QWidget()
+        pr = QFormLayout(perf_w)
+        sp_workers = QSpinBox()
+        sp_workers.setRange(1, 16)
+        sp_workers.setValue(cfg.get_int("performance", "max_raw_workers", 2))
+        pr.addRow("Max concurrent RAW workers", sp_workers)
+        sp_proxy = QSpinBox()
+        sp_proxy.setRange(400, 8000)
+        sp_proxy.setValue(cfg.get_int("performance", "proxy_max_dimension", 1600))
+        pr.addRow("Proxy max dimension (px)", sp_proxy)
+        cb_16 = QCheckBox("Prefer 16-bit pipeline where supported")
+        cb_16.setChecked(cfg.get_bool("performance", "use_16bit_pipeline", False))
+        pr.addRow(cb_16)
+        tabs.addTab(perf_w, "Performance")
+
+        # UI
+        ui_w = QWidget()
+        ur = QFormLayout(ui_w)
+        cb_remember = QCheckBox("Remember last folder")
+        cb_remember.setChecked(cfg.get_bool("ui", "remember_last_folder", True))
+        ur.addRow(cb_remember)
+        e_last = QLineEdit(cfg.get("ui", "last_folder", ""))
+        ur.addRow("Last folder", e_last)
+        e_updates = QLineEdit(cfg.get("ui", "check_for_updates_url", ""))
+        ur.addRow("Updates URL", e_updates)
+        tabs.addTab(ui_w, "UI")
+
+        # Licensing / integrations (masked-ish)
+        sec_w = QWidget()
+        sf = QFormLayout(sec_w)
+        e_serial = QLineEdit(cfg.get("licensing", "serial", ""))
+        e_serial.setEchoMode(QLineEdit.EchoMode.Password)
+        e_email = QLineEdit(cfg.get("licensing", "customer_email", ""))
+        e_api = QLineEdit(cfg.get("integrations", "api_key", ""))
+        e_api.setEchoMode(QLineEdit.EchoMode.Password)
+        e_endpoint = QLineEdit(cfg.get("integrations", "api_endpoint", ""))
+        sf.addRow("Serial", e_serial)
+        sf.addRow("Customer email", e_email)
+        sf.addRow("API key", e_api)
+        sf.addRow("API endpoint", e_endpoint)
+        hint = QLabel(
+            f"Saved to:\n{user_ini_path()}\n\n"
+            "Env overrides: PHOTOLAB_API_KEY, PHOTOLAB_SERIAL, PHOTOLAB_PLUGIN_DIR, …"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#888; font-size:11px;")
+        sf.addRow(hint)
+        tabs.addTab(sec_w, "License / API")
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        root.addWidget(buttons)
+
+        def on_save():
+            cfg.set("paths", "plugin_dir", e_plugin.text().strip())
+            cfg.set("paths", "docs_dir", e_docs.text().strip())
+            cfg.set("paths", "lensfun_dir", e_lensfun.text().strip())
+            cfg.set("paths", "ffmpeg", e_ffmpeg.text().strip())
+            cfg.set("paths", "catalog_db", e_catalog.text().strip())
+            cfg.set("paths", "thumb_cache", e_thumbs.text().strip())
+            cfg.set("paths", "export_default_dir", e_export.text().strip())
+            cfg.set("paths", "scripts_dir", e_scripts.text().strip())
+            cfg.set("performance", "max_raw_workers", sp_workers.value())
+            cfg.set("performance", "proxy_max_dimension", sp_proxy.value())
+            cfg.set("performance", "use_16bit_pipeline", "true" if cb_16.isChecked() else "false")
+            cfg.set("ui", "remember_last_folder", "true" if cb_remember.isChecked() else "false")
+            cfg.set("ui", "last_folder", e_last.text().strip())
+            cfg.set("ui", "check_for_updates_url", e_updates.text().strip())
+            cfg.set("licensing", "serial", e_serial.text().strip())
+            cfg.set("licensing", "customer_email", e_email.text().strip())
+            cfg.set("integrations", "api_key", e_api.text().strip())
+            cfg.set("integrations", "api_endpoint", e_endpoint.text().strip())
+            path = cfg.save_user()
+            reload_config()
+            self.log(f"Preferences saved → {path}")
+            self.statusBar().showMessage(f"Preferences saved → {path}")
+            QMessageBox.information(
+                dlg, "Preferences",
+                f"Saved:\n{path}\n\nSome path changes apply on next catalog open or restart.",
+            )
+            dlg.accept()
+
+        buttons.accepted.connect(on_save)
+        buttons.rejected.connect(dlg.reject)
+        dlg.exec()
+
+    def _preset_start_dir(self) -> str:
+        """Default folder for Load/Save Preset dialogs (plugin/)."""
+        try:
+            from app_paths import ensure_plugin_dir
+            return ensure_plugin_dir()
+        except Exception:
+            d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugin")
+            try:
+                os.makedirs(d, exist_ok=True)
+            except Exception:
+                pass
+            return d if os.path.isdir(d) else ""
+
     def save_preset(self):
         if self.current_path is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Save Preset", "preset.json", "JSON (*.json)")
+        start = os.path.join(self._preset_start_dir(), "preset.json")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Preset", start, "JSON (*.json)")
         if path:
             try:
                 self.recipes[self.current_path].save_json(path)
@@ -4234,7 +4415,7 @@ class PhotoLab(QMainWindow):
         path, selected_filter = QFileDialog.getOpenFileName(
             self,
             "Load Preset",
-            "",
+            self._preset_start_dir(),
             "All Presets (*.xmp *.json);;Lightroom XMP (*.xmp);;PhotoLab JSON (*.json);;All (*.*)",
         )
         if not path:
@@ -4255,7 +4436,9 @@ class PhotoLab(QMainWindow):
         if self.current_path is None:
             QMessageBox.information(self, "Import Presets", "Open an image first.")
             return
-        folder = QFileDialog.getExistingDirectory(self, "Choose preset folder (XMP/JSON)")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose preset folder (XMP/JSON)", self._preset_start_dir()
+        )
         if not folder:
             return
         files = list_preset_files(folder)

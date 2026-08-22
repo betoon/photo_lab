@@ -35,6 +35,13 @@ def resource_path(*parts: str) -> str:
 
 def docs_dir() -> str:
     """User / developer manuals directory."""
+    try:
+        from config import get_config
+        override = get_config().path("docs_dir")
+        if override and os.path.isdir(override):
+            return override
+    except Exception:
+        pass
     candidates = [
         resource_path("docs"),
         resource_path(),  # manuals may sit next to the binary
@@ -48,6 +55,19 @@ def docs_dir() -> str:
 
 def plugin_dir() -> str:
     """JSON / Lightroom XMP preset folder shipped with the app."""
+    try:
+        from config import get_config
+        override = get_config().path("plugin_dir")
+        if override and os.path.isdir(override):
+            return override
+        if override:
+            try:
+                os.makedirs(override, exist_ok=True)
+                return override
+            except OSError:
+                pass
+    except Exception:
+        pass
     candidates = [
         resource_path("plugin"),
         os.path.join(os.getcwd(), "plugin"),
@@ -204,3 +224,36 @@ def log_dir() -> str:
     except Exception:
         log.debug("log_dir: non-critical failure, continuing", exc_info=True)
     return d
+
+
+def ffmpeg_path() -> str:
+    """ffmpeg executable: config → PATH → empty."""
+    try:
+        from config import get_config
+        override = get_config().path("ffmpeg")
+        if override and os.path.isfile(override):
+            return override
+    except Exception:
+        pass
+    import shutil
+    found = shutil.which("ffmpeg")
+    return found or ""
+
+
+def lensfun_dir() -> Optional[str]:
+    """Lensfun database directory if configured or discovered next to the app."""
+    try:
+        from config import get_config
+        override = get_config().path("lensfun_dir")
+        if override and os.path.isdir(override):
+            return override
+    except Exception:
+        pass
+    for c in (
+        resource_path("lensfun"),
+        os.path.join(os.getcwd(), "lensfun"),
+        os.path.join(os.path.expanduser("~"), ".photolab", "lensfun"),
+    ):
+        if os.path.isdir(c):
+            return c
+    return None
