@@ -247,8 +247,19 @@ class SliderRow(QWidget):
 
 
 class _ToneCurveCanvas(QWidget):
-    """Interactive parametric curve graph (5 control points)."""
+    """Interactive curve graph: parametric 5-region handles (channel="param")
+    plus free point curves for Luma/R/G/B (double-click to add/remove
+    points, drag to move)."""
     curveChanged = pyqtSignal(float, float, float, float, float)
+    pointCurveChanged = pyqtSignal(str, list)  # channel key, [[x,y],...]
+
+    CHANNEL_COLORS = {
+        "param": QColor(120, 180, 255),
+        "luma": QColor(220, 220, 220),
+        "r": QColor(230, 90, 90),
+        "g": QColor(90, 200, 100),
+        "b": QColor(90, 140, 240),
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -256,16 +267,63 @@ class _ToneCurveCanvas(QWidget):
         self.setMinimumWidth(200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.values = [0.0, 0.0, 0.0, 0.0, 0.0]
+        self.point_curves = {
+            "luma": [[0.0, 0.0], [1.0, 1.0]],
+            "r": [[0.0, 0.0], [1.0, 1.0]],
+            "g": [[0.0, 0.0], [1.0, 1.0]],
+            "b": [[0.0, 0.0], [1.0, 1.0]],
+        }
+        self.channel = "param"
         self._drag_idx = None
         self.setMouseTracking(True)
+        self.setToolTip(
+            "Parametric: drag the 5 region handles (or use the sliders below).\n"
+            "Luma/R/G/B: drag points; double-click empty area to add; "
+            "double-click a point (not endpoint) to remove."
+        )
+
+    def set_channel(self, key: str):
+        if key in ("param", "luma", "r", "g", "b"):
+            self.channel = key
+            self._drag_idx = None
+            self.update()
 
     def set_values(self, shadows, darks, mids, lights, highlights):
         self.values = [float(shadows), float(darks), float(mids), float(lights), float(highlights)]
         self.update()
 
+    def set_point_curve(self, key: str, points: list):
+        if key not in self.point_curves:
+            return
+        pts = []
+        for p in points or []:
+            try:
+                pts.append([float(p[0]), float(p[1])])
+            except Exception:
+                pass
+        if len(pts) < 2:
+            pts = [[0.0, 0.0], [1.0, 1.0]]
+        pts = sorted(pts, key=lambda t: t[0])
+        self.point_curves[key] = pts
+        self.update()
+
+    def reset_current(self):
+        if self.channel == "param":
+            self.values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            self.curveChanged.emit(*self.values)
+        else:
+            self.point_curves[self.channel] = [[0.0, 0.0], [1.0, 1.0]]
+            self._emit_points()
+        self.update()
+
+    def _margin(self):
+        return 12
+
     def _points(self):
+        """Parametric (channel=='param') handle positions — kept as its own
+        method name for compatibility with the slider-driven paint path."""
         w, h = self.width(), self.height()
-        margin = 12
+        margin = self._margin()
         xs = [0.0, 0.25, 0.5, 0.75, 1.0]
         pts = []
         for i, xnorm in enumerate(xs):
@@ -275,11 +333,26 @@ class _ToneCurveCanvas(QWidget):
             pts.append(QPoint(int(x), int(y)))
         return pts
 
+    def _curve_widget_pts(self, key):
+        w, h = self.width(), self.height()
+        margin = self._margin()
+        pts = []
+        for x, y in self.point_curves.get(key, [[0, 0], [1, 1]]):
+            px = margin + float(x) * (w - 2 * margin)
+            py = margin + (1.0 - float(y)) * (h - 2 * margin)
+            pts.append(QPoint(int(px), int(py)))
+        return pts
+
+    def _emit_points(self):
+        key = self.channel
+        if key in self.point_curves:
+            self.pointCurveChanged.emit(key, [list(p) for p in self.point_curves[key]])
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        margin = 12
+        margin = self._margin()
         painter.fillRect(self.rect(), QColor("#1a1a1a"))
         painter.setPen(QPen(QColor(45, 45, 45), 1))
         for i in range(1, 4):
@@ -289,18 +362,29 @@ class _ToneCurveCanvas(QWidget):
             painter.drawLine(margin, int(y), w - margin, int(y))
         painter.setPen(QPen(QColor(70, 70, 70), 1, Qt.PenStyle.DashLine))
         painter.drawLine(margin, h - margin, w - margin, margin)
-        pts = self._points()
-        painter.setPen(QPen(QColor(120, 180, 255), 2))
+
+        if self.channel == "param":
+            pts = self._points()
+            color = self.CHANNEL_COLORS["param"]
+        else:
+            pts = self._curve_widget_pts(self.channel)
+            color = self.CHANNEL_COLORS.get(self.channel, QColor(200, 200, 200))
+
+        painter.setPen(QPen(color, 2))
         for i in range(len(pts) - 1):
             painter.drawLine(pts[i], pts[i + 1])
         for i, p in enumerate(pts):
-            painter.setBrush(QBrush(QColor(100, 160, 255) if i == self._drag_idx else QColor(80, 140, 230)))
+            painter.setBrush(QBrush(color.lighter(120) if i == self._drag_idx else color))
             painter.setPen(QPen(QColor(220, 220, 220), 1))
             painter.drawEllipse(p, 6, 6)
+        painter.setPen(QColor(160, 160, 160))
+        painter.drawText(margin, h - 2, self.channel.upper())
         painter.end()
 
     def mousePressEvent(self, e):
-        pts = self._points()
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        pts = self._points() if self.channel == "param" else self._curve_widget_pts(self.channel)
         pos = e.position().toPoint()
         for i, p in enumerate(pts):
             if (pos - p).manhattanLength() < 14:
@@ -308,17 +392,60 @@ class _ToneCurveCanvas(QWidget):
                 self.update()
                 return
 
+    def mouseDoubleClickEvent(self, e):
+        if self.channel == "param":
+            return
+        pos = e.position().toPoint()
+        pts_w = self._curve_widget_pts(self.channel)
+        for i, p in enumerate(pts_w):
+            if (pos - p).manhattanLength() < 14:
+                pts = self.point_curves[self.channel]
+                if 0 < i < len(pts) - 1:
+                    pts.pop(i)
+                    self._emit_points()
+                    self.update()
+                return
+        w, h = self.width(), self.height()
+        margin = self._margin()
+        xn = max(0.0, min(1.0, (e.position().x() - margin) / max(w - 2 * margin, 1)))
+        yn = max(0.0, min(1.0, 1.0 - (e.position().y() - margin) / max(h - 2 * margin, 1)))
+        pts = self.point_curves[self.channel]
+        pts.append([xn, yn])
+        pts.sort(key=lambda t: t[0])
+        self._emit_points()
+        self.update()
+
     def mouseMoveEvent(self, e):
         if self._drag_idx is None:
             return
         h = self.height()
-        margin = 12
-        ynorm = max(0.02, min(0.98, (e.position().y() - margin) / max(h - 2 * margin, 1)))
-        base = [0.0, 0.25, 0.5, 0.75, 1.0][self._drag_idx]
-        val = max(-100.0, min(100.0, ((1.0 - ynorm) - base) / 0.45 * 100.0))
-        self.values[self._drag_idx] = val
-        self.update()
-        self.curveChanged.emit(*self.values)
+        w = self.width()
+        margin = self._margin()
+        if self.channel == "param":
+            ynorm = max(0.02, min(0.98, (e.position().y() - margin) / max(h - 2 * margin, 1)))
+            base = [0.0, 0.25, 0.5, 0.75, 1.0][self._drag_idx]
+            val = max(-100.0, min(100.0, ((1.0 - ynorm) - base) / 0.45 * 100.0))
+            self.values[self._drag_idx] = val
+            self.update()
+            self.curveChanged.emit(*self.values)
+        else:
+            pts = self.point_curves[self.channel]
+            idx = self._drag_idx
+            if idx < 0 or idx >= len(pts):
+                return
+            xn = max(0.0, min(1.0, (e.position().x() - margin) / max(w - 2 * margin, 1)))
+            yn = max(0.0, min(1.0, 1.0 - (e.position().y() - margin) / max(h - 2 * margin, 1)))
+            if idx == 0:
+                xn = 0.0
+            elif idx == len(pts) - 1:
+                xn = 1.0
+            else:
+                lo = pts[idx - 1][0] + 0.01
+                hi = pts[idx + 1][0] - 0.01
+                xn = max(lo, min(hi, xn))
+            pts[idx] = [xn, yn]
+            self.update()
+            self._emit_points()
 
     def mouseReleaseEvent(self, e):
         self._drag_idx = None
@@ -326,8 +453,12 @@ class _ToneCurveCanvas(QWidget):
 
 
 class ToneCurveWidget(QWidget):
-    """Parametric tone curve + region sliders (Lightroom-style Highlights/Lights/Darks/Shadows)."""
+
+    """Parametric tone curve (graph handles + region sliders, Lightroom-style
+    Highlights/Lights/Darks/Shadows) plus free point curves for Luma/R/G/B,
+    switchable via the channel buttons above the graph."""
     curveChanged = pyqtSignal(float, float, float, float, float)
+    pointCurveChanged = pyqtSignal(str, list)  # channel key, [[x,y],...]
 
     _REGION_LABELS = (
         ("Highlights", 4),
@@ -335,6 +466,7 @@ class ToneCurveWidget(QWidget):
         ("Darks", 1),
         ("Shadows", 0),
     )
+    _CHANNELS = (("Param", "param"), ("Luma", "luma"), ("R", "r"), ("G", "g"), ("B", "b"))
 
     def __init__(self):
         super().__init__()
@@ -345,8 +477,25 @@ class ToneCurveWidget(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
 
+        ch_row = QHBoxLayout()
+        self._channel_buttons = []
+        for label, key in self._CHANNELS:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(key == "param")
+            btn.setMaximumWidth(48)
+            btn.clicked.connect(lambda checked=False, k=key: self._on_channel_button(k))
+            ch_row.addWidget(btn)
+            self._channel_buttons.append((btn, key))
+        reset_btn = QPushButton("Reset")
+        reset_btn.setMaximumWidth(52)
+        reset_btn.clicked.connect(lambda: self.canvas.reset_current())
+        ch_row.addWidget(reset_btn)
+        lay.addLayout(ch_row)
+
         self.canvas = _ToneCurveCanvas()
         self.canvas.curveChanged.connect(self._on_canvas)
+        self.canvas.pointCurveChanged.connect(self.pointCurveChanged)
         lay.addWidget(self.canvas)
 
         region_lbl = QLabel("Region")
@@ -421,6 +570,21 @@ class ToneCurveWidget(QWidget):
         self.values = [float(shadows), float(darks), float(mids), float(lights), float(highlights)]
         self.canvas.set_values(*self.values)
         self._sync_sliders_from_values()
+
+    def _on_channel_button(self, key):
+        for btn, k in self._channel_buttons:
+            btn.setChecked(k == key)
+        self.canvas.set_channel(key)
+
+    def set_channel(self, key: str):
+        """Programmatically switch the visible channel (e.g. on image change)."""
+        self._on_channel_button(key)
+
+    def set_point_curve(self, key: str, points: list):
+        self.canvas.set_point_curve(key, points)
+
+    def reset_current(self):
+        self.canvas.reset_current()
 
 
 class ImageCanvas(QWidget):

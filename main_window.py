@@ -390,7 +390,17 @@ class PhotoLab(QMainWindow):
 
 
     def _manual_path(self, name: str) -> str:
-        """Resolve docs/*.md next to the app or cwd."""
+        """Resolve docs/*.md — prefers app_paths.manual_file() (respects a
+        configured docs_dir override and packaged/frozen-app resource
+        paths), falling back to simple relative-to-source-tree candidates
+        for the plain "run from a checkout" case."""
+        try:
+            from app_paths import manual_file
+            found = manual_file(name)
+            if found:
+                return found
+        except Exception:
+            log.debug("_manual_path: manual_file() lookup failed", exc_info=True)
         candidates = [
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", name),
             os.path.join(os.getcwd(), "docs", name),
@@ -1218,6 +1228,7 @@ class PhotoLab(QMainWindow):
         box, v = collapsible_group("Tone Curve", layout)
         self.tone_curve = ToneCurveWidget()
         self.tone_curve.curveChanged.connect(self.on_curve_changed)
+        self.tone_curve.pointCurveChanged.connect(self.on_point_curve_changed)
         v.addWidget(self.tone_curve)
         self._add_slider(v, "gamma", "Gamma", 0.3, 2.5, 0.05, 2, 1.0)
 
@@ -2428,6 +2439,10 @@ class PhotoLab(QMainWindow):
             r.curve_shadows, r.curve_darks, r.curve_mids,
             r.curve_lights, r.curve_highlights,
         )
+        self.tone_curve.set_point_curve("luma", getattr(r, "curve_points", None) or [])
+        self.tone_curve.set_point_curve("r", getattr(r, "curve_r_points", None) or [])
+        self.tone_curve.set_point_curve("g", getattr(r, "curve_g_points", None) or [])
+        self.tone_curve.set_point_curve("b", getattr(r, "curve_b_points", None) or [])
         # HSL panel — all 8 bands, all three channels
         if hasattr(self, "hsl_panel"):
             self.hsl_panel.set_values(r.hsl_hue, r.hsl_sat, r.hsl_lum)
@@ -2595,6 +2610,23 @@ class PhotoLab(QMainWindow):
         r.curve_lights = lights
         r.curve_highlights = highlights
         self.render_timer.start()
+
+    def on_point_curve_changed(self, channel_key: str, points: list):
+        """Luma/R/G/B point-curve edit from the Tone Curve graph."""
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        field_map = {
+            "luma": "curve_points",
+            "r": "curve_r_points",
+            "g": "curve_g_points",
+            "b": "curve_b_points",
+        }
+        field = field_map.get(channel_key)
+        if field is not None:
+            setattr(r, field, points)
+            self._schedule_history(f"Tone curve ({channel_key})")
+            self.render_timer.start()
 
     def on_wb_as_shot(self, checked):
         if self.current_path is None:

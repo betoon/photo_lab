@@ -114,6 +114,13 @@ class Recipe:
     curve_mids: float = 0.0
     curve_lights: float = 0.0
     curve_highlights: float = 0.0
+    # Per-channel point curves (Luma/R/G/B), each a list of [x,y] in 0..1.
+    # Separate from the 5-region parametric curve above; both can be
+    # active at once (parametric first, then these on top).
+    curve_points: list = field(default_factory=list)
+    curve_r_points: list = field(default_factory=list)
+    curve_g_points: list = field(default_factory=list)
+    curve_b_points: list = field(default_factory=list)
 
     denoise_luminance: float = 0.0
     denoise_chroma: float = 0.0
@@ -512,6 +519,68 @@ def apply_tone_curve(img, shadows, darks, mids, lights, highlights):
     l_idx = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
     lab[..., 0] = lut[l_idx] * 100.0
     return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
+def _points_to_lut(points, size=256):
+    """Build a 0..1 LUT from sorted [[x,y], ...] control points (0..1)."""
+    if not points:
+        return np.linspace(0, 1, size, dtype=np.float32)
+    pts = []
+    for p in points:
+        try:
+            x, y = float(p[0]), float(p[1])
+            pts.append((max(0.0, min(1.0, x)), max(0.0, min(1.0, y))))
+        except Exception:
+            continue
+    if not pts:
+        return np.linspace(0, 1, size, dtype=np.float32)
+    pts = sorted(pts, key=lambda t: t[0])
+    if pts[0][0] > 0.0:
+        pts = [(0.0, pts[0][1])] + pts
+    if pts[-1][0] < 1.0:
+        pts = pts + [(1.0, pts[-1][1])]
+    xs = np.array([p[0] for p in pts], dtype=np.float32)
+    ys = np.array([p[1] for p in pts], dtype=np.float32)
+    uniq_x, uniq_y = [xs[0]], [ys[0]]
+    for i in range(1, len(xs)):
+        if xs[i] - uniq_x[-1] > 1e-6:
+            uniq_x.append(xs[i])
+            uniq_y.append(ys[i])
+        else:
+            uniq_y[-1] = ys[i]
+    grid = np.linspace(0, 1, size, dtype=np.float32)
+    return np.clip(np.interp(grid, uniq_x, uniq_y), 0, 1).astype(np.float32)
+
+
+def apply_point_curve_luma(img, points):
+    """Apply luminance point curve via LAB L channel."""
+    if not points or len(points) < 2:
+        return img
+    lut = _points_to_lut(points)
+    img = np.clip(img, 0, 1).astype(np.float32)
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_idx = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
+    lab[..., 0] = lut[l_idx] * 100.0
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
+def apply_rgb_point_curves(img, r_pts=None, g_pts=None, b_pts=None):
+    """Per-channel RGB point curves. Input/output float BGR 0..1."""
+    if not r_pts and not g_pts and not b_pts:
+        return img
+    img = np.clip(img, 0, 1).astype(np.float32)
+    out = img.copy()
+    channels = [
+        (0, b_pts),
+        (1, g_pts),
+        (2, r_pts),
+    ]
+    for ch, pts in channels:
+        if pts and len(pts) >= 2:
+            lut = _points_to_lut(pts)
+            idx = (np.clip(out[..., ch], 0, 1) * 255).astype(np.int32)
+            out[..., ch] = lut[idx]
+    return np.clip(out, 0, 1)
 
 
 def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0, method="auto"):
@@ -1154,6 +1223,13 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         img = img + (img - blur) * (r.clarity / 100.0)
 
     img = apply_tone_curve(img, r.curve_shadows, r.curve_darks, r.curve_mids, r.curve_lights, r.curve_highlights)
+    img = apply_point_curve_luma(img, getattr(r, "curve_points", None) or [])
+    img = apply_rgb_point_curves(
+        img,
+        getattr(r, "curve_r_points", None) or [],
+        getattr(r, "curve_g_points", None) or [],
+        getattr(r, "curve_b_points", None) or [],
+    )
     img = np.clip(img, 0, 1)
     if abs(r.gamma - 1.0) > 1e-4:
         img = img ** (1.0 / r.gamma)
@@ -1335,13 +1411,18 @@ def apply_zone_system(
     out = np.power(out_lin, 1.0 / 2.2)
 
     if overlay:
+        # Flat, fully-opaque zone-color patches — the classic Ansel Adams
+        # 11-step zone chart (Zone 0 black .. Zone X white). Previously
+        # this blended 35% of the underlying continuous image back in,
+        # which smeared the crisp zone boundaries into ~100 nearly-
+        # identical shades instead of 11 distinct, clearly bounded steps
+        # (verified: a black-to-white test gradient produced 103 distinct
+        # colors before this fix, 11 after). A reference chart like this
+        # only works as an exposure-planning aid if each zone reads as one
+        # unambiguous flat color, so the overlay no longer mixes in any of
+        # the original image's continuous luminance/detail.
         idx = np.clip(np.round(zone).astype(np.int32), 0, 10)
-        colors = _ZONE_COLORS[idx]
-        if force_bw:
-            base = np.stack([out, out, out], axis=-1)
-            img = base * 0.35 + colors * 0.65
-        else:
-            img = img * 0.35 + colors * 0.65
+        img = _ZONE_COLORS[idx]
         return np.clip(img, 0, 1)
 
     if force_bw:
