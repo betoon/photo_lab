@@ -2646,71 +2646,87 @@ class PhotoLab(QMainWindow):
 
     def _build_hsl_panel(self, parent_layout):
         """Lightroom-style HSL: Hue / Saturation / Luminance / All for 8 channels."""
-        from PyQt6.QtWidgets import QTabWidget, QWidget, QVBoxLayout, QLabel
+        from PyQt6.QtWidgets import QTabWidget, QWidget, QVBoxLayout, QLabel, QSizePolicy, QScrollArea
+        from PyQt6.QtCore import Qt
 
         self._HSL_NAMES = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
-        # Accent colors for channel labels (approx)
         self._HSL_COLORS = [
             "#e74c3c", "#e67e22", "#f1c40f", "#27ae60",
             "#1abc9c", "#3498db", "#9b59b6", "#e84393",
         ]
-        self.hsl_sliders = {"hue": [], "sat": [], "lum": []}  # list of SliderRow per channel
+        self.hsl_sliders = {"hue": [], "sat": [], "lum": []}
 
         tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        tabs.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         tabs.setStyleSheet(
             "QTabWidget::pane { border: 1px solid #333; background:#1a1a1a; }"
-            "QTabBar::tab { background:#222; color:#ccc; padding:6px 12px; margin-right:2px; }"
+            "QTabBar::tab { background:#222; color:#ccc; padding:5px 10px; margin-right:1px; }"
             "QTabBar::tab:selected { background:#2a5080; color:#fff; }"
         )
 
         def _make_channel_page(which: str) -> QWidget:
             page = QWidget()
+            page.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
             lay = QVBoxLayout(page)
-            lay.setContentsMargins(2, 4, 2, 2)
-            lay.setSpacing(1)
+            lay.setContentsMargins(2, 2, 2, 2)
+            lay.setSpacing(0)
             for i, name in enumerate(self._HSL_NAMES):
                 row = SliderRow(name, -100.0, 100.0, 0.0, 1.0, decimals=0)
-                # Tint label
+                row.setMaximumHeight(28)
                 for child in row.findChildren(QLabel):
                     if child.text() == name:
-                        child.setStyleSheet(f"color: {self._HSL_COLORS[i]}; font-size: 12px; font-weight: 600;")
+                        child.setStyleSheet(
+                            f"color: {self._HSL_COLORS[i]}; font-size: 11px; font-weight: 600;"
+                        )
                 row.valueChanged.connect(
                     lambda val, w=which, idx=i: self._on_hsl_channel_value(w, idx, val)
                 )
                 self.hsl_sliders[which].append(row)
                 lay.addWidget(row)
-            lay.addStretch(1)
+            # No stretch — keeps panel tight under last slider
             return page
 
         tabs.addTab(_make_channel_page("hue"), "Hue")
         tabs.addTab(_make_channel_page("sat"), "Saturation")
         tabs.addTab(_make_channel_page("lum"), "Luminance")
 
-        # All: compact grid of all three for each channel
-        all_page = QWidget()
-        all_lay = QVBoxLayout(all_page)
-        all_lay.setContentsMargins(2, 4, 2, 2)
-        all_lay.setSpacing(3)
-        self.hsl_all_sliders = []  # [(hue_row, sat_row, lum_row), ...]
+        # All: scrollable but still compact row spacing
+        all_inner = QWidget()
+        all_lay = QVBoxLayout(all_inner)
+        all_lay.setContentsMargins(2, 2, 2, 2)
+        all_lay.setSpacing(1)
+        self.hsl_all_sliders = []
         for i, name in enumerate(self._HSL_NAMES):
             hdr = QLabel(name)
-            hdr.setStyleSheet(f"color: {self._HSL_COLORS[i]}; font-weight: 600; font-size: 11px;")
+            hdr.setStyleSheet(
+                f"color: {self._HSL_COLORS[i]}; font-weight: 600; font-size: 11px; margin-top: 2px;"
+            )
             all_lay.addWidget(hdr)
             trio = []
             for which, label in (("hue", "H"), ("sat", "S"), ("lum", "L")):
                 row = SliderRow(label, -100.0, 100.0, 0.0, 1.0, decimals=0)
+                row.setMaximumHeight(26)
                 row.valueChanged.connect(
                     lambda val, w=which, idx=i: self._on_hsl_channel_value(w, idx, val)
                 )
                 trio.append(row)
                 all_lay.addWidget(row)
             self.hsl_all_sliders.append(tuple(trio))
-        all_lay.addStretch(1)
-        tabs.addTab(all_page, "All")
+        all_scroll = QScrollArea()
+        all_scroll.setWidgetResizable(True)
+        all_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        all_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        all_scroll.setWidget(all_inner)
+        all_scroll.setMinimumHeight(220)
+        all_scroll.setMaximumHeight(320)
+        tabs.addTab(all_scroll, "All")
 
+        # Cap tab height so Hue/Sat/Lum don't grow into empty void
+        tabs.setMinimumHeight(0)
+        tabs.setMaximumHeight(280)
         parent_layout.addWidget(tabs)
         self.hsl_tabs = tabs
-
         self.color_wheel = None
 
     def _on_hsl_channel_value(self, which: str, idx: int, value: float):
