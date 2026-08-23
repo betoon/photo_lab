@@ -55,51 +55,6 @@ class HistogramWidget(QWidget):
                 return
 
 
-    def _draw_exposure_overlays(self, painter):
-        """Clipping warning and/or zebra stripes on over/underexposed areas (all view modes)."""
-        if self._pixmap is None or self._pixmap.isNull():
-            return
-        want_clip = getattr(self, "show_clipping", False)
-        want_zebra = getattr(self, "show_zebras", False)
-        if not want_clip and not want_zebra:
-            return
-        rect = self.image_rect()
-        if rect.isEmpty():
-            return
-        from PyQt6.QtGui import QImage, QBrush
-        qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-        w, h = qimg.width(), qimg.height()
-        step = max(1, max(w, h) // 400)
-        lo = int(255 * getattr(self, "_clip_lo", 0.005))
-        hi = int(255 * getattr(self, "_clip_hi", 0.995))
-        z_thr = int(255 * float(getattr(self, "_zebra_threshold", 0.95)))
-        painter.save()
-        painter.setClipRect(rect)
-        sx = rect.width() / max(w, 1)
-        sy = rect.height() / max(h, 1)
-        for y in range(0, h, step):
-            for x in range(0, w, step):
-                c = qimg.pixelColor(x, y)
-                yv = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
-                px = int(rect.left() + x * sx)
-                py = int(rect.top() + y * sy)
-                pw = max(1, int(step * sx) + 1)
-                ph = max(1, int(step * sy) + 1)
-                if want_clip:
-                    if yv <= lo:
-                        painter.fillRect(px, py, pw, ph, QColor(40, 80, 255, 160))
-                    elif yv >= hi:
-                        painter.fillRect(px, py, pw, ph, QColor(255, 40, 40, 160))
-                if want_zebra and yv >= z_thr:
-                    # Diagonal zebra stripes (classic video exposure assist)
-                    # Alternate black/yellow bands by (x+y)
-                    band = ((x + y) // max(4, step * 2)) % 2
-                    if band == 0:
-                        painter.fillRect(px, py, pw, ph, QColor(0, 0, 0, 180))
-                    else:
-                        painter.fillRect(px, py, pw, ph, QColor(255, 220, 0, 200))
-        painter.restore()
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#1a1a1a"))
@@ -664,6 +619,52 @@ class ImageCanvas(QWidget):
         x = (self.width() - sw) // 2 + self._offset.x() + x_off
         y = (self.height() - sh) // 2 + self._offset.y()
         painter.drawPixmap(QRect(x, y, sw, sh), pm)
+
+
+    def _draw_exposure_overlays(self, painter):
+        """Clipping warning and/or zebra stripes on over/underexposed areas (all view modes)."""
+        if self._pixmap is None or self._pixmap.isNull():
+            return
+        want_clip = getattr(self, "show_clipping", False)
+        want_zebra = getattr(self, "show_zebras", False)
+        if not want_clip and not want_zebra:
+            return
+        rect = self.image_rect()
+        if rect.isEmpty():
+            return
+        from PyQt6.QtGui import QImage, QBrush
+        qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+        w, h = qimg.width(), qimg.height()
+        step = max(1, max(w, h) // 400)
+        lo = int(255 * getattr(self, "_clip_lo", 0.005))
+        hi = int(255 * getattr(self, "_clip_hi", 0.995))
+        z_thr = int(255 * float(getattr(self, "_zebra_threshold", 0.95)))
+        painter.save()
+        painter.setClipRect(rect)
+        sx = rect.width() / max(w, 1)
+        sy = rect.height() / max(h, 1)
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                c = qimg.pixelColor(x, y)
+                yv = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
+                px = int(rect.left() + x * sx)
+                py = int(rect.top() + y * sy)
+                pw = max(1, int(step * sx) + 1)
+                ph = max(1, int(step * sy) + 1)
+                if want_clip:
+                    if yv <= lo:
+                        painter.fillRect(px, py, pw, ph, QColor(40, 80, 255, 160))
+                    elif yv >= hi:
+                        painter.fillRect(px, py, pw, ph, QColor(255, 40, 40, 160))
+                if want_zebra and yv >= z_thr:
+                    # Diagonal zebra stripes (classic video exposure assist)
+                    # Alternate black/yellow bands by (x+y)
+                    band = ((x + y) // max(4, step * 2)) % 2
+                    if band == 0:
+                        painter.fillRect(px, py, pw, ph, QColor(0, 0, 0, 180))
+                    else:
+                        painter.fillRect(px, py, pw, ph, QColor(255, 220, 0, 200))
+        painter.restore()
 
     def paintEvent(self, event):
         painter = QPainter(self)

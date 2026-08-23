@@ -1501,6 +1501,64 @@ class PhotoLab(QMainWindow):
         inner = QWidget()
         layout = QVBoxLayout(inner)
 
+        # ----- Infrared -----
+        box, v = collapsible_group("Infrared", layout, checked=True)
+        ir_hint = QLabel(
+            "For IR-converted cameras or IR filters. Channel swap is the classic false-color start."
+        )
+        ir_hint.setWordWrap(True)
+        ir_hint.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(ir_hint)
+        swap_row = QHBoxLayout()
+        swap_row.addWidget(QLabel("Channel swap"))
+        self.ir_swap_combo = QComboBox()
+        for name, key in (
+            ("None", "none"),
+            ("R ↔ B (classic IR)", "rb"),
+        ):
+            self.ir_swap_combo.addItem(name, key)
+        self.ir_swap_combo.currentIndexChanged.connect(self._on_ir_swap)
+        swap_row.addWidget(self.ir_swap_combo, 1)
+        v.addLayout(swap_row)
+        self._add_slider(v, "ir_false_color", "False color", 0.0, 100.0, 1, 0, 0.0)
+        self.ir_mono_cb = QCheckBox("Mono IR (red-weighted)")
+        self.ir_mono_cb.toggled.connect(self._on_ir_mono)
+        v.addWidget(self.ir_mono_cb)
+        ir_btn_row = QHBoxLayout()
+        for label, fn in (
+            ("Wood effect", self._ir_preset_wood),
+            ("Gold/Blue", self._ir_preset_gold_blue),
+            ("Mono IR", self._ir_preset_mono),
+            ("Reset IR", self._ir_preset_reset),
+        ):
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            ir_btn_row.addWidget(b)
+        v.addLayout(ir_btn_row)
+
+        # ----- Astro -----
+        box, v = collapsible_group("Astro", layout, checked=True)
+        astro_hint = QLabel(
+            "For night-sky / linear-ish data. Stretch lifts faint detail; "
+            "background removal softens gradients and light pollution."
+        )
+        astro_hint.setWordWrap(True)
+        astro_hint.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(astro_hint)
+        self._add_slider(v, "astro_stretch", "Stretch (asinh)", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "astro_bg_remove", "Background / gradient remove", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "astro_star_emphasis", "Star emphasis", 0.0, 100.0, 1, 0, 0.0)
+        astro_btn_row = QHBoxLayout()
+        for label, fn in (
+            ("Milky Way", self._astro_preset_milkyway),
+            ("DSO soft", self._astro_preset_dso),
+            ("Reset Astro", self._astro_preset_reset),
+        ):
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            astro_btn_row.addWidget(b)
+        v.addLayout(astro_btn_row)
+
         box, v = collapsible_group("Vignetting", layout, checked=False)
         self._add_slider(v, "vignette", "Intensity", 0.0, 100.0, 1, 0, 0.0)
 
@@ -1562,64 +1620,6 @@ class PhotoLab(QMainWindow):
         zone_hint.setStyleSheet("color:#777; font-size:11px;")
         v.addWidget(zone_hint)
 
-
-        # ----- Infrared -----
-        box, v = collapsible_group("Infrared", layout, checked=True)
-        ir_hint = QLabel(
-            "For IR-converted cameras or IR filters. Channel swap is the classic false-color start."
-        )
-        ir_hint.setWordWrap(True)
-        ir_hint.setStyleSheet("color:#777; font-size:11px;")
-        v.addWidget(ir_hint)
-        swap_row = QHBoxLayout()
-        swap_row.addWidget(QLabel("Channel swap"))
-        self.ir_swap_combo = QComboBox()
-        for name, key in (
-            ("None", "none"),
-            ("R ↔ B (classic IR)", "rb"),
-        ):
-            self.ir_swap_combo.addItem(name, key)
-        self.ir_swap_combo.currentIndexChanged.connect(self._on_ir_swap)
-        swap_row.addWidget(self.ir_swap_combo, 1)
-        v.addLayout(swap_row)
-        self._add_slider(v, "ir_false_color", "False color", 0.0, 100.0, 1, 0, 0.0)
-        self.ir_mono_cb = QCheckBox("Mono IR (red-weighted)")
-        self.ir_mono_cb.toggled.connect(self._on_ir_mono)
-        v.addWidget(self.ir_mono_cb)
-        ir_btn_row = QHBoxLayout()
-        for label, fn in (
-            ("Wood effect", self._ir_preset_wood),
-            ("Gold/Blue", self._ir_preset_gold_blue),
-            ("Mono IR", self._ir_preset_mono),
-            ("Reset IR", self._ir_preset_reset),
-        ):
-            b = QPushButton(label)
-            b.clicked.connect(fn)
-            ir_btn_row.addWidget(b)
-        v.addLayout(ir_btn_row)
-
-        # ----- Astro -----
-        box, v = collapsible_group("Astro", layout, checked=True)
-        astro_hint = QLabel(
-            "For night-sky / linear-ish data. Stretch lifts faint detail; "
-            "background removal softens gradients and light pollution."
-        )
-        astro_hint.setWordWrap(True)
-        astro_hint.setStyleSheet("color:#777; font-size:11px;")
-        v.addWidget(astro_hint)
-        self._add_slider(v, "astro_stretch", "Stretch (asinh)", 0.0, 100.0, 1, 0, 0.0)
-        self._add_slider(v, "astro_bg_remove", "Background / gradient remove", 0.0, 100.0, 1, 0, 0.0)
-        self._add_slider(v, "astro_star_emphasis", "Star emphasis", 0.0, 100.0, 1, 0, 0.0)
-        astro_btn_row = QHBoxLayout()
-        for label, fn in (
-            ("Milky Way", self._astro_preset_milkyway),
-            ("DSO soft", self._astro_preset_dso),
-            ("Reset Astro", self._astro_preset_reset),
-        ):
-            b = QPushButton(label)
-            b.clicked.connect(fn)
-            astro_btn_row.addWidget(b)
-        v.addLayout(astro_btn_row)
 
         box, v = collapsible_group("Rotate", layout, checked=False)
         row = QHBoxLayout()
