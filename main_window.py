@@ -313,7 +313,7 @@ class PhotoLab(QMainWindow):
         add_action(view_m, "Fit to Window", lambda: self.preview.fit_to_view(), "F")
         self.act_clipping = add_action(view_m, "Clipping Warning", self.toggle_clipping, "J", checkable=True)
         self.act_peaking = add_action(view_m, "Focus Peaking", self.toggle_peaking, "P", checkable=True)
-        add_action(view_m, "Actual Size (1:1)", lambda: self.preview.zoom_1_to_1(), "1")
+        add_action(view_m, "Actual Size (1:1)", lambda: self.preview.zoom_1_to_1(), "Ctrl+1")
         view_m.addSeparator()
         add_action(view_m, "Compare Off", lambda: self.set_compare_mode(ImageCanvas.MODE_NORMAL))
         add_action(view_m, "Split Compare", lambda: self.set_compare_mode(ImageCanvas.MODE_SPLIT), "C")
@@ -397,16 +397,30 @@ class PhotoLab(QMainWindow):
 
 
     def _manual_path(self, name: str) -> str:
-        """Resolve docs/*.md next to the app or cwd."""
-        candidates = [
+        """Resolve docs/*.md via app_paths, then next to the app / cwd."""
+        candidates = []
+        try:
+            from app_paths import docs_dir, manual_file
+            mf = manual_file(name) if callable(manual_file) else None
+            if mf:
+                candidates.append(mf)
+            candidates.append(os.path.join(docs_dir(), name))
+        except Exception:
+            pass
+        candidates.extend([
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", name),
             os.path.join(os.getcwd(), "docs", name),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), name),
-        ]
+            os.path.join(os.getcwd(), name),
+        ])
+        seen = set()
         for c in candidates:
+            if not c or c in seen:
+                continue
+            seen.add(c)
             if os.path.isfile(c):
                 return c
-        return candidates[0]
+        return candidates[0] if candidates else name
 
     def _show_markdown_manual(self, title: str, filename: str):
         path = self._manual_path(filename)
@@ -574,7 +588,7 @@ class PhotoLab(QMainWindow):
         tb.addSeparator()
 
         act("Fit", lambda: self.preview.fit_to_view(), "F", tip="Fit to window (F)")
-        act("1:1", lambda: self.preview.zoom_1_to_1(), "1", tip="Actual size (1)")
+        act("1:1", lambda: self.preview.zoom_1_to_1(), "Ctrl+1", tip="Actual size (Ctrl+1)")
         self.zoom_label = QLabel(" 100% ")
         self.zoom_label.setStyleSheet("color:#ccc; min-width:44px;")
         tb.addWidget(self.zoom_label)
@@ -1226,11 +1240,15 @@ class PhotoLab(QMainWindow):
         self._add_slider(v, "microcontrast", "Microcontrast", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "clarity", "Clarity", -100.0, 100.0, 1, 0, 0.0)
 
-        # Tone Curve
+        # Tone Curve (graph + Lightroom-style region sliders)
         box, v = collapsible_group("Tone Curve", layout)
         self.tone_curve = ToneCurveWidget()
         self.tone_curve.curveChanged.connect(self.on_curve_changed)
         v.addWidget(self.tone_curve)
+        self._add_slider(v, "curve_highlights", "Highlights", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "curve_lights", "Lights", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "curve_darks", "Darks", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "curve_shadows", "Shadows", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "gamma", "Gamma", 0.3, 2.5, 0.05, 2, 1.0)
 
         # Vignetting
@@ -2473,6 +2491,18 @@ class PhotoLab(QMainWindow):
         if hasattr(self.recipes[self.current_path], key):
             setattr(self.recipes[self.current_path], key, value)
             self._schedule_history(key)
+        # Keep ToneCurveWidget graph in sync with region sliders
+        if key in ("curve_shadows", "curve_darks", "curve_mids", "curve_lights", "curve_highlights"):
+            if hasattr(self, "tone_curve"):
+                r = self.recipes[self.current_path]
+                self.tone_curve.blockSignals(True)
+                try:
+                    self.tone_curve.set_values(
+                        r.curve_shadows, r.curve_darks, r.curve_mids,
+                        r.curve_lights, r.curve_highlights,
+                    )
+                finally:
+                    self.tone_curve.blockSignals(False)
         self.render_timer.start()
 
     def _schedule_history(self, label: str):
@@ -2748,6 +2778,19 @@ class PhotoLab(QMainWindow):
         r.curve_mids = mids
         r.curve_lights = lights
         r.curve_highlights = highlights
+        # Sync region sliders under the curve
+        for key, val in (
+            ("curve_shadows", shadows),
+            ("curve_darks", darks),
+            ("curve_mids", mids),
+            ("curve_lights", lights),
+            ("curve_highlights", highlights),
+        ):
+            if key in self.sliders:
+                self.sliders[key].blockSignals(True)
+                self.sliders[key].set_value(val)
+                self.sliders[key].blockSignals(False)
+        self._schedule_history("Tone curve")
         self.render_timer.start()
 
     def on_wb_as_shot(self, checked):
@@ -2891,10 +2934,17 @@ class PhotoLab(QMainWindow):
             self.local_active_cb.blockSignals(False)
         self.preview.local_mode = self._local_mode
         if self._local_mode:
+            # Exclusive vs other canvas tools
+            self.preview.gradient_mode = False
+            self.preview.brush_mode = False
+            self.preview.wb_picker_mode = False
+            for act_name in ("act_grad", "act_brush", "act_wb_pick"):
+                a = getattr(self, act_name, None)
+                if a is not None:
+                    a.setChecked(False)
             self.statusBar().showMessage("Control Point mode: click on image to place a local adjustment")
             self.preview.setCursor(Qt.CursorShape.CrossCursor)
-            # Switch to Local tab (index 5)
-            if hasattr(self, "_cat_group"):
+            if hasattr(self, "_cat_buttons") and len(self._cat_buttons) > 5:
                 self._cat_buttons[5].setChecked(True)
                 self.tool_stack.setCurrentIndex(5)
         else:
@@ -4012,6 +4062,7 @@ class PhotoLab(QMainWindow):
             self.preview.gradient_mode = False
             self.preview.wb_picker_mode = False
             self.preview.local_mode = False
+            self._local_mode = False
             for act_name in ("act_grad", "act_wb_pick", "act_local"):
                 a = getattr(self, act_name, None)
                 if a:
@@ -4175,8 +4226,13 @@ class PhotoLab(QMainWindow):
         self.preview.wb_picker_mode = on
         if on:
             self.preview.gradient_mode = False
-            if hasattr(self, "act_grad"):
-                self.act_grad.setChecked(False)
+            self.preview.brush_mode = False
+            self.preview.local_mode = False
+            self._local_mode = False
+            for act_name in ("act_grad", "act_brush", "act_local"):
+                a = getattr(self, act_name, None)
+                if a is not None:
+                    a.setChecked(False)
             self.preview.setCursor(Qt.CursorShape.CrossCursor)
             self.statusBar().showMessage("WB Picker: click on a neutral gray/white area")
         else:
@@ -4215,11 +4271,13 @@ class PhotoLab(QMainWindow):
         self.preview.gradient_mode = on
         if on:
             self.preview.wb_picker_mode = False
-            if hasattr(self, "act_wb_pick"):
-                self.act_wb_pick.setChecked(False)
+            self.preview.brush_mode = False
             self.preview.local_mode = False
-            if hasattr(self, "act_local"):
-                self.act_local.setChecked(False)
+            self._local_mode = False
+            for act_name in ("act_wb_pick", "act_brush", "act_local"):
+                a = getattr(self, act_name, None)
+                if a is not None:
+                    a.setChecked(False)
             # switch to Local tab if present
             if hasattr(self, "_cat_buttons") and len(self._cat_buttons) > 5:
                 self._cat_buttons[5].setChecked(True)
