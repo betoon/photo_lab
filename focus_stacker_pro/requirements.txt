@@ -1,0 +1,8 @@
+numpy>=1.24
+opencv-python>=4.8
+Pillow>=10.0
+PySide6>=6.6
+tifffile>=2023.9
+# Optional RAW import: rawpy>=0.19
+# Optional advanced filters: scipy>=1.11 scikit-image>=0.22
+

@@ -4022,6 +4022,43 @@ class PhotoLab(QMainWindow):
         finally:
             self._pano_paths_override = None
 
+
+    def open_focus_stacker_pro(self):
+        """Launch the full Focus Stacker Pro GUI (microscope, retouch, 16-bit, etc.)."""
+        import sys
+        import subprocess
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base, "run_focus_stacker_pro.py"),
+            os.path.join(base, "focus_stacker_pro", "run.py"),
+            os.path.expanduser(r"~/Documents/GitHub/focus_stacker/run.py"),
+            r"C:\Users\brian\Documents\GitHub\focus_stacker\run.py",
+        ]
+        script = next((c for c in candidates if os.path.isfile(c)), None)
+        if not script:
+            QMessageBox.warning(
+                self, "Focus Stacker Pro",
+                "Could not find Focus Stacker Pro.\n\n"
+                "Expected run_focus_stacker_pro.py next to PhotoLab, or\n"
+                "C:\\Users\\brian\\Documents\\GitHub\\focus_stacker\\run.py\n\n"
+                "Install PySide6 in that environment: pip install PySide6",
+            )
+            return
+        cmd = [sys.executable, script]
+        self.log(f"Launching Focus Stacker Pro: {' '.join(cmd)}")
+        try:
+            kwargs = {}
+            if os.name == "nt":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            else:
+                kwargs["start_new_session"] = True
+            # cwd so relative imports work for focus_stacker_pro/run.py
+            kwargs["cwd"] = os.path.dirname(script) if script.endswith("run.py") else base
+            subprocess.Popen(cmd, **kwargs)
+            self.statusBar().showMessage("Focus Stacker Pro opened")
+        except Exception as e:
+            QMessageBox.warning(self, "Focus Stacker Pro", f"Could not launch:\n{e}")
+
     def focus_stack_selected(self):
         """Thin focus-stack UI: select 2+ filmstrip frames → align → fuse → open result."""
         paths = getattr(self, "_stack_paths_override", None)
@@ -4073,15 +4110,41 @@ class PhotoLab(QMainWindow):
         size_combo.addItem("Long edge 1200 px (preview)", 1200)
         form.addRow("Working size", size_combo)
 
+        radius_spin = QSpinBox()
+        radius_spin.setRange(1, 15)
+        radius_spin.setValue(5)
+        radius_spin.setToolTip("Focus measure radius (Focus Stacker Pro default 5)")
+        form.addRow("Focus radius", radius_spin)
+
+        smooth_spin = QSpinBox()
+        smooth_spin.setRange(0, 31)
+        smooth_spin.setValue(7)
+        form.addRow("Boundary smooth", smooth_spin)
+
+        levels_spin = QSpinBox()
+        levels_spin.setRange(2, 8)
+        levels_spin.setValue(5)
+        form.addRow("Pyramid levels", levels_spin)
+
+        min_score = QDoubleSpinBox()
+        min_score.setRange(0.0, 1.0)
+        min_score.setSingleStep(0.05)
+        min_score.setValue(0.0)
+        min_score.setToolTip("Exclude non-reference frames with weaker alignment (0 = keep all)")
+        form.addRow("Min align score", min_score)
+
         crop_cb = QCheckBox("Crop common area")
         crop_cb.setChecked(True)
         form.addRow(crop_cb)
         depth_cb = QCheckBox("Also save depth map PNG")
         form.addRow(depth_cb)
+        norm_cb = QCheckBox("Normalize exposure across stack")
+        form.addRow(norm_cb)
 
         tip = QLabel(
-            "Frames should be near→far (or far→near) focus brackets on a stable camera.\n"
-            "Result opens in Develop for further editing."
+            "Focus brackets near→far on a stable camera.\n"
+            "For microscope tools, alignment inspector, retouch, and 16-bit archival export,\n"
+            "use Tools → Open Focus Stacker Pro…"
         )
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#888; font-size:11px;")
@@ -4107,15 +4170,20 @@ class PhotoLab(QMainWindow):
 
         self.statusBar().showMessage("Focus stacking…")
         self.log(f"Focus stack: {len(paths)} frames → {out_path}")
-        self._stack_worker = FocusStackWorker, PanoramaWorker(
+        self._stack_worker = FocusStackWorker(
             paths,
             out_path,
             align_mode=align_combo.currentData(),
             fusion_mode=fusion_combo.currentData(),
             reference=ref_combo.currentData(),
             max_dim=int(size_combo.currentData() or 0),
+            focus_radius=int(radius_spin.value()),
+            boundary_smooth=int(smooth_spin.value()),
+            pyramid_levels=int(levels_spin.value()),
             crop_common=crop_cb.isChecked(),
             save_depth=depth_cb.isChecked(),
+            min_align_score=float(min_score.value()),
+            normalize_exposure=bool(norm_cb.isChecked()),
         )
         self._stack_worker.progress.connect(
             lambda m: self.statusBar().showMessage(f"Focus stack: {m}")

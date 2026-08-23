@@ -292,8 +292,8 @@ class BatchExportWorker(QThread):
 
 
 class FocusStackWorker(QThread):
-    """Background focus-stack: align + fuse selected frames."""
-    finished_ok = pyqtSignal(str, object)  # out_path, report dict
+    """Background focus stack (align + fuse)."""
+    finished_ok = pyqtSignal(str, object)  # out_path, report
     failed = pyqtSignal(str)
     progress = pyqtSignal(str)
 
@@ -305,11 +305,13 @@ class FocusStackWorker(QThread):
         fusion_mode="depth",
         reference="middle",
         max_dim=0,
-        focus_radius=3,
-        boundary_smooth=5,
+        focus_radius=5,
+        boundary_smooth=7,
         pyramid_levels=5,
         crop_common=True,
         save_depth=False,
+        min_align_score=0.0,
+        normalize_exposure=False,
     ):
         super().__init__()
         self.paths = list(paths)
@@ -323,11 +325,14 @@ class FocusStackWorker(QThread):
         self.pyramid_levels = pyramid_levels
         self.crop_common = crop_common
         self.save_depth = save_depth
+        self.min_align_score = float(min_align_score or 0.0)
+        self.normalize_exposure = bool(normalize_exposure)
 
     def run(self):
         try:
             from focus_stack import focus_stack
             import cv2
+            import numpy as np
 
             def cb(msg, frac=None):
                 self.progress.emit(msg)
@@ -342,23 +347,27 @@ class FocusStackWorker(QThread):
                 boundary_smooth=self.boundary_smooth,
                 pyramid_levels=self.pyramid_levels,
                 crop_common=self.crop_common,
+                min_align_score=self.min_align_score,
+                normalize_exposure=self.normalize_exposure,
                 progress_cb=cb,
             )
             ext = self.out_path.lower().rsplit(".", 1)[-1]
-            if ext in ("tif", "tiff"):
-                cv2.imwrite(self.out_path, result)
-            elif ext in ("png",):
-                cv2.imwrite(self.out_path, result)
-            else:
+            if ext in ("jpg", "jpeg"):
                 cv2.imwrite(self.out_path, result, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            else:
+                cv2.imwrite(self.out_path, result)
             if self.save_depth and depth is not None:
                 depth_path = self.out_path.rsplit(".", 1)[0] + "_depth.png"
-                cv2.imwrite(depth_path, depth)
+                d = depth
+                if d.dtype != np.uint8:
+                    d = np.clip(d, 0, 255).astype(np.uint8)
+                cv2.imwrite(depth_path, d)
                 report["depth_path"] = depth_path
             report["out_path"] = self.out_path
             self.finished_ok.emit(self.out_path, report)
         except Exception as e:
             self.failed.emit(str(e))
+
 
 
 class PanoramaWorker(QThread):
