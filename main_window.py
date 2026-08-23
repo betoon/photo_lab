@@ -312,6 +312,7 @@ class PhotoLab(QMainWindow):
         view_m = mb.addMenu("&View")
         add_action(view_m, "Fit to Window", lambda: self.preview.fit_to_view(), "F")
         self.act_clipping = add_action(view_m, "Clipping Warning", self.toggle_clipping, "J", checkable=True)
+        self.act_zebras = add_action(view_m, "Zebra Stripes (overexposure)", self.toggle_zebras, "Z", checkable=True)
         self.act_peaking = add_action(view_m, "Focus Peaking", self.toggle_peaking, "P", checkable=True)
         add_action(view_m, "Actual Size (1:1)", lambda: self.preview.zoom_1_to_1(), "Ctrl+1")
         view_m.addSeparator()
@@ -601,7 +602,7 @@ class PhotoLab(QMainWindow):
         self.act_local = act("Local", self._toggle_local_mode, checkable=True, tip="Control Point local adjustments")
         self.act_grad = act("Grad", self.toggle_gradient_mode, "G", checkable=True, tip="Graduated filter (G)")
         self.act_brush = act("Brush", self.toggle_brush_mode, "Shift+B", checkable=True, tip="Adjustment brush (Shift+B)")
-        self.act_wb_pick = act("WB", self.toggle_wb_picker, "W", checkable=True, tip="White balance picker (W)")
+        self.act_wb_pick = act("WB", self.toggle_wb_picker, "W", checkable=True, tip="Open Color panel + white balance picker (W)")
         tb.addSeparator()
         act("Reset", self.reset_current, "Ctrl+R", tip="Reset image (Ctrl+R)")
         act("Preset", self.load_preset, tip="Load preset (XMP / JSON)")
@@ -654,6 +655,8 @@ class PhotoLab(QMainWindow):
             sc.activated.connect(lambda n=n: self.rate_current(n))
         scj = QShortcut(QKeySequence("J"), self)
         scj.activated.connect(lambda: self.toggle_clipping())
+        scz = QShortcut(QKeySequence("Z"), self)
+        scz.activated.connect(lambda: self.toggle_zebras())
         scx = QShortcut(QKeySequence("X"), self)
         scx.activated.connect(self.toggle_reject_current)
         scu = QShortcut(QKeySequence("U"), self)
@@ -1245,6 +1248,9 @@ class PhotoLab(QMainWindow):
         self.tone_curve = ToneCurveWidget()
         self.tone_curve.curveChanged.connect(self.on_curve_changed)
         v.addWidget(self.tone_curve)
+        region_lbl = QLabel("Region")
+        region_lbl.setStyleSheet("color:#9cf; font-weight:600; font-size:12px; margin-top:6px;")
+        v.addWidget(region_lbl)
         self._add_slider(v, "curve_highlights", "Highlights", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "curve_lights", "Lights", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "curve_darks", "Darks", -100.0, 100.0, 1, 0, 0.0)
@@ -3117,6 +3123,24 @@ class PhotoLab(QMainWindow):
                 item.setText(("★" * stars + "☆" * (5 - stars) + "  " + base) if stars else base)
                 break
         self.statusBar().showMessage(f"Rating: {stars} star(s)" if stars else "Rating cleared")
+
+    def toggle_zebras(self, checked=False):
+        """Diagonal zebra stripes on near-clipped highlights (video-style exposure assist)."""
+        on = checked if isinstance(checked, bool) else (not getattr(self.preview, "show_zebras", False))
+        if not isinstance(checked, bool):
+            on = not getattr(self.preview, "show_zebras", False)
+        if hasattr(self, "act_zebras"):
+            self.act_zebras.setChecked(on)
+        if hasattr(self.preview, "set_show_zebras"):
+            self.preview.set_show_zebras(on)
+        else:
+            self.preview.show_zebras = on
+            self.preview.update()
+        self.statusBar().showMessage(
+            "Zebras ON — striped areas are near/fully overexposed (toggle Z)"
+            if on else "Zebras off"
+        )
+
         self._apply_filmstrip_filter()
 
     def copy_settings(self):
@@ -4233,8 +4257,15 @@ class PhotoLab(QMainWindow):
                 a = getattr(self, act_name, None)
                 if a is not None:
                     a.setChecked(False)
+            if hasattr(self, "_cat_buttons") and len(self._cat_buttons) > 1:
+                self._cat_buttons[1].setChecked(True)
+                self.tool_stack.setCurrentIndex(1)
+            try:
+                self.show_develop_mode()
+            except Exception:
+                pass
             self.preview.setCursor(Qt.CursorShape.CrossCursor)
-            self.statusBar().showMessage("WB Picker: click on a neutral gray/white area")
+            self.statusBar().showMessage("Color → White Balance — click a neutral gray/white area")
         else:
             self.preview.setCursor(Qt.CursorShape.ArrowCursor)
             self.statusBar().showMessage("WB Picker off")

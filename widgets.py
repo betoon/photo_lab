@@ -54,6 +54,52 @@ class HistogramWidget(QWidget):
                 self.update()
                 return
 
+
+    def _draw_exposure_overlays(self, painter):
+        """Clipping warning and/or zebra stripes on over/underexposed areas (all view modes)."""
+        if self._pixmap is None or self._pixmap.isNull():
+            return
+        want_clip = getattr(self, "show_clipping", False)
+        want_zebra = getattr(self, "show_zebras", False)
+        if not want_clip and not want_zebra:
+            return
+        rect = self.image_rect()
+        if rect.isEmpty():
+            return
+        from PyQt6.QtGui import QImage, QBrush
+        qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+        w, h = qimg.width(), qimg.height()
+        step = max(1, max(w, h) // 400)
+        lo = int(255 * getattr(self, "_clip_lo", 0.005))
+        hi = int(255 * getattr(self, "_clip_hi", 0.995))
+        z_thr = int(255 * float(getattr(self, "_zebra_threshold", 0.95)))
+        painter.save()
+        painter.setClipRect(rect)
+        sx = rect.width() / max(w, 1)
+        sy = rect.height() / max(h, 1)
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                c = qimg.pixelColor(x, y)
+                yv = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
+                px = int(rect.left() + x * sx)
+                py = int(rect.top() + y * sy)
+                pw = max(1, int(step * sx) + 1)
+                ph = max(1, int(step * sy) + 1)
+                if want_clip:
+                    if yv <= lo:
+                        painter.fillRect(px, py, pw, ph, QColor(40, 80, 255, 160))
+                    elif yv >= hi:
+                        painter.fillRect(px, py, pw, ph, QColor(255, 40, 40, 160))
+                if want_zebra and yv >= z_thr:
+                    # Diagonal zebra stripes (classic video exposure assist)
+                    # Alternate black/yellow bands by (x+y)
+                    band = ((x + y) // max(4, step * 2)) % 2
+                    if band == 0:
+                        painter.fillRect(px, py, pw, ph, QColor(0, 0, 0, 180))
+                    else:
+                        painter.fillRect(px, py, pw, ph, QColor(255, 220, 0, 200))
+        painter.restore()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#1a1a1a"))
@@ -383,6 +429,8 @@ class ImageCanvas(QWidget):
         self.show_mask_only = False
         self.show_clipping = False
         self.show_peaking = False
+        self.show_zebras = False
+        self._zebra_threshold = 0.95  # luminance 0..1
         self.horizon_line_mode = False
         self._horizon_line = None  # (x0,y0,x1,y1) widget coords while dragging
         self._clip_lo = 0.005
@@ -508,6 +556,14 @@ class ImageCanvas(QWidget):
         self.show_peaking = bool(enabled)
         self.update()
 
+    def set_show_zebras(self, enabled: bool):
+        self.show_zebras = bool(enabled)
+        self.update()
+
+    def set_zebra_threshold(self, t: float):
+        self._zebra_threshold = float(max(0.5, min(1.0, t)))
+        self.update()
+
     def set_spiral_params(self, cx=None, cy=None, scale=None, orient=None):
         if cx is not None:
             self.spiral_cx = float(max(0.0, min(1.0, cx)))
@@ -623,41 +679,6 @@ class ImageCanvas(QWidget):
             if getattr(self, "show_mask_only", False) and self.brush_masks:
                 painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
 
-            if getattr(self, "show_clipping", False) and self._pixmap is not None and not self._pixmap.isNull():
-                rect = self.image_rect()
-                if not rect.isEmpty():
-                    from PyQt6.QtGui import QImage
-                    qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-                    w, h = qimg.width(), qimg.height()
-                    step = max(1, max(w, h) // 400)
-                    lo = int(255 * getattr(self, "_clip_lo", 0.005))
-                    hi = int(255 * getattr(self, "_clip_hi", 0.995))
-                    painter.save()
-                    painter.setClipRect(rect)
-                    sx = rect.width() / max(w, 1)
-                    sy = rect.height() / max(h, 1)
-                    for y in range(0, h, step):
-                        for x in range(0, w, step):
-                            c = qimg.pixelColor(x, y)
-                            yv = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
-                            if yv <= lo:
-                                painter.fillRect(
-                                    int(rect.left() + x * sx),
-                                    int(rect.top() + y * sy),
-                                    max(1, int(step * sx) + 1),
-                                    max(1, int(step * sy) + 1),
-                                    QColor(40, 80, 255, 160),
-                                )
-                            elif yv >= hi:
-                                painter.fillRect(
-                                    int(rect.left() + x * sx),
-                                    int(rect.top() + y * sy),
-                                    max(1, int(step * sx) + 1),
-                                    max(1, int(step * sy) + 1),
-                                    QColor(255, 40, 40, 160),
-                                )
-                    painter.restore()
-
             if getattr(self, "show_peaking", False) and self._pixmap is not None and not self._pixmap.isNull():
                 rect = self.image_rect()
                 if not rect.isEmpty():
@@ -689,6 +710,9 @@ class ImageCanvas(QWidget):
             painter.drawLine(sx, 0, sx, self.height())
         else:
             self._draw_pixmap(painter, self._pixmap)
+
+        # Exposure assists work in every compare mode
+        self._draw_exposure_overlays(painter)
 
         if self.show_grid and self.compare_mode == self.MODE_NORMAL:
             rect = self.image_rect()
