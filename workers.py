@@ -123,18 +123,44 @@ class HdrMergeWorker(QThread):
     failed = pyqtSignal(str)
     progress = pyqtSignal(str)
 
-    def __init__(self, paths, out_path, align=True, max_dim=0):
+    def __init__(self, paths, out_path, align=True, max_dim=0,
+                 method="mertens", deghost=0):
         super().__init__()
         self.paths = list(paths)
         self.out_path = out_path
         self.align = align
         self.max_dim = max_dim
+        self.method = (method or "mertens").lower()
+        self.deghost = float(deghost or 0)
 
     def run(self):
         try:
-            from imaging import merge_hdr_mertens
-            self.progress.emit(f"Merging {len(self.paths)} exposures…")
-            out = merge_hdr_mertens(self.paths, align=self.align, max_dim=self.max_dim or 0)
+            from imaging import merge_hdr_mertens, merge_hdr_debevec, deghost_stack, load_image
+            self.progress.emit(f"Merging {len(self.paths)} exposures ({self.method})…")
+            if self.method.startswith("debevec"):
+                out = merge_hdr_debevec(
+                    self.paths, align=self.align, max_dim=self.max_dim or 0,
+                    deghost=self.deghost,
+                )
+            else:
+                # Mertens path; optional deghost via pre-load if strength > 0
+                if self.deghost > 0:
+                    try:
+                        # Prefer merge_hdr_mertens deghost kw if supported
+                        out = merge_hdr_mertens(
+                            self.paths, align=self.align, max_dim=self.max_dim or 0,
+                            deghost=self.deghost,
+                        )
+                    except TypeError:
+                        out = merge_hdr_mertens(
+                            self.paths, align=self.align, max_dim=self.max_dim or 0,
+                        )
+                else:
+                    out = merge_hdr_mertens(
+                        self.paths, align=self.align, max_dim=self.max_dim or 0,
+                    )
+            if out is None:
+                raise RuntimeError("HDR merge returned empty result")
             ext = self.out_path.lower().rsplit(".", 1)[-1]
             if ext in ("jpg", "jpeg"):
                 cv2.imwrite(self.out_path, out, [cv2.IMWRITE_JPEG_QUALITY, 95])

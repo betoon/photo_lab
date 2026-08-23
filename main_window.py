@@ -281,7 +281,7 @@ class PhotoLab(QMainWindow):
         file_m.addSeparator()
         add_action(file_m, "Preferences…", self.show_preferences, "Ctrl+,")
         file_m.addSeparator()
-        add_action(file_m, "Print", enabled=False, shortcut="Ctrl+P")
+        add_action(file_m, "Print / PDF…", self.show_print_dialog, "Ctrl+P")
         file_m.addSeparator()
         add_action(file_m, "E&xit", self.close, "Ctrl+Q")
 
@@ -357,12 +357,22 @@ class PhotoLab(QMainWindow):
         add_action(image_m, "Panorama…", self.panorama_selected, "Ctrl+Shift+P")
         add_action(image_m, "Create Pan Video…", self.create_pan_video)
         add_action(image_m, "Audio Editor…", self.open_audio_editor)
+        image_m.addSeparator()
+        add_action(image_m, "Map (GPS)…", self.show_map_view, "Ctrl+Shift+M")
+        add_action(image_m, "Slideshow…", self.start_slideshow, "Ctrl+Shift+S")
+        add_action(image_m, "Print / PDF…", self.show_print_dialog, "Ctrl+P")
+        add_action(image_m, "Run Script…", self.run_user_script)
+
 
         # ----- Help -----
         help_m = mb.addMenu("&Help")
         add_action(help_m, "User Manual", self._show_user_manual, "F1")
         add_action(help_m, "Developer Manual", self._show_developer_manual)
         add_action(help_m, "Keyboard Shortcuts", self._show_shortcuts)
+        help_m.addSeparator()
+        add_action(help_m, "Clear Caches…", self.clear_caches)
+        add_action(help_m, "Report a Problem…", self.export_problem_report)
+        add_action(help_m, "Check for Updates…", self.check_for_updates)
         help_m.addSeparator()
         add_action(help_m, "About PhotoLab", self._show_about)
 
@@ -605,6 +615,11 @@ class PhotoLab(QMainWindow):
         tools_menu.addAction("Panorama…", self.panorama_selected)
         tools_menu.addSeparator()
         tools_menu.addAction("Pan Video…", self.create_pan_video)
+        tools_menu.addSeparator()
+        tools_menu.addAction("Map (GPS)…", self.show_map_view)
+        tools_menu.addAction("Slideshow…", self.start_slideshow)
+        tools_menu.addAction("Print / PDF…", self.show_print_dialog)
+        tools_menu.addAction("Run Script…", self.run_user_script)
         tools_menu.addAction("Audio Editor…", self.open_audio_editor)
         tools_btn.setMenu(tools_menu)
         tb.addWidget(tools_btn)
@@ -1471,6 +1486,56 @@ class PhotoLab(QMainWindow):
         self.bw_cb = QCheckBox("Convert to black & white")
         self.bw_cb.toggled.connect(self._on_bw)
         v.addWidget(self.bw_cb)
+
+        zone_title = QLabel("Zone System (Ansel Adams)")
+        zone_title.setStyleSheet("color:#8af; font-weight:600; font-size:12px;")
+        v.addWidget(zone_title)
+        self.zone_enabled_cb = QCheckBox("Enable zone mapping")
+        self.zone_enabled_cb.setToolTip(
+            "Map tones onto the classic 0–X zone scale (Zone V ≈ middle gray)."
+        )
+        self.zone_enabled_cb.toggled.connect(self._on_zone_enabled)
+        v.addWidget(self.zone_enabled_cb)
+        self._add_slider(v, "zone_placement", "Place midtones on zone", 0.0, 10.0, 0.1, 1, 5.0)
+        self._add_slider(v, "zone_expansion", "Expansion (N− … N+)", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "zone_snap", "Snap to zone centers", 0.0, 100.0, 1, 0, 0.0)
+        filt_row = QHBoxLayout()
+        filt_row.addWidget(QLabel("B&W filter"))
+        self.zone_filter_combo = QComboBox()
+        for name, key in (
+            ("None (panchromatic)", "none"),
+            ("Yellow", "yellow"),
+            ("Orange", "orange"),
+            ("Red", "red"),
+            ("Green", "green"),
+            ("Blue", "blue"),
+        ):
+            self.zone_filter_combo.addItem(name, key)
+        self.zone_filter_combo.currentIndexChanged.connect(self._on_zone_filter)
+        filt_row.addWidget(self.zone_filter_combo, 1)
+        v.addLayout(filt_row)
+        self.zone_overlay_cb = QCheckBox("False-color zone overlay (preview)")
+        self.zone_overlay_cb.toggled.connect(self._on_zone_overlay)
+        v.addWidget(self.zone_overlay_cb)
+        preset_row = QHBoxLayout()
+        for label, place, exp in (
+            ("Zone V", 5.0, 0.0),
+            ("N−", 5.0, -40.0),
+            ("N+", 5.0, 40.0),
+            ("High key", 6.5, 20.0),
+            ("Low key", 3.5, 20.0),
+        ):
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda _=False, p=place, e=exp: self._apply_zone_preset(p, e))
+            preset_row.addWidget(btn)
+        v.addLayout(preset_row)
+        zone_hint = QLabel(
+            "Zones 0–X: pure black → pure white. Place midtones on a zone, "
+            "expand/compress like N+/N− development."
+        )
+        zone_hint.setWordWrap(True)
+        zone_hint.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(zone_hint)
 
         box, v = collapsible_group("Rotate", layout, checked=False)
         row = QHBoxLayout()
@@ -3277,6 +3342,194 @@ class PhotoLab(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Audio Editor", str(e))
 
+
+    def _on_zone_enabled(self, checked: bool):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].zone_enabled = bool(checked)
+        self._schedule_history("Zone enable")
+        self.render_timer.start()
+
+    def _on_zone_filter(self, _idx: int = 0):
+        if self.current_path is None or not hasattr(self, "zone_filter_combo"):
+            return
+        key = self.zone_filter_combo.currentData()
+        self.recipes[self.current_path].zone_filter = key or "none"
+        self._schedule_history("Zone filter")
+        self.render_timer.start()
+
+    def _on_zone_overlay(self, checked: bool):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].zone_overlay = bool(checked)
+        self.render_timer.start()
+
+    def _apply_zone_preset(self, placement: float, expansion: float):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.zone_enabled = True
+        r.zone_placement = float(placement)
+        r.zone_expansion = float(expansion)
+        r.black_and_white = True
+        if hasattr(self, "zone_enabled_cb"):
+            self.zone_enabled_cb.blockSignals(True)
+            self.zone_enabled_cb.setChecked(True)
+            self.zone_enabled_cb.blockSignals(False)
+        if hasattr(self, "bw_cb"):
+            self.bw_cb.blockSignals(True)
+            self.bw_cb.setChecked(True)
+            self.bw_cb.blockSignals(False)
+        self.sync_sliders_to_recipe()
+        self._push_history("Zone preset")
+        self.render_preview()
+
+    def show_map_view(self):
+        paths = []
+        try:
+            paths = self._selected_filmstrip_paths()
+        except Exception:
+            paths = []
+        if len(paths) < 1:
+            paths = list(getattr(self, "image_paths", []) or [])
+        if not paths:
+            QMessageBox.information(self, "Map", "Open a folder or select images first.")
+            return
+        from map_view import MapDialog
+        dlg = MapDialog(paths, parent=self, on_open_path=self.load_image)
+        dlg.exec()
+
+    def start_slideshow(self):
+        paths = []
+        try:
+            paths = self._selected_filmstrip_paths()
+        except Exception:
+            paths = []
+        if len(paths) < 1:
+            paths = list(getattr(self, "image_paths", []) or [])
+        if not paths:
+            QMessageBox.information(self, "Slideshow", "Open a folder or select images first.")
+            return
+        def _load(path):
+            from imaging import load_image, apply_recipe
+            img, meta = load_image(path)
+            r = self.recipes.get(path)
+            if r is not None:
+                img = apply_recipe(img, r, wb_multipliers=meta.get("wb_multipliers"), meta=meta)
+            return img
+        from slideshow import SlideshowWindow
+        self._slideshow = SlideshowWindow(paths, _load, interval_ms=4000, ken_burns=True)
+        self._slideshow.show()
+        self.statusBar().showMessage("Slideshow — Esc exit, Space pause, K Ken Burns")
+
+    def show_print_dialog(self):
+        if getattr(self, "original_bgr", None) is None or self.current_path is None:
+            QMessageBox.information(self, "Print", "Open an image first.")
+            return
+        from print_dialog import PrintDialog
+        r = self.recipes.get(self.current_path)
+        suggested = os.path.splitext(self.current_path)[0] + "_print.pdf"
+        dlg = PrintDialog(self, self.original_bgr, r, default_path=suggested)
+        dlg.exec()
+
+    def run_user_script(self):
+        from PyQt6.QtWidgets import QInputDialog, QMessageBox
+
+        if self.current_path is None:
+            QMessageBox.information(self, "Run Script", "Open an image first.")
+            return
+        from script_runner import list_scripts, run_script, scripts_dir
+        scripts = list_scripts()
+        if not scripts:
+            QMessageBox.information(
+                self, "Run Script",
+                f"No scripts in:\n{scripts_dir()}\n\nAdd a .py file that accepts --path and --recipe.",
+            )
+            return
+        names = [os.path.basename(s) for s in scripts]
+        name, ok = QInputDialog.getItem(self, "Run Script", "Script:", names, 0, False)
+        if not ok:
+            return
+        script = scripts[names.index(name)]
+        recipe = self.recipes.get(self.current_path)
+        code, out, err = run_script(script, self.current_path, recipe)
+        msg = (out or "") + (("\n" + err) if err else "")
+        self.log(f"Script {name} exit={code}")
+        QMessageBox.information(self, "Run Script", f"{name} finished (code {code})\n\n{(msg or '(no output)')[:1500]}")
+
+    def check_for_updates(self):
+        from PyQt6.QtGui import QDesktopServices
+        from PyQt6.QtCore import QUrl
+        try:
+            from config import get_config
+            url = get_config().get("ui", "check_for_updates_url") or "https://github.com/betoon/photo_lab/releases"
+        except Exception:
+            url = "https://github.com/betoon/photo_lab/releases"
+        QDesktopServices.openUrl(QUrl(url))
+        self.statusBar().showMessage(f"Opened: {url}")
+
+    def export_problem_report(self):
+        """Write a diagnostics text file: system info + recent log lines."""
+        import platform, traceback
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Problem Report", "photolab_problem_report.txt", "Text (*.txt)"
+        )
+        if not path:
+            return
+        lines = [
+            "PhotoLab problem report",
+            f"Platform: {platform.platform()}",
+            f"Python: {platform.python_version()}",
+            f"Current image: {self.current_path or '(none)'}",
+        ]
+        try:
+            import cv2, numpy
+            lines.append(f"OpenCV: {cv2.__version__}")
+            lines.append(f"NumPy: {numpy.__version__}")
+        except Exception as e:
+            lines.append(f"Import check: {e}")
+        # recent debug log if available
+        log_buf = getattr(self, "_debug_log_lines", None) or getattr(self, "debug_lines", None)
+        if log_buf:
+            lines.append("--- debug log (tail) ---")
+            lines.extend(list(log_buf)[-50:])
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            self.statusBar().showMessage(f"Report saved → {path}")
+            QMessageBox.information(self, "Report a Problem", f"Saved:\n{path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Report a Problem", str(e))
+
+    def clear_caches(self):
+        """Clear proxy/preview caches and optional thumb cache dir."""
+        cleared = []
+        for attr in ("_preview_cache", "_proxy_cache", "proxy_cache", "thumb_cache"):
+            obj = getattr(self, attr, None)
+            if isinstance(obj, dict):
+                obj.clear()
+                cleared.append(attr)
+        try:
+            from catalog import default_thumb_dir
+            import shutil
+            td = default_thumb_dir()
+            if os.path.isdir(td):
+                # only clear files, keep dir
+                n = 0
+                for name in os.listdir(td):
+                    fp = os.path.join(td, name)
+                    if os.path.isfile(fp):
+                        try:
+                            os.remove(fp)
+                            n += 1
+                        except OSError:
+                            pass
+                cleared.append(f"thumbs:{n}")
+        except Exception as e:
+            cleared.append(f"thumbs-error:{e}")
+        self.statusBar().showMessage(f"Caches cleared ({', '.join(cleared) or 'nothing'})")
+        QMessageBox.information(self, "Clear Caches", "Preview/proxy caches cleared.\nThumb cache cleaned when available.")
+
     def create_pan_video(self):
         """Launch the full Panorama-to-Video tool with the current image preloaded.
 
@@ -3606,7 +3859,7 @@ class PhotoLab(QMainWindow):
                 "then Image → Merge HDR… (Ctrl+Shift+H).",
             )
             return
-        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QSpinBox
         dlg = QDialog(self)
         dlg.setWindowTitle("Merge HDR")
         dlg.setMinimumWidth(420)
@@ -3620,6 +3873,15 @@ class PhotoLab(QMainWindow):
         align_cb = QCheckBox("Align frames (recommended for handheld)")
         align_cb.setChecked(True)
         form.addRow(align_cb)
+        method_combo = QComboBox()
+        method_combo.addItem("Mertens (exposure fusion)", "mertens")
+        method_combo.addItem("Debevec + tonemap (true HDR)", "debevec")
+        form.addRow("Method", method_combo)
+        deghost_spin = QSpinBox()
+        deghost_spin.setRange(0, 100)
+        deghost_spin.setValue(0)
+        deghost_spin.setToolTip("0 = off. Higher values reduce ghosting from movement.")
+        form.addRow("Deghost strength", deghost_spin)
         size_combo = QComboBox()
         size_combo.addItem("Full resolution", 0)
         size_combo.addItem("Preview (long edge 2000px)", 2000)
@@ -3635,6 +3897,8 @@ class PhotoLab(QMainWindow):
             return
         align = align_cb.isChecked()
         max_dim = int(size_combo.currentData() or 0)
+        method = method_combo.currentData() or "mertens"
+        deghost = int(deghost_spin.value())
         base = os.path.splitext(os.path.basename(paths[0]))[0]
         suggested = os.path.join(self.folder or ".", f"{base}_HDR.jpg")
         out_path, _ = QFileDialog.getSaveFileName(
@@ -3644,8 +3908,11 @@ class PhotoLab(QMainWindow):
         if not out_path:
             return
         self.statusBar().showMessage(f"HDR merge: {len(paths)} frames…")
-        self.log(f"HDR merge started ({len(paths)} frames) → {out_path}")
-        self._hdr_worker = HdrMergeWorker(paths, out_path, align=align, max_dim=max_dim)
+        self.log(f"HDR merge started ({len(paths)} frames, {method}, deghost={deghost}) → {out_path}")
+        self._hdr_worker = HdrMergeWorker(
+            paths, out_path, align=align, max_dim=max_dim,
+            method=method, deghost=deghost,
+        )
         self._hdr_worker.progress.connect(lambda m: self.statusBar().showMessage(m))
         self._hdr_worker.finished_ok.connect(self._on_hdr_merge_done)
         self._hdr_worker.failed.connect(
