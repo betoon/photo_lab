@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QFrame, QLineEdit, QToolButton, QSizePolicy, QMessageBox, QStackedWidget, QButtonGroup, QMenu,
     QTreeView, QTextEdit, QTextBrowser, QDockWidget, QPlainTextEdit, QApplication,
     QDialog, QDialogButtonBox, QFormLayout, QInputDialog, QProgressDialog,
+    QSpinBox, QDoubleSpinBox,
 )
 
 VIDEO_EXTENSIONS = {
@@ -4238,7 +4239,7 @@ class PhotoLab(QMainWindow):
             )
             return
 
-        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Focus Stack — {len(paths)} frames")
         form = QFormLayout(dlg)
