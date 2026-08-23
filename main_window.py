@@ -603,6 +603,7 @@ class PhotoLab(QMainWindow):
         self.act_grad = act("Grad", self.toggle_gradient_mode, "G", checkable=True, tip="Graduated filter (G)")
         self.act_brush = act("Brush", self.toggle_brush_mode, "Shift+B", checkable=True, tip="Adjustment brush (Shift+B)")
         self.act_wb_pick = act("WB", self.toggle_wb_picker, "W", checkable=True, tip="Open Color panel + white balance picker (W)")
+        self.act_tb_zebras = act("Zebras", self.toggle_zebras, "Z", checkable=True, tip="Zebra stripes on overexposed areas (Z)")
         tb.addSeparator()
         act("Reset", self.reset_current, "Ctrl+R", tip="Reset image (Ctrl+R)")
         act("Preset", self.load_preset, tip="Load preset (XMP / JSON)")
@@ -1563,7 +1564,7 @@ class PhotoLab(QMainWindow):
 
 
         # ----- Infrared -----
-        box, v = collapsible_group("Infrared", layout, checked=False)
+        box, v = collapsible_group("Infrared", layout, checked=True)
         ir_hint = QLabel(
             "For IR-converted cameras or IR filters. Channel swap is the classic false-color start."
         )
@@ -1598,7 +1599,7 @@ class PhotoLab(QMainWindow):
         v.addLayout(ir_btn_row)
 
         # ----- Astro -----
-        box, v = collapsible_group("Astro", layout, checked=False)
+        box, v = collapsible_group("Astro", layout, checked=True)
         astro_hint = QLabel(
             "For night-sky / linear-ish data. Stretch lifts faint detail; "
             "background removal softens gradients and light pollution."
@@ -3182,6 +3183,8 @@ class PhotoLab(QMainWindow):
             on = not getattr(self.preview, "show_zebras", False)
         if hasattr(self, "act_zebras"):
             self.act_zebras.setChecked(on)
+        if hasattr(self, "act_tb_zebras"):
+            self.act_tb_zebras.setChecked(on)
         if hasattr(self.preview, "set_show_zebras"):
             self.preview.set_show_zebras(on)
         else:
