@@ -861,6 +861,76 @@ class ImageCanvas(QWidget):
         y = (self.height() - sh) // 2 + self._offset.y()
         painter.drawPixmap(QRect(x, y, sw, sh), pm)
 
+    def _draw_exposure_overlays(self, painter):
+        """Highlight/shadow clipping warning (show_clipping) + focus
+        peaking (show_peaking), over whatever is currently drawn at
+        image_rect(). Same logic used inline in Split compare mode;
+        pulled out so normal single-image view gets these warnings too
+        instead of only Split mode."""
+        if self._pixmap is None or self._pixmap.isNull():
+            return
+        rect = self.image_rect()
+        if rect.isEmpty():
+            return
+
+        if getattr(self, "show_clipping", False):
+            from PyQt6.QtGui import QImage
+            qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+            w, h = qimg.width(), qimg.height()
+            step = max(1, max(w, h) // 400)
+            lo = int(255 * getattr(self, "_clip_lo", 0.005))
+            hi = int(255 * getattr(self, "_clip_hi", 0.995))
+            painter.save()
+            painter.setClipRect(rect)
+            sx = rect.width() / max(w, 1)
+            sy = rect.height() / max(h, 1)
+            for y in range(0, h, step):
+                for x in range(0, w, step):
+                    c = qimg.pixelColor(x, y)
+                    yv = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
+                    if yv <= lo:
+                        painter.fillRect(
+                            int(rect.left() + x * sx),
+                            int(rect.top() + y * sy),
+                            max(1, int(step * sx) + 1),
+                            max(1, int(step * sy) + 1),
+                            QColor(40, 80, 255, 160),
+                        )
+                    elif yv >= hi:
+                        painter.fillRect(
+                            int(rect.left() + x * sx),
+                            int(rect.top() + y * sy),
+                            max(1, int(step * sx) + 1),
+                            max(1, int(step * sy) + 1),
+                            QColor(255, 40, 40, 160),
+                        )
+            painter.restore()
+
+        if getattr(self, "show_peaking", False):
+            from PyQt6.QtGui import QImage
+            qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+            w, h = qimg.width(), qimg.height()
+            step = max(2, max(w, h) // 350)
+            painter.save()
+            painter.setClipRect(rect)
+            sx = rect.width() / max(w, 1)
+            sy = rect.height() / max(h, 1)
+            painter.setPen(QPen(QColor(0, 255, 90, 210), max(1, int(step * sx * 0.6))))
+            for y in range(step, h - step, step):
+                for x in range(step, w - step, step):
+                    c0 = qimg.pixelColor(x, y)
+                    c1 = qimg.pixelColor(x + step, y)
+                    c2 = qimg.pixelColor(x, y + step)
+                    y0 = (c0.red() + c0.green() + c0.blue()) // 3
+                    y1 = (c1.red() + c1.green() + c1.blue()) // 3
+                    y2 = (c2.red() + c2.green() + c2.blue()) // 3
+                    if abs(y0 - y1) + abs(y0 - y2) > 40:
+                        painter.drawPoint(
+                            int(rect.left() + x * sx),
+                            int(rect.top() + y * sy),
+                        )
+            painter.restore()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#121212"))
@@ -890,72 +960,13 @@ class ImageCanvas(QWidget):
             if getattr(self, "show_mask_only", False) and self.brush_masks:
                 painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
 
-            if getattr(self, "show_clipping", False) and self._pixmap is not None and not self._pixmap.isNull():
-                rect = self.image_rect()
-                if not rect.isEmpty():
-                    from PyQt6.QtGui import QImage
-                    qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-                    w, h = qimg.width(), qimg.height()
-                    step = max(1, max(w, h) // 400)
-                    lo = int(255 * getattr(self, "_clip_lo", 0.005))
-                    hi = int(255 * getattr(self, "_clip_hi", 0.995))
-                    painter.save()
-                    painter.setClipRect(rect)
-                    sx = rect.width() / max(w, 1)
-                    sy = rect.height() / max(h, 1)
-                    for y in range(0, h, step):
-                        for x in range(0, w, step):
-                            c = qimg.pixelColor(x, y)
-                            yv = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
-                            if yv <= lo:
-                                painter.fillRect(
-                                    int(rect.left() + x * sx),
-                                    int(rect.top() + y * sy),
-                                    max(1, int(step * sx) + 1),
-                                    max(1, int(step * sy) + 1),
-                                    QColor(40, 80, 255, 160),
-                                )
-                            elif yv >= hi:
-                                painter.fillRect(
-                                    int(rect.left() + x * sx),
-                                    int(rect.top() + y * sy),
-                                    max(1, int(step * sx) + 1),
-                                    max(1, int(step * sy) + 1),
-                                    QColor(255, 40, 40, 160),
-                                )
-                    painter.restore()
-
-            if getattr(self, "show_peaking", False) and self._pixmap is not None and not self._pixmap.isNull():
-                rect = self.image_rect()
-                if not rect.isEmpty():
-                    from PyQt6.QtGui import QImage
-                    qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-                    w, h = qimg.width(), qimg.height()
-                    step = max(2, max(w, h) // 350)
-                    painter.save()
-                    painter.setClipRect(rect)
-                    sx = rect.width() / max(w, 1)
-                    sy = rect.height() / max(h, 1)
-                    painter.setPen(QPen(QColor(0, 255, 90, 210), max(1, int(step * sx * 0.6))))
-                    for y in range(step, h - step, step):
-                        for x in range(step, w - step, step):
-                            c0 = qimg.pixelColor(x, y)
-                            c1 = qimg.pixelColor(x + step, y)
-                            c2 = qimg.pixelColor(x, y + step)
-                            y0 = (c0.red() + c0.green() + c0.blue()) // 3
-                            y1 = (c1.red() + c1.green() + c1.blue()) // 3
-                            y2 = (c2.red() + c2.green() + c2.blue()) // 3
-                            if abs(y0 - y1) + abs(y0 - y2) > 40:
-                                painter.drawPoint(
-                                    int(rect.left() + x * sx),
-                                    int(rect.top() + y * sy),
-                                )
-                    painter.restore()
+            self._draw_exposure_overlays(painter)
             painter.setClipping(False)
             painter.setPen(QPen(QColor(255, 255, 255, 200), 2))
             painter.drawLine(sx, 0, sx, self.height())
         else:
             self._draw_pixmap(painter, self._pixmap)
+            self._draw_exposure_overlays(painter)
 
         if self.show_grid and self.compare_mode == self.MODE_NORMAL:
             rect = self.image_rect()
