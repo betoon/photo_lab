@@ -565,3 +565,19 @@ PhotoLab is an open, Python-based editor. It aims for a DxO-like workflow withou
 | Export | Export current image |
 
 Number keys **0–5** set star rating (so 1:1 zoom uses **Ctrl+1**).
+
+## Infrared & Astro (Effects tab)
+
+### Infrared
+- **Channel swap R↔B** — classic false-color IR starting point
+- **False color** — blend toward a warm foliage / cool sky remix
+- **Mono IR** — red-weighted black & white
+- Preset buttons: Wood effect, Gold/Blue, Mono IR
+
+### Astro
+- **Stretch (asinh)** — lift faint nebula / Milky Way structure
+- **Background / gradient remove** — soften sky gradients and light pollution
+- **Star emphasis** — mild detail boost on point sources
+- Presets: Milky Way, DSO soft
+
+These are stored in the recipe sidecar like any other edit. Full calibration stacking (darks/flats) can be added later.

@@ -1561,6 +1561,65 @@ class PhotoLab(QMainWindow):
         zone_hint.setStyleSheet("color:#777; font-size:11px;")
         v.addWidget(zone_hint)
 
+
+        # ----- Infrared -----
+        box, v = collapsible_group("Infrared", layout, checked=False)
+        ir_hint = QLabel(
+            "For IR-converted cameras or IR filters. Channel swap is the classic false-color start."
+        )
+        ir_hint.setWordWrap(True)
+        ir_hint.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(ir_hint)
+        swap_row = QHBoxLayout()
+        swap_row.addWidget(QLabel("Channel swap"))
+        self.ir_swap_combo = QComboBox()
+        for name, key in (
+            ("None", "none"),
+            ("R ↔ B (classic IR)", "rb"),
+        ):
+            self.ir_swap_combo.addItem(name, key)
+        self.ir_swap_combo.currentIndexChanged.connect(self._on_ir_swap)
+        swap_row.addWidget(self.ir_swap_combo, 1)
+        v.addLayout(swap_row)
+        self._add_slider(v, "ir_false_color", "False color", 0.0, 100.0, 1, 0, 0.0)
+        self.ir_mono_cb = QCheckBox("Mono IR (red-weighted)")
+        self.ir_mono_cb.toggled.connect(self._on_ir_mono)
+        v.addWidget(self.ir_mono_cb)
+        ir_btn_row = QHBoxLayout()
+        for label, fn in (
+            ("Wood effect", self._ir_preset_wood),
+            ("Gold/Blue", self._ir_preset_gold_blue),
+            ("Mono IR", self._ir_preset_mono),
+            ("Reset IR", self._ir_preset_reset),
+        ):
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            ir_btn_row.addWidget(b)
+        v.addLayout(ir_btn_row)
+
+        # ----- Astro -----
+        box, v = collapsible_group("Astro", layout, checked=False)
+        astro_hint = QLabel(
+            "For night-sky / linear-ish data. Stretch lifts faint detail; "
+            "background removal softens gradients and light pollution."
+        )
+        astro_hint.setWordWrap(True)
+        astro_hint.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(astro_hint)
+        self._add_slider(v, "astro_stretch", "Stretch (asinh)", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "astro_bg_remove", "Background / gradient remove", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "astro_star_emphasis", "Star emphasis", 0.0, 100.0, 1, 0, 0.0)
+        astro_btn_row = QHBoxLayout()
+        for label, fn in (
+            ("Milky Way", self._astro_preset_milkyway),
+            ("DSO soft", self._astro_preset_dso),
+            ("Reset Astro", self._astro_preset_reset),
+        ):
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            astro_btn_row.addWidget(b)
+        v.addLayout(astro_btn_row)
+
         box, v = collapsible_group("Rotate", layout, checked=False)
         row = QHBoxLayout()
         rot_l = QPushButton("⟲ 90° CCW")
@@ -2474,6 +2533,8 @@ class PhotoLab(QMainWindow):
         if hasattr(self, "bw_cb"):
             self.bw_cb.blockSignals(True)
             self.bw_cb.setChecked(bool(r.black_and_white))
+        if hasattr(self, "_sync_ir_astro_widgets"):
+            self._sync_ir_astro_widgets(r)
             self.bw_cb.blockSignals(False)
             
         # Control points sync
@@ -3406,6 +3467,118 @@ class PhotoLab(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Audio Editor", str(e))
 
+
+
+    def _on_ir_swap(self, _idx=0):
+        if self.current_path is None or not hasattr(self, "ir_swap_combo"):
+            return
+        key = self.ir_swap_combo.currentData() or "none"
+        self.recipes[self.current_path].ir_channel_swap = key
+        self._schedule_history("IR swap")
+        self.render_timer.start()
+
+    def _on_ir_mono(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].ir_mono = bool(checked)
+        self._schedule_history("IR mono")
+        self.render_timer.start()
+
+    def _ir_preset_wood(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.ir_channel_swap = "rb"
+        r.ir_false_color = 55.0
+        r.ir_mono = False
+        self._sync_ir_astro_widgets(r)
+        self._push_history("IR Wood effect")
+        self.render_preview()
+
+    def _ir_preset_gold_blue(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.ir_channel_swap = "rb"
+        r.ir_false_color = 80.0
+        r.ir_mono = False
+        self._sync_ir_astro_widgets(r)
+        self._push_history("IR Gold/Blue")
+        self.render_preview()
+
+    def _ir_preset_mono(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.ir_channel_swap = "none"
+        r.ir_false_color = 0.0
+        r.ir_mono = True
+        self._sync_ir_astro_widgets(r)
+        self._push_history("IR Mono")
+        self.render_preview()
+
+    def _ir_preset_reset(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.ir_channel_swap = "none"
+        r.ir_false_color = 0.0
+        r.ir_mono = False
+        self._sync_ir_astro_widgets(r)
+        self._push_history("IR Reset")
+        self.render_preview()
+
+    def _astro_preset_milkyway(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.astro_stretch = 55.0
+        r.astro_bg_remove = 40.0
+        r.astro_star_emphasis = 25.0
+        self._sync_ir_astro_widgets(r)
+        self._push_history("Astro Milky Way")
+        self.render_preview()
+
+    def _astro_preset_dso(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.astro_stretch = 70.0
+        r.astro_bg_remove = 55.0
+        r.astro_star_emphasis = 15.0
+        self._sync_ir_astro_widgets(r)
+        self._push_history("Astro DSO")
+        self.render_preview()
+
+    def _astro_preset_reset(self):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.astro_stretch = 0.0
+        r.astro_bg_remove = 0.0
+        r.astro_star_emphasis = 0.0
+        self._sync_ir_astro_widgets(r)
+        self._push_history("Astro Reset")
+        self.render_preview()
+
+    def _sync_ir_astro_widgets(self, r):
+        if hasattr(self, "ir_swap_combo"):
+            key = str(getattr(r, "ir_channel_swap", "none") or "none")
+            idx = self.ir_swap_combo.findData(key)
+            if idx < 0:
+                idx = 0
+            self.ir_swap_combo.blockSignals(True)
+            self.ir_swap_combo.setCurrentIndex(idx)
+            self.ir_swap_combo.blockSignals(False)
+        if hasattr(self, "ir_mono_cb"):
+            self.ir_mono_cb.blockSignals(True)
+            self.ir_mono_cb.setChecked(bool(getattr(r, "ir_mono", False)))
+            self.ir_mono_cb.blockSignals(False)
+        for key in ("ir_false_color", "astro_stretch", "astro_bg_remove", "astro_star_emphasis"):
+            if key in getattr(self, "sliders", {}):
+                self.sliders[key].blockSignals(True)
+                self.sliders[key].set_value(float(getattr(r, key, 0) or 0))
+                self.sliders[key].blockSignals(False)
 
     def _on_zone_enabled(self, checked: bool):
         if self.current_path is None:

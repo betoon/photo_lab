@@ -133,6 +133,15 @@ class Recipe:
     vignette: float = 0.0
     film_grain: float = 0.0
     black_and_white: bool = False
+    # Infrared specialty
+    ir_channel_swap: str = "none"  # none | rb | br
+    ir_false_color: float = 0.0     # 0..100 blend toward classic false-color IR
+    ir_mono: bool = False           # mono IR (weighted toward red/NIR)
+    # Astro specialty
+    astro_stretch: float = 0.0      # 0..100 asinh / histogram stretch
+    astro_bg_remove: float = 0.0    # 0..100 gradient / sky background subtraction
+    astro_star_emphasis: float = 0.0  # 0..100 mild star edge boost
+
     # Ansel Adams zone system (B&W)
     zone_enabled: bool = False
     zone_placement: float = 5.0
@@ -1177,6 +1186,88 @@ def try_lensfun_correct(img, meta, strength=1.0):
         return img, f"Lensfun error: {e}"
 
 
+
+def apply_ir_processing(img, r):
+    """Infrared specialty looks on float BGR [0,1]. Additive; no-ops when defaults."""
+    import numpy as np
+    swap = str(getattr(r, "ir_channel_swap", "none") or "none").lower()
+    false_amt = float(getattr(r, "ir_false_color", 0.0) or 0.0) / 100.0
+    mono = bool(getattr(r, "ir_mono", False))
+    if swap == "none" and false_amt < 1e-6 and not mono:
+        return img
+    out = np.clip(img, 0, 1).astype(np.float32).copy()
+    b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    if swap in ("rb", "r-b", "r_b"):
+        # Classic IR channel swap: R <-> B
+        out[..., 0], out[..., 2] = rch.copy(), b.copy()
+        b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    elif swap in ("br", "b-r", "b_r"):
+        out[..., 0], out[..., 2] = rch.copy(), b.copy()
+        # same physical swap; kept as alias
+        b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    if false_amt > 1e-6:
+        # Push toward wood-effect-ish false color (cyan sky / warm foliage tendencies)
+        # Operate in a mild channel remix
+        b2 = np.clip(0.15 * rch + 0.25 * g + 0.60 * b, 0, 1)
+        g2 = np.clip(0.25 * rch + 0.55 * g + 0.20 * b, 0, 1)
+        r2 = np.clip(0.70 * rch + 0.25 * g + 0.05 * b, 0, 1)
+        out[..., 0] = b * (1 - false_amt) + b2 * false_amt
+        out[..., 1] = g * (1 - false_amt) + g2 * false_amt
+        out[..., 2] = rch * (1 - false_amt) + r2 * false_amt
+        b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    if mono:
+        # NIR-weighted mono (favor red channel as stand-in for IR-rich signal)
+        lum = np.clip(0.15 * b + 0.25 * g + 0.60 * rch, 0, 1)
+        out[..., 0] = out[..., 1] = out[..., 2] = lum
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
+def apply_astro_processing(img, r):
+    """Astro stretch + background gradient removal on float BGR [0,1]."""
+    import numpy as np
+    import cv2
+    stretch = float(getattr(r, "astro_stretch", 0.0) or 0.0)
+    bg = float(getattr(r, "astro_bg_remove", 0.0) or 0.0)
+    stars = float(getattr(r, "astro_star_emphasis", 0.0) or 0.0)
+    if stretch < 0.5 and bg < 0.5 and stars < 0.5:
+        return img
+    out = np.clip(img, 0, 1).astype(np.float32).copy()
+    h, w = out.shape[:2]
+    if bg > 0.5:
+        # Large Gaussian as sky model; subtract scaled residual
+        k = max(31, int(min(h, w) * 0.25) | 1)
+        k = min(k, 251)
+        try:
+            sky = cv2.GaussianBlur(out, (k, k), sigmaX=k * 0.25)
+        except Exception:
+            sky = cv2.blur(out, (k, k))
+        strength = (bg / 100.0) * 0.85
+        out = np.clip(out - sky * strength + np.median(sky) * strength * 0.35, 0, 1)
+    if stretch > 0.5:
+        # Per-channel asinh stretch anchored near black point
+        amt = stretch / 100.0
+        # Estimate black from dark percentile
+        flat = out.reshape(-1, 3)
+        lo = np.percentile(flat, 1.0, axis=0).astype(np.float32)
+        work = np.clip(out - lo, 0, 1)
+        # soft scale: higher stretch → more aggressive midtone lift
+        scale = 1.0 + amt * 12.0
+        stretched = np.arcsinh(work * scale) / np.arcsinh(scale)
+        # blend so 0 stretch = original
+        out = out * (1.0 - amt) + stretched * amt
+        out = np.clip(out, 0, 1)
+    if stars > 0.5:
+        # Mild unsharp on luminance to emphasize point sources
+        amt = stars / 100.0 * 0.6
+        try:
+            blur = cv2.GaussianBlur(out, (0, 0), sigmaX=1.2)
+            detail = out - blur
+            out = np.clip(out + detail * amt, 0, 1)
+        except Exception:
+            pass
+    return out.astype(np.float32)
+
+
 def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
     rot = int(getattr(r, "rotate_90", 0)) % 4
     if rot:
@@ -1293,6 +1384,11 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         noise = np.random.randn(*img.shape[:2]).astype(np.float32) * (amt * 0.08)
         img = np.clip(img + noise[..., None], 0, 1)
 
+
+
+    # Specialty: Infrared + Astro (non-destructive recipe flags)
+    img = apply_ir_processing(img, r)
+    img = apply_astro_processing(img, r)
 
     # Black and white + Ansel Adams zone system
     if getattr(r, "black_and_white", False) or getattr(r, "zone_enabled", False):

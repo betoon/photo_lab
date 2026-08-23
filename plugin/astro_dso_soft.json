@@ -1,0 +1,7 @@
+{
+  "name": "Astro DSO Soft",
+  "astro_stretch": 70.0,
+  "astro_bg_remove": 55.0,
+  "astro_star_emphasis": 15.0,
+  "denoise_luminance": 30.0
+}
