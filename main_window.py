@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from PyQt6.QtCore import Qt, QTimer, QSize, QRect, QDir
-from PyQt6.QtGui import QIcon, QAction, QKeySequence, QFont, QFileSystemModel
+from PyQt6.QtGui import QIcon, QAction, QKeySequence, QFont, QFileSystemModel, QColor
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QScrollArea, QListWidget, QListWidgetItem, QFileDialog, QToolBar,
@@ -65,6 +65,167 @@ def collapsible_group(title: str, parent_layout, checked=True):
     inner.setContentsMargins(8, 12, 8, 8)
     parent_layout.addWidget(box)
     return box, inner
+
+
+
+
+class PresetBrowserDialog(QDialog):
+    """Browse and apply presets from the plugin folder (and optional extra dirs)."""
+
+    def __init__(self, parent, plugin_dir: str, extra_dirs=None):
+        super().__init__(parent)
+        self.setWindowTitle("Preset Browser")
+        self.setMinimumSize(520, 480)
+        self.resize(560, 560)
+        self._plugin_dir = plugin_dir or ""
+        self._extra = list(extra_dirs or [])
+        self.selected_path = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+
+        hdr = QLabel("Presets")
+        hdr.setStyleSheet("font-size:16px; font-weight:700; color:#eee;")
+        root.addWidget(hdr)
+
+        path_row = QHBoxLayout()
+        self.path_lbl = QLabel(self._plugin_dir or "(no plugin folder)")
+        self.path_lbl.setStyleSheet("color:#888; font-size:11px;")
+        self.path_lbl.setWordWrap(True)
+        path_row.addWidget(self.path_lbl, 1)
+        browse_btn = QPushButton("Folder…")
+        browse_btn.setToolTip("Choose another preset folder")
+        browse_btn.clicked.connect(self._pick_folder)
+        path_row.addWidget(browse_btn)
+        root.addLayout(path_row)
+
+        filt_row = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search presets…")
+        self.search.textChanged.connect(self._filter)
+        filt_row.addWidget(self.search, 1)
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("All types", "all")
+        self.type_combo.addItem("JSON", "json")
+        self.type_combo.addItem("XMP", "xmp")
+        self.type_combo.currentIndexChanged.connect(self._filter)
+        filt_row.addWidget(self.type_combo)
+        root.addLayout(filt_row)
+
+        self.list = QListWidget()
+        self.list.setStyleSheet(
+            "QListWidget { background:#161616; border:1px solid #333; border-radius:6px; color:#ddd; font-size:13px; }"
+            "QListWidget::item { padding:8px 10px; border-bottom:1px solid #222; }"
+            "QListWidget::item:selected { background:#2a5080; color:#fff; }"
+            "QListWidget::item:hover { background:#1e1e28; }"
+        )
+        self.list.itemDoubleClicked.connect(self._accept_item)
+        self.list.currentItemChanged.connect(self._on_sel)
+        root.addWidget(self.list, 1)
+
+        self.detail = QLabel("Select a preset to apply to the current image.")
+        self.detail.setWordWrap(True)
+        self.detail.setStyleSheet("color:#aaa; font-size:12px; padding:4px;")
+        root.addWidget(self.detail)
+
+        btn_row = QHBoxLayout()
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self.reload)
+        btn_row.addWidget(refresh)
+        btn_row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btn_row.addWidget(cancel)
+        self.apply_btn = QPushButton("Apply")
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.setStyleSheet(
+            "QPushButton { background:#2a5080; color:#fff; font-weight:600; padding:6px 18px; border-radius:4px; }"
+            "QPushButton:disabled { background:#333; color:#777; }"
+        )
+        self.apply_btn.clicked.connect(self.accept)
+        btn_row.addWidget(self.apply_btn)
+        root.addLayout(btn_row)
+
+        self._all_files = []
+        self.reload()
+
+    def reload(self):
+        from presets import list_preset_files
+        files = []
+        dirs = []
+        if self._plugin_dir and os.path.isdir(self._plugin_dir):
+            dirs.append(self._plugin_dir)
+        for d in self._extra:
+            if d and os.path.isdir(d) and d not in dirs:
+                dirs.append(d)
+        for d in dirs:
+            try:
+                files.extend(list_preset_files(d))
+            except Exception:
+                pass
+        # de-dupe by basename preference for plugin dir order
+        seen = set()
+        unique = []
+        for f in files:
+            key = os.path.normcase(os.path.abspath(f))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(f)
+        unique.sort(key=lambda p: os.path.basename(p).lower())
+        self._all_files = unique
+        self._filter()
+
+    def _filter(self, *_):
+        q = (self.search.text() or "").strip().lower()
+        kind = self.type_combo.currentData() or "all"
+        self.list.clear()
+        for path in self._all_files:
+            name = os.path.basename(path)
+            ext = os.path.splitext(name)[1].lower()
+            if kind == "json" and ext != ".json":
+                continue
+            if kind == "xmp" and ext != ".xmp":
+                continue
+            if q and q not in name.lower():
+                continue
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            tip = path
+            item.setToolTip(tip)
+            # subtle color by type
+            if ext == ".xmp":
+                item.setForeground(QColor("#9cf"))
+            else:
+                item.setForeground(QColor("#cfc"))
+            self.list.addItem(item)
+        self.detail.setText(f"{self.list.count()} preset(s) — select one and click Apply.")
+        self.apply_btn.setEnabled(False)
+        self.selected_path = None
+
+    def _on_sel(self, cur, _prev=None):
+        if cur is None:
+            self.apply_btn.setEnabled(False)
+            self.selected_path = None
+            return
+        path = cur.data(Qt.ItemDataRole.UserRole)
+        self.selected_path = path
+        self.apply_btn.setEnabled(True)
+        ext = os.path.splitext(path)[1].upper()
+        self.detail.setText(f"{os.path.basename(path)}\n{path}\nType: {ext}")
+
+    def _accept_item(self, item):
+        self.selected_path = item.data(Qt.ItemDataRole.UserRole)
+        self.accept()
+
+    def _pick_folder(self):
+        d = QFileDialog.getExistingDirectory(self, "Preset folder", self._plugin_dir or "")
+        if d:
+            self._plugin_dir = d
+            self.path_lbl.setText(d)
+            self.reload()
+
 
 
 class PhotoLab(QMainWindow):
@@ -280,7 +441,8 @@ class PhotoLab(QMainWindow):
         add_action(file_m, "Export to Flickr", enabled=False)
         add_action(file_m, "Export to Lightroom", enabled=False)
         file_m.addSeparator()
-        add_action(file_m, "Load Preset… (XMP / JSON)", self.load_preset)
+        add_action(file_m, "Preset Browser…", self.load_preset)
+        add_action(file_m, "Load Preset File… (XMP / JSON)", self.load_preset_file_dialog)
         add_action(file_m, "Import Preset Folder…", self.load_preset_folder)
         add_action(file_m, "Save Preset… (JSON)", self.save_preset)
         file_m.addSeparator()
@@ -612,7 +774,7 @@ class PhotoLab(QMainWindow):
         self.act_tb_zebras = act("Zebras", self.toggle_zebras, "Z", checkable=True, tip="Zebra stripes on overexposed areas (Z)")
         tb.addSeparator()
         act("Reset", self.reset_current, "Ctrl+R", tip="Reset image (Ctrl+R)")
-        act("Preset", self.load_preset, tip="Load preset (XMP / JSON)")
+        act("Preset", self.load_preset, tip="Open Preset Browser (plugin folder)")
         act("Save Preset", self.save_preset, tip="Save current recipe as JSON preset")
         tb.addSeparator()
 
@@ -5071,19 +5233,22 @@ class PhotoLab(QMainWindow):
                 QMessageBox.warning(self, "Save Preset", str(e))
 
     def load_preset(self):
+        """Open the Preset Browser (plugin folder). File → Load Preset… and Apply preset use this."""
         if self.current_path is None:
             QMessageBox.information(self, "Load Preset", "Open an image first.")
             return
-        path, selected_filter = QFileDialog.getOpenFileName(
-            self,
-            "Load Preset",
-            self._preset_start_dir(),
-            "All Presets (*.xmp *.json);;Lightroom XMP (*.xmp);;PhotoLab JSON (*.json);;All (*.*)",
-        )
+        dlg = PresetBrowserDialog(self, self._preset_start_dir())
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        path = dlg.selected_path
         if not path:
             return
+        self._apply_preset_path(path)
+
+    def _apply_preset_path(self, path: str):
+        if self.current_path is None or not path:
+            return
         try:
-            base = self.recipes.get(self.current_path)
             r = load_preset_file(path, base=None)
             self.recipes[self.current_path] = r
             self.sync_sliders_to_recipe()
@@ -5092,6 +5257,20 @@ class PhotoLab(QMainWindow):
             self.statusBar().showMessage(f"Preset loaded ← {os.path.basename(path)}")
         except Exception as e:
             QMessageBox.warning(self, "Load Preset", f"Could not load preset:\n{e}")
+
+    def load_preset_file_dialog(self):
+        """Classic file picker (also available from browser Folder…)."""
+        if self.current_path is None:
+            QMessageBox.information(self, "Load Preset", "Open an image first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Preset File",
+            self._preset_start_dir(),
+            "All Presets (*.xmp *.json);;Lightroom XMP (*.xmp);;PhotoLab JSON (*.json);;All (*.*)",
+        )
+        if path:
+            self._apply_preset_path(path)
 
     def load_preset_folder(self):
         """Import all .xmp/.json presets from a folder and apply the first one (list in status)."""
