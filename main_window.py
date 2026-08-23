@@ -2501,14 +2501,13 @@ class PhotoLab(QMainWindow):
         if key in ("curve_shadows", "curve_darks", "curve_mids", "curve_lights", "curve_highlights"):
             if hasattr(self, "tone_curve"):
                 r = self.recipes[self.current_path]
-                self.tone_curve.blockSignals(True)
-                try:
-                    self.tone_curve.set_values(
-                        r.curve_shadows, r.curve_darks, r.curve_mids,
-                        r.curve_lights, r.curve_highlights,
-                    )
-                finally:
-                    self.tone_curve.blockSignals(False)
+                self.tone_curve.set_values(
+                    float(getattr(r, "curve_shadows", 0) or 0),
+                    float(getattr(r, "curve_darks", 0) or 0),
+                    float(getattr(r, "curve_mids", 0) or 0),
+                    float(getattr(r, "curve_lights", 0) or 0),
+                    float(getattr(r, "curve_highlights", 0) or 0),
+                )
         self.render_timer.start()
 
     def _schedule_history(self, label: str):
@@ -2605,8 +2604,8 @@ class PhotoLab(QMainWindow):
         def _make_channel_page(which: str) -> QWidget:
             page = QWidget()
             lay = QVBoxLayout(page)
-            lay.setContentsMargins(4, 8, 4, 4)
-            lay.setSpacing(2)
+            lay.setContentsMargins(2, 4, 2, 2)
+            lay.setSpacing(1)
             for i, name in enumerate(self._HSL_NAMES):
                 row = SliderRow(name, -100.0, 100.0, 0.0, 1.0, decimals=0)
                 # Tint label
@@ -2628,8 +2627,8 @@ class PhotoLab(QMainWindow):
         # All: compact grid of all three for each channel
         all_page = QWidget()
         all_lay = QVBoxLayout(all_page)
-        all_lay.setContentsMargins(4, 8, 4, 4)
-        all_lay.setSpacing(6)
+        all_lay.setContentsMargins(2, 4, 2, 2)
+        all_lay.setSpacing(3)
         self.hsl_all_sliders = []  # [(hue_row, sat_row, lum_row), ...]
         for i, name in enumerate(self._HSL_NAMES):
             hdr = QLabel(name)
@@ -2650,16 +2649,7 @@ class PhotoLab(QMainWindow):
         parent_layout.addWidget(tabs)
         self.hsl_tabs = tabs
 
-        # Optional color wheel for quick channel pick (still useful)
-        try:
-            self.color_wheel = ColorWheelWidget()
-            self.color_wheel.channelChanged.connect(self._on_hsl_channel)
-            parent_layout.addWidget(self.color_wheel)
-            self.hsl_channel_label = QLabel("Wheel selects channel on All tab")
-            self.hsl_channel_label.setStyleSheet("color:#666; font-size:10px;")
-            parent_layout.addWidget(self.hsl_channel_label)
-        except Exception:
-            self.color_wheel = None
+        self.color_wheel = None
 
     def _on_hsl_channel_value(self, which: str, idx: int, value: float):
         if self.current_path is None:

@@ -301,17 +301,32 @@ class ToneCurveWidget(QWidget):
         self.setMouseTracking(True)
 
     def set_values(self, shadows, darks, mids, lights, highlights):
-        self.values = [shadows, darks, mids, lights, highlights]
+        """Update region handles from sliders (shadows…highlights in -100..100)."""
+        self.values = [
+            float(shadows or 0.0),
+            float(darks or 0.0),
+            float(mids or 0.0),
+            float(lights or 0.0),
+            float(highlights or 0.0),
+        ]
         self.update()
+        self.repaint()  # force immediate redraw when driven by sliders
 
     def _points(self):
+        """Five control points: Shadows, Darks, Midtones, Lights, Highlights."""
         w, h = self.width(), self.height()
         margin = 12
         xs = [0.0, 0.25, 0.5, 0.75, 1.0]
         pts = []
+        # values[i] is vertical offset from the diagonal, -100..100 → stronger visual (0.55)
+        strength = 0.55
         for i, xnorm in enumerate(xs):
             x = margin + xnorm * (w - 2 * margin)
-            ynorm = max(0.02, min(0.98, 1.0 - (xs[i] + self.values[i] / 100.0 * 0.45)))
+            # diagonal baseline: y goes from bottom-left to top-right in image coords
+            # display y increases downward
+            base_y_norm = 1.0 - xnorm  # 1 at left (black), 0 at right (white)
+            offset = (self.values[i] / 100.0) * strength
+            ynorm = max(0.02, min(0.98, base_y_norm - offset))
             y = margin + ynorm * (h - 2 * margin)
             pts.append(QPoint(int(x), int(y)))
         return pts

@@ -245,9 +245,65 @@ def extract_exif(path: str) -> dict:
                         meta.setdefault("datetime", str(value))
                     elif decoded == "DateTime":
                         meta.setdefault("datetime", str(value))
+                    elif decoded == "GPSInfo":
+                        try:
+                            lat, lon = _parse_gps_info(value)
+                            if lat is not None and lon is not None:
+                                meta["gps_latitude"] = lat
+                                meta["gps_longitude"] = lon
+                                meta["gps"] = (lat, lon)
+                        except Exception:
+                            pass
     except Exception:
         pass
     return meta
+
+
+def _gps_ratio_to_float(rat):
+    try:
+        if hasattr(rat, "numerator"):
+            return float(rat.numerator) / float(rat.denominator or 1)
+        if isinstance(rat, (tuple, list)) and len(rat) >= 2:
+            return float(rat[0]) / float(rat[1] or 1)
+        return float(rat)
+    except Exception:
+        return 0.0
+
+
+def _parse_gps_info(gps_info):
+    """Parse PIL GPSInfo dict → (lat, lon) decimal degrees or (None, None)."""
+    if not gps_info or not isinstance(gps_info, dict):
+        return None, None
+    try:
+        from PIL.ExifTags import GPSTAGS
+        tagged = {GPSTAGS.get(k, k): v for k, v in gps_info.items()}
+    except Exception:
+        tagged = gps_info
+
+    def _to_deg(values, ref):
+        if not values or len(values) < 3:
+            return None
+        d = _gps_ratio_to_float(values[0])
+        m = _gps_ratio_to_float(values[1])
+        s = _gps_ratio_to_float(values[2])
+        dec = d + m / 60.0 + s / 3600.0
+        if str(ref) in ("S", "W"):
+            dec = -dec
+        return dec
+
+    lat = _to_deg(tagged.get("GPSLatitude"), tagged.get("GPSLatitudeRef") or "N")
+    lon = _to_deg(tagged.get("GPSLongitude"), tagged.get("GPSLongitudeRef") or "E")
+    return lat, lon
+
+
+def extract_gps(path: str):
+    """Return (lat, lon) or None for an image path."""
+    meta = extract_exif(path)
+    if meta.get("gps"):
+        return meta["gps"]
+    if meta.get("gps_latitude") is not None and meta.get("gps_longitude") is not None:
+        return float(meta["gps_latitude"]), float(meta["gps_longitude"])
+    return None
 
 
 def format_raw_error(path: str, err: Optional[BaseException] = None) -> str:
