@@ -362,6 +362,7 @@ class PhotoLab(QMainWindow):
         add_action(image_m, "Focus Stack…", self.focus_stack_selected, "Ctrl+Shift+F")
         add_action(image_m, "Panorama…", self.panorama_selected, "Ctrl+Shift+P")
         add_action(image_m, "Create Pan Video…", self.create_pan_video)
+        add_action(image_m, "Video Editor…", self._menu_open_video_editor)
         add_action(image_m, "Audio Editor…", self.open_audio_editor)
         image_m.addSeparator()
         add_action(image_m, "Map (GPS)…", self.show_map_view, "Ctrl+Shift+M")
@@ -636,6 +637,7 @@ class PhotoLab(QMainWindow):
         tools_menu.addAction("Panorama…", self.panorama_selected)
         tools_menu.addSeparator()
         tools_menu.addAction("Pan Video…", self.create_pan_video)
+        tools_menu.addAction("Video Editor…", self._menu_open_video_editor)
         tools_menu.addSeparator()
         tools_menu.addAction("Map (GPS)…", self.show_map_view)
         tools_menu.addAction("Slideshow…", self.start_slideshow)
@@ -3794,6 +3796,14 @@ class PhotoLab(QMainWindow):
         self.statusBar().showMessage(f"Caches cleared ({', '.join(cleared) or 'nothing'})")
         QMessageBox.information(self, "Clear Caches", "Preview/proxy caches cleared.\nThumb cache cleaned when available.")
 
+
+
+    def _menu_open_video_editor(self):
+        path = getattr(self, "current_path", None)
+        if path and self._is_video_path(path):
+            self.open_video_editor(path)
+        else:
+            self.open_video_editor(None)
 
     def open_video_editor(self, path=None):
         """Launch VeloCut Studio (video_editor.py), optionally with a clip preloaded."""
