@@ -21,6 +21,11 @@ from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QInputDialog, QProgressDialog,
 )
 
+VIDEO_EXTENSIONS = {
+    ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v",
+    ".mpeg", ".mpg", ".wmv", ".3gp", ".insv", ".lrv",
+}
+
 from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark)
 from presets import load_preset_file, list_preset_files
@@ -82,7 +87,7 @@ class PhotoLab(QMainWindow):
         self.image_paths: list[str] = []
         self.recipes: dict[str, Recipe] = {}
         self.meta_cache: dict[str, dict] = {}
-        self.current_path: str | None = None
+        self.current_path=None
         self.original_bgr: np.ndarray | None = None
 
         self.render_timer = QTimer()
@@ -2397,7 +2402,7 @@ class PhotoLab(QMainWindow):
             self.show_develop_mode()
         self.image_paths = sorted(
             os.path.join(folder, f) for f in os.listdir(folder)
-            if f.lower().endswith(IMAGE_EXTS)
+            if f.lower().endswith(IMAGE_EXTS) or f.lower().endswith(tuple(VIDEO_EXTENSIONS))
         )
         self.filmstrip.clear()
         self.recipes = {}
@@ -2439,6 +2444,9 @@ class PhotoLab(QMainWindow):
         self.load_image(item.data(Qt.ItemDataRole.UserRole))
 
     def load_image(self, path: str):
+        if path and self._is_video_path(path):
+            self.open_video_editor(path)
+            return
         self.current_path = path
         self.statusBar().showMessage(f"Loading {os.path.basename(path)}…")
         if self._load_worker is not None and self._load_worker.isRunning():
@@ -3785,6 +3793,44 @@ class PhotoLab(QMainWindow):
             cleared.append(f"thumbs-error:{e}")
         self.statusBar().showMessage(f"Caches cleared ({', '.join(cleared) or 'nothing'})")
         QMessageBox.information(self, "Clear Caches", "Preview/proxy caches cleared.\nThumb cache cleaned when available.")
+
+
+    def open_video_editor(self, path=None):
+        """Launch VeloCut Studio (video_editor.py), optionally with a clip preloaded."""
+        import sys
+        import subprocess
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "video_editor.py")
+        if not os.path.isfile(script):
+            alt = os.path.join(os.getcwd(), "video_editor.py")
+            script = alt if os.path.isfile(alt) else script
+        if not os.path.isfile(script):
+            QMessageBox.warning(
+                self, "Video Editor",
+                f"Could not find video_editor.py next to the app.\n\n{script}",
+            )
+            return
+        cmd = [sys.executable, script]
+        if path and os.path.isfile(path):
+            cmd.append(path)
+        self.log(f"Launching Video Editor: {' '.join(cmd)}")
+        try:
+            kwargs = {}
+            if os.name == "nt":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            else:
+                kwargs["start_new_session"] = True
+            subprocess.Popen(cmd, **kwargs)
+            self.statusBar().showMessage(
+                f"Video Editor opened" + (f" — {os.path.basename(path)}" if path else "")
+            )
+        except Exception as e:
+            self.log(f"Video Editor launch failed: {e}", level="ERR")
+            QMessageBox.warning(self, "Video Editor", f"Could not launch:\n{e}")
+
+    def _is_video_path(self, path: str) -> bool:
+        if not path:
+            return False
+        return os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS
 
     def create_pan_video(self):
         """Launch the full Panorama-to-Video tool with the current image preloaded.
