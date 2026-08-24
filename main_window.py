@@ -16,7 +16,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QTimer, QSize, QRect, QDir, QSettings
 from PyQt6.QtGui import QIcon, QAction, QKeySequence, QFont, QFileSystemModel, QColor
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
     QScrollArea, QListWidget, QListWidgetItem, QFileDialog, QToolBar,
     QGroupBox, QPushButton, QSplitter, QStatusBar, QComboBox, QTabWidget,
     QCheckBox, QFrame, QLineEdit, QToolButton, QSizePolicy, QMessageBox, QStackedWidget, QButtonGroup, QMenu,
@@ -1311,8 +1311,12 @@ class PhotoLab(QMainWindow):
 
         # RIGHT: DxO-style tool panel
         right = QWidget()
-        right.setMaximumWidth(380)
-        right.setMinimumWidth(340)
+        # Keep correction controls readable when interface text scaling is used.
+        # The category selector below wraps, so this only needs a modest growth
+        # rather than consuming the image-preview area at large text sizes.
+        panel_width = int(round(340 + 100 * (self._ui_scale - 1.0)))
+        right.setMinimumWidth(max(340, panel_width))
+        right.setMaximumWidth(max(380, panel_width + 40))
         rl = QVBoxLayout(right)
         rl.setContentsMargins(4, 4, 4, 4)
         rl.setSpacing(4)
@@ -1334,9 +1338,13 @@ class PhotoLab(QMainWindow):
         rl.addWidget(self.search_edit)
 
         # Category tabs (Light / Color / Detail / Geometry / Effects)
-        # DxO-style category strip (buttons, not cramped tabs)
-        cat_row = QHBoxLayout()
-        cat_row.setSpacing(4)
+        # DxO-style category selector.  A fixed single row overflowed the
+        # correction panel at larger interface text sizes and hid Geometry.
+        # Three responsive columns keep every category visible at every scale.
+        cat_grid = QGridLayout()
+        cat_grid.setContentsMargins(0, 0, 0, 0)
+        cat_grid.setHorizontalSpacing(4)
+        cat_grid.setVerticalSpacing(4)
         self._cat_group = QButtonGroup(self)
         self._cat_group.setExclusive(True)
         self.tool_stack = QStackedWidget()
@@ -1353,11 +1361,12 @@ class PhotoLab(QMainWindow):
         for i, (name, builder) in enumerate(categories):
             btn = QPushButton(name)
             btn.setCheckable(True)
-            btn.setMinimumWidth(50)
+            btn.setMinimumWidth(0)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.setStyleSheet("""
                 QPushButton {
                     background: #2a2a2a; color: #bbb; border: 1px solid #3a3a3a;
-                    border-radius: 4px; padding: 7px 10px; font-size: 12px;
+                    border-radius: 4px; padding: 7px 4px; font-size: 12px;
                 }
                 QPushButton:checked {
                     background: #2a6ad4; color: #fff; border-color: #2a6ad4; font-weight: 600;
@@ -1367,13 +1376,14 @@ class PhotoLab(QMainWindow):
             if i == 0:
                 btn.setChecked(True)
             self._cat_group.addButton(btn, i)
-            cat_row.addWidget(btn)
+            cat_grid.addWidget(btn, i // 3, i % 3)
             self._cat_buttons.append(btn)
             page = builder()  # returns the scroll widget
             self.tool_stack.addWidget(page)
         self._cat_group.idClicked.connect(self.tool_stack.setCurrentIndex)
-        cat_row.addStretch(1)
-        rl.addLayout(cat_row)
+        for column in range(3):
+            cat_grid.setColumnStretch(column, 1)
+        rl.addLayout(cat_grid)
         rl.addWidget(self.tool_stack, stretch=1)
 
         splitter.addWidget(right)
