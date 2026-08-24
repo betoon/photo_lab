@@ -7,11 +7,8 @@ Collapsible correction groups matching DxO PhotoLab structure.
 from __future__ import annotations
 
 import os
-import logging
 import cv2
 import numpy as np
-
-log = logging.getLogger(__name__)
 
 from PyQt6.QtCore import Qt, QTimer, QSize, QRect, QDir
 from PyQt6.QtGui import QIcon, QAction, QKeySequence, QFont, QFileSystemModel, QColor
@@ -35,7 +32,7 @@ from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
 from presets import load_preset_file, list_preset_files
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
-from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, HSLPanelWidget, HistoryWidget, NavigatorWidget
+from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
 from catalog import Catalog
 import sys
 from datetime import datetime
@@ -579,7 +576,11 @@ class PhotoLab(QMainWindow):
                 candidates.append(mf)
             candidates.append(os.path.join(docs_dir(), name))
         except Exception:
+<<<<<<< Updated upstream
             log.debug("_manual_path: app path lookup failed", exc_info=True)
+=======
+            pass
+>>>>>>> Stashed changes
         candidates.extend([
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", name),
             os.path.join(os.getcwd(), "docs", name),
@@ -1421,7 +1422,6 @@ class PhotoLab(QMainWindow):
         box, v = collapsible_group("Tone Curve", layout)
         self.tone_curve = ToneCurveWidget()
         self.tone_curve.curveChanged.connect(self.on_curve_changed)
-        self.tone_curve.pointCurveChanged.connect(self.on_point_curve_changed)
         v.addWidget(self.tone_curve)
         region_lbl = QLabel("Region")
         region_lbl.setStyleSheet("color:#9cf; font-weight:600; font-size:12px; margin-top:6px;")
@@ -1793,6 +1793,10 @@ class PhotoLab(QMainWindow):
         zone_hint.setWordWrap(True)
         zone_hint.setStyleSheet("color:#777; font-size:11px;")
         v.addWidget(zone_hint)
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 
         box, v = collapsible_group("Rotate", layout, checked=False)
         row = QHBoxLayout()
@@ -1988,27 +1992,6 @@ class PhotoLab(QMainWindow):
             return
         self.recipes[self.current_path].black_and_white = checked
         self._schedule_history("B&W")
-        self.render_timer.start()
-
-    def _on_zone_toggle(self, checked):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].zone_enabled = checked
-        self._schedule_history("Zone System")
-        self.render_timer.start()
-
-    def _on_zone_filter(self, name):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].zone_filter = name
-        self._schedule_history("Zone filter")
-        self.render_timer.start()
-
-    def _on_zone_overlay(self, checked):
-        if self.current_path is None:
-            return
-        self.recipes[self.current_path].zone_overlay = checked
-        self._schedule_history("Zone overlay")
         self.render_timer.start()
 
     def _rotate(self, direction):
@@ -2706,10 +2689,13 @@ class PhotoLab(QMainWindow):
             r.curve_shadows, r.curve_darks, r.curve_mids,
             r.curve_lights, r.curve_highlights,
         )
+<<<<<<< Updated upstream
         self.tone_curve.set_point_curve("luma", getattr(r, "curve_points", None) or [])
         self.tone_curve.set_point_curve("r", getattr(r, "curve_r_points", None) or [])
         self.tone_curve.set_point_curve("g", getattr(r, "curve_g_points", None) or [])
         self.tone_curve.set_point_curve("b", getattr(r, "curve_b_points", None) or [])
+=======
+>>>>>>> Stashed changes
         # HSL channel sliders
         if hasattr(self, "_sync_all_hsl_sliders_from_recipe"):
             self._sync_all_hsl_sliders_from_recipe(r)
@@ -2735,7 +2721,10 @@ class PhotoLab(QMainWindow):
         if hasattr(self, "bw_cb"):
             self.bw_cb.blockSignals(True)
             self.bw_cb.setChecked(bool(r.black_and_white))
+        if hasattr(self, "_sync_ir_astro_widgets"):
+            self._sync_ir_astro_widgets(r)
             self.bw_cb.blockSignals(False)
+<<<<<<< Updated upstream
         if hasattr(self, "_sync_ir_astro_widgets"):
             self._sync_ir_astro_widgets(r)
         if hasattr(self, "zone_enabled_cb"):
@@ -2751,6 +2740,9 @@ class PhotoLab(QMainWindow):
             self.zone_overlay_cb.setChecked(bool(getattr(r, "zone_overlay", False)))
             self.zone_overlay_cb.blockSignals(False)
 
+=======
+            
+>>>>>>> Stashed changes
         # Control points sync
         self.selected_local_index = -1
         self._update_local_points_list()
@@ -2948,10 +2940,93 @@ class PhotoLab(QMainWindow):
         r = self.recipes[self.current_path]
 
         def replace(tup, i, v):
+            lst = list(tup if tup is not None else (0.0,) * 8)
+            while len(lst) < 8:
+                lst.append(0.0)
+            lst[i] = float(value)
+            return tuple(lst)
+
+        if which == "hue":
+            r.hsl_hue = replace(r.hsl_hue, idx, value)
+        elif which == "sat":
+            r.hsl_sat = replace(r.hsl_sat, idx, value)
+        else:
+            r.hsl_lum = replace(r.hsl_lum, idx, value)
+        r.hsl_active_channel = idx
+        self._sync_hsl_slider_group(which, idx, value)
+        self._schedule_history(f"HSL {which} {self._HSL_NAMES[idx]}")
+        self.render_timer.start()
+
+    def _sync_hsl_slider_group(self, which: str, idx: int, value: float):
+        """Keep tab sliders and All-tab trio in sync without feedback loops."""
+        rows = getattr(self, "hsl_sliders", {}).get(which) or []
+        if idx < len(rows):
+            row = rows[idx]
+            if abs(row.spin.value() - value) > 1e-6:
+                row.blockSignals(True)
+                row.set_value(value)
+                row.blockSignals(False)
+        if hasattr(self, "hsl_all_sliders") and idx < len(self.hsl_all_sliders):
+            map_i = {"hue": 0, "sat": 1, "lum": 2}[which]
+            row = self.hsl_all_sliders[idx][map_i]
+            if abs(row.spin.value() - value) > 1e-6:
+                row.blockSignals(True)
+                row.set_value(value)
+                row.blockSignals(False)
+
+    def _sync_all_hsl_sliders_from_recipe(self, r):
+        if not hasattr(self, "hsl_sliders"):
+            return
+        for which, attr in (("hue", "hsl_hue"), ("sat", "hsl_sat"), ("lum", "hsl_lum")):
+            vals = list(getattr(r, attr, (0.0,) * 8) or (0.0,) * 8)
+            while len(vals) < 8:
+                vals.append(0.0)
+            for i, row in enumerate(self.hsl_sliders.get(which) or []):
+                row.blockSignals(True)
+                row.set_value(float(vals[i]))
+                row.blockSignals(False)
+            if hasattr(self, "hsl_all_sliders"):
+                map_i = {"hue": 0, "sat": 1, "lum": 2}[which]
+                for i, trio in enumerate(self.hsl_all_sliders):
+                    trio[map_i].blockSignals(True)
+                    trio[map_i].set_value(float(vals[i]))
+                    trio[map_i].blockSignals(False)
+
+    def _on_hsl_channel(self, idx: int):
+        """Color wheel selected a channel — jump All tab focus / status."""
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.hsl_active_channel = idx
+        names = getattr(self, "_HSL_NAMES", None) or [
+            "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"
+        ]
+        if hasattr(self, "hsl_channel_label"):
+            self.hsl_channel_label.setText(f"Channel: {names[idx]}")
+        if hasattr(self, "hsl_tabs"):
+            self.hsl_tabs.setCurrentIndex(3)  # All
+        self.statusBar().showMessage(f"HSL channel: {names[idx]}")
+    def _on_hsl_channel(self, idx: int):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        r.hsl_active_channel = idx
+        names = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]
+        self.hsl_channel_label.setText(f"Channel: {names[idx]}")
+        # Load channel values into sliders
+        self.sliders["_hsl_hue"].set_value(r.hsl_hue[idx])
+        self.sliders["_hsl_sat"].set_value(r.hsl_sat[idx])
+        self.sliders["_hsl_lum"].set_value(r.hsl_lum[idx])
+
+    def _on_hsl_slider(self, which: str, value: float):
+        if self.current_path is None:
+            return
+        r = self.recipes[self.current_path]
+        idx = r.hsl_active_channel
+        def replace(tup, i, v):
             lst = list(tup)
             lst[i] = v
             return tuple(lst)
-
         if which == "hue":
             r.hsl_hue = replace(r.hsl_hue, idx, value)
         elif which == "sat":
@@ -3076,23 +3151,6 @@ class PhotoLab(QMainWindow):
                 self.sliders[key].blockSignals(False)
         self._schedule_history("Tone curve")
         self.render_timer.start()
-
-    def on_point_curve_changed(self, channel_key: str, points: list):
-        """Luma/R/G/B point-curve edit from the Tone Curve graph."""
-        if self.current_path is None:
-            return
-        r = self.recipes[self.current_path]
-        field_map = {
-            "luma": "curve_points",
-            "r": "curve_r_points",
-            "g": "curve_g_points",
-            "b": "curve_b_points",
-        }
-        field = field_map.get(channel_key)
-        if field is not None:
-            setattr(r, field, points)
-            self._schedule_history(f"Tone curve ({channel_key})")
-            self.render_timer.start()
 
     def on_wb_as_shot(self, checked):
         if self.current_path is None:

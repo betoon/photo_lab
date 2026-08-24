@@ -67,6 +67,13 @@ def _parse_xmp_text(text: str) -> dict:
 
 def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     """Load a Lightroom/ACR .xmp develop preset into a Recipe."""
+<<<<<<< Updated upstream
+=======
+    # XMP develop presets are partial edits.  Work on a copy so applying one
+    # preserves settings that the preset does not mention (especially the
+    # image's current/as-shot WB) and a parse failure cannot mutate the live
+    # recipe in place.
+>>>>>>> Stashed changes
     r = copy.deepcopy(base) if base is not None else Recipe()
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         text = f.read()
@@ -134,17 +141,12 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     if sat is not None:
         r.saturation = max(-100.0, min(100.0, sat))
 
-    # White balance
-    #
-    # Real Lightroom/ACR exports never put a Temperature below 2000 here —
-    # 2000K is the floor LR's own Temperature slider enforces, so anything
-    # smaller is not a deliberate absolute-Kelvin value. These bundled
-    # plugin/*.xmp files contain small values like "4" or "8" for
-    # crs:Temperature (evidently meant as a minor relative nudge, not
-    # degrees Kelvin) — treating those as absolute Kelvin and clamping to
-    # the 2000K floor produced a strong, unintended orange cast on nearly
-    # every bundled plugin. Skip implausible values instead of clamping
-    # them, leaving Recipe.temperature at its neutral default.
+    # White balance. Lightroom stores absolute Kelvin values for a custom WB,
+    # but many converted creative presets use small signed Temperature/Tint
+    # values as relative nudges. They are not Kelvin: clamping +6 to 2000 K
+    # creates the severe orange cast this importer used to produce. Because
+    # Recipe currently has only absolute WB fields, preserve the existing WB
+    # for relative pairs rather than inventing an absolute illuminant.
     temp = _f(g("Temperature"))
     has_absolute_temp = temp is not None and 2000.0 <= temp <= 50000.0
     if has_absolute_temp:

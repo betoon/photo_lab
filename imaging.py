@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import logging
 import threading
 from dataclasses import dataclass, asdict, field, fields
 from typing import Optional, Tuple
@@ -18,14 +17,12 @@ from typing import Optional, Tuple
 import numpy as np
 import cv2
 
-log = logging.getLogger(__name__)
-
 # Suppress OpenCV's noisy TIFF tag warnings (NEF/CR2 false probes)
 try:
     if hasattr(cv2, 'setLogLevel'):
         cv2.setLogLevel(3)  # ERROR only
 except Exception:
-    log.debug("Could not set OpenCV log level", exc_info=True)
+    pass
 
 # rawpy/LibRaw is not thread-safe. ThumbnailWorker and LoadImageWorker (and
 # any other background threads) can call into it concurrently, which
@@ -114,13 +111,6 @@ class Recipe:
     curve_mids: float = 0.0
     curve_lights: float = 0.0
     curve_highlights: float = 0.0
-    # Per-channel point curves (Luma/R/G/B), each a list of [x,y] in 0..1.
-    # Separate from the 5-region parametric curve above; both can be
-    # active at once (parametric first, then these on top).
-    curve_points: list = field(default_factory=list)
-    curve_r_points: list = field(default_factory=list)
-    curve_g_points: list = field(default_factory=list)
-    curve_b_points: list = field(default_factory=list)
 
     denoise_luminance: float = 0.0
     denoise_chroma: float = 0.0
@@ -364,10 +354,18 @@ def format_raw_error(path: str, err: Optional[BaseException] = None) -> str:
 _RAW_OUTPUT_BPS = 8
 
 def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] = None) -> Tuple[np.ndarray, dict]:
+<<<<<<< Updated upstream
     """Decode into the pipeline's uint8 BGR working format.
 
     ``output_bps`` is accepted for export-worker compatibility. The current
     processing pipeline remains 8-bit/display-referred internally.
+=======
+    """Decode an image into the pipeline's uint8 BGR working format.
+
+    ``output_bps`` is accepted for compatibility with the export worker. The
+    current processing stack is 8-bit/display-referred, so requesting 16-bit
+    affects final file encoding rather than this intermediate decode.
+>>>>>>> Stashed changes
     """
     meta = {"is_raw": False, "wb_multipliers": None, "wb_baked": False}
     img_bgr = None
@@ -399,6 +397,12 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                         )
                     img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                     meta["is_raw"] = True
+<<<<<<< Updated upstream
+=======
+                    # LibRaw has already applied the camera multipliers to
+                    # this rendered RGB image. apply_recipe must not apply
+                    # camera_whitebalance a second time.
+>>>>>>> Stashed changes
                     meta["wb_baked"] = bool(use_camera_wb)
                     try:
                         meta["wb_multipliers"] = list(raw.camera_whitebalance)
@@ -559,30 +563,7 @@ def kelvin_to_rgb(kelvin):
     return rgb
 
 
-# Reference point apply_white_balance() normalizes against. Kept equal to
-# Recipe.temperature's own default (see imaging.Recipe) so that a Recipe
-# nobody has touched the WB fields on is always color-neutral. If you ever
-# change Recipe.temperature's default, update this to match.
-_WB_NEUTRAL_KELVIN = 5500.0
-
-
 def apply_white_balance(img, temperature, tint, as_shot=False, multipliers=None):
-    """White balance via a Kelvin/tint gain, anchored so the *default*
-    Recipe (temperature=5500, tint=0) is always a true no-op.
-
-    kelvin_to_rgb(5500) is NOT neutral RGB on its own — it's a warm color
-    (~R 1.0 / G 0.93 / B 0.87), since it approximates real blackbody
-    radiation rather than a white-balance correction curve. Using it
-    directly as a multiplicative gain (the previous implementation) meant
-    every Recipe that didn't explicitly set temperature/tint — which is
-    effectively every plugin/preset, and every freshly opened non-RAW
-    image — got a visible orange cast purely from this stage, with no way
-    to avoid it. Dividing by kelvin_to_rgb() at the Recipe's own default
-    temperature anchors the gain to exactly (1, 1, 1) at that default, so
-    moving the Temperature/Tint sliders away from their defaults still
-    warms/cools the image as expected, but leaving them untouched no
-    longer shifts color at all.
-    """
     if as_shot and multipliers is not None:
         try:
             r_m, g_m, b_m = float(multipliers[0]), float(multipliers[1]), float(multipliers[2])
@@ -590,9 +571,8 @@ def apply_white_balance(img, temperature, tint, as_shot=False, multipliers=None)
             gains /= (gains[1] + 1e-6)
             return np.clip(img * gains[None, None, :], 0, 1)
         except Exception:
-            log.debug("apply_white_balance: non-critical failure, continuing", exc_info=True)
-    neutral_rgb = kelvin_to_rgb(_WB_NEUTRAL_KELVIN)
-    rgb = kelvin_to_rgb(temperature) / (neutral_rgb + 1e-6)
+            pass
+    rgb = kelvin_to_rgb(temperature)
     tf = tint / 150.0
     rgb[0] *= (1.0 + tf * 0.4)
     rgb[1] *= (1.0 - tf * 0.6)
@@ -629,68 +609,6 @@ def apply_tone_curve(img, shadows, darks, mids, lights, highlights):
     l_idx = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
     lab[..., 0] = lut[l_idx] * 100.0
     return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-
-def _points_to_lut(points, size=256):
-    """Build a 0..1 LUT from sorted [[x,y], ...] control points (0..1)."""
-    if not points:
-        return np.linspace(0, 1, size, dtype=np.float32)
-    pts = []
-    for p in points:
-        try:
-            x, y = float(p[0]), float(p[1])
-            pts.append((max(0.0, min(1.0, x)), max(0.0, min(1.0, y))))
-        except Exception:
-            continue
-    if not pts:
-        return np.linspace(0, 1, size, dtype=np.float32)
-    pts = sorted(pts, key=lambda t: t[0])
-    if pts[0][0] > 0.0:
-        pts = [(0.0, pts[0][1])] + pts
-    if pts[-1][0] < 1.0:
-        pts = pts + [(1.0, pts[-1][1])]
-    xs = np.array([p[0] for p in pts], dtype=np.float32)
-    ys = np.array([p[1] for p in pts], dtype=np.float32)
-    uniq_x, uniq_y = [xs[0]], [ys[0]]
-    for i in range(1, len(xs)):
-        if xs[i] - uniq_x[-1] > 1e-6:
-            uniq_x.append(xs[i])
-            uniq_y.append(ys[i])
-        else:
-            uniq_y[-1] = ys[i]
-    grid = np.linspace(0, 1, size, dtype=np.float32)
-    return np.clip(np.interp(grid, uniq_x, uniq_y), 0, 1).astype(np.float32)
-
-
-def apply_point_curve_luma(img, points):
-    """Apply luminance point curve via LAB L channel."""
-    if not points or len(points) < 2:
-        return img
-    lut = _points_to_lut(points)
-    img = np.clip(img, 0, 1).astype(np.float32)
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l_idx = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
-    lab[..., 0] = lut[l_idx] * 100.0
-    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-
-def apply_rgb_point_curves(img, r_pts=None, g_pts=None, b_pts=None):
-    """Per-channel RGB point curves. Input/output float BGR 0..1."""
-    if not r_pts and not g_pts and not b_pts:
-        return img
-    img = np.clip(img, 0, 1).astype(np.float32)
-    out = img.copy()
-    channels = [
-        (0, b_pts),
-        (1, g_pts),
-        (2, r_pts),
-    ]
-    for ch, pts in channels:
-        if pts and len(pts) >= 2:
-            lut = _points_to_lut(pts)
-            idx = (np.clip(out[..., ch], 0, 1) * 255).astype(np.int32)
-            out[..., ch] = lut[idx]
-    return np.clip(out, 0, 1)
 
 
 def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0, method="auto"):
@@ -1420,13 +1338,6 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         img = img + (img - blur) * (r.clarity / 100.0)
 
     img = apply_tone_curve(img, r.curve_shadows, r.curve_darks, r.curve_mids, r.curve_lights, r.curve_highlights)
-    img = apply_point_curve_luma(img, getattr(r, "curve_points", None) or [])
-    img = apply_rgb_point_curves(
-        img,
-        getattr(r, "curve_r_points", None) or [],
-        getattr(r, "curve_g_points", None) or [],
-        getattr(r, "curve_b_points", None) or [],
-    )
     img = np.clip(img, 0, 1)
     if abs(r.gamma - 1.0) > 1e-4:
         img = img ** (1.0 / r.gamma)
@@ -1488,30 +1399,10 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         d = np.clip(d, 0, 1.4) / 1.4
         img *= (1.0 - (r.vignette / 100.0) * (d ** 2))[..., None]
 
-    # Black and white + Ansel Adams zone system
-    if getattr(r, "black_and_white", False) or getattr(r, "zone_enabled", False):
-        img = apply_zone_system(
-            img,
-            enabled=True,
-            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
-            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
-            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
-            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
-            overlay=bool(getattr(r, "zone_overlay", False)),
-            force_bw=True,
-        )
-    elif getattr(r, "zone_overlay", False):
-        # Overlay only without forcing B&W conversion of the edit stack
-        img = apply_zone_system(
-            img,
-            enabled=True,
-            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
-            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
-            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
-            snap=0.0,
-            overlay=True,
-            force_bw=False,
-        )
+    # Black and white
+    if getattr(r, "black_and_white", False):
+        gray = cv2.cvtColor(np.clip(img, 0, 1), cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
     # Film grain
     if abs(getattr(r, "film_grain", 0.0)) > 1e-4:
@@ -1547,112 +1438,44 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
             overlay=True,
         )
 
+<<<<<<< Updated upstream
+    # Film grain
+    if abs(getattr(r, "film_grain", 0.0)) > 1e-4:
+        amt = r.film_grain / 100.0
+        noise = np.random.randn(*img.shape[:2]).astype(np.float32) * (amt * 0.08)
+        img = np.clip(img + noise[..., None], 0, 1)
+
+
+
+    # Specialty: Infrared + Astro (non-destructive recipe flags)
+    img = apply_ir_processing(img, r)
+    img = apply_astro_processing(img, r)
+
+    # Black and white + Ansel Adams zone system
+    if getattr(r, "black_and_white", False) or getattr(r, "zone_enabled", False):
+        img = apply_zone_system(
+            img,
+            enabled=True,
+            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
+            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
+            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
+            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
+            overlay=bool(getattr(r, "zone_overlay", False)),
+        )
+    elif getattr(r, "zone_overlay", False):
+        img = apply_zone_system(
+            img,
+            enabled=False,
+            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
+            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
+            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
+            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
+            overlay=True,
+        )
+
+=======
+>>>>>>> Stashed changes
     return (np.clip(img, 0, 1) * 255.0).astype(np.uint8)
-
-
-# Spectral weights for classic B&W contrast filters (approx on sRGB primaries)
-_ZONE_FILTERS = {
-    "none": (0.299, 0.587, 0.114),
-    "yellow": (0.35, 0.55, 0.10),
-    "orange": (0.45, 0.45, 0.10),
-    "red": (0.65, 0.25, 0.10),
-    "green": (0.15, 0.70, 0.15),
-    "blue": (0.15, 0.25, 0.60),
-}
-
-# False-color palette for zone overlay (Zone 0..X)
-_ZONE_COLORS = np.array([
-    [0, 0, 0],        # 0 black
-    [20, 20, 40],     # I
-    [40, 50, 90],     # II
-    [30, 90, 120],    # III
-    [40, 140, 80],    # IV
-    [180, 180, 60],   # V mid
-    [200, 140, 40],   # VI
-    [220, 90, 40],    # VII
-    [230, 50, 50],    # VIII
-    [240, 200, 200],  # IX
-    [255, 255, 255],  # X white
-], dtype=np.float32) / 255.0
-
-
-def apply_zone_system(
-    img,
-    enabled: bool = True,
-    placement: float = 5.0,
-    expansion: float = 0.0,
-    filter_name: str = "none",
-    snap: float = 0.0,
-    overlay: bool = False,
-    force_bw: bool = True,
-):
-    """Ansel Adams–inspired zone mapping on float BGR [0,1].
-
-    placement: which zone (0..10) middle-gray (~18% / zone V) is mapped to.
-    expansion: −100 compresses dynamic range, +100 expands (N− / N+ feel).
-    filter_name: spectral B&W contrast filter.
-    snap: 0..100 pull luminance toward discrete zone centers.
-    overlay: paint false-color zones (preview aid).
-    """
-    if not enabled and not overlay:
-        return img
-    img = np.clip(img, 0, 1).astype(np.float32)
-    filt = _ZONE_FILTERS.get((filter_name or "none").lower(), _ZONE_FILTERS["none"])
-    # OpenCV BGR order
-    b, g, rch = img[..., 0], img[..., 1], img[..., 2]
-    # filt is RGB weights
-    lum = np.clip(filt[2] * b + filt[1] * g + filt[0] * rch, 0.0, 1.0)
-
-    # Map: log-ish zone scale. Zone V ≈ 0.18 reflectance → ~0.5 display gamma-ish.
-    # Work in linear-ish zone index 0..10
-    # Convert luminance to zone via log2 relative to mid-gray 0.18
-    mid_ref = 0.18
-    # Avoid log0
-    safe = np.maximum(lum, 1e-5)
-    # Stops relative to mid-gray; zone V = 5
-    stops = np.log2(safe / mid_ref)
-    zone = 5.0 + stops  # approximately
-
-    place = float(np.clip(placement if placement is not None else 5.0, 0.0, 10.0))
-    # Shift so mid-gray lands on placement
-    zone = zone + (place - 5.0)
-
-    # Expansion around placement (N+/N−)
-    exp = float(expansion or 0.0) / 100.0
-    scale = 1.0 + exp * 0.85
-    zone = place + (zone - place) * scale
-    zone = np.clip(zone, 0.0, 10.0)
-
-    snap_amt = float(np.clip(snap or 0.0, 0.0, 100.0)) / 100.0
-    if snap_amt > 0.01:
-        centers = np.round(zone)
-        zone = zone * (1.0 - snap_amt) + centers * snap_amt
-
-    # Zone → display luminance (approx Adams print scale)
-    # Zone 0→0, V→0.18 linear-ish, X→1 with soft shoulder
-    out_lin = mid_ref * (2.0 ** (zone - 5.0))
-    out_lin = np.clip(out_lin, 0.0, 1.0)
-    # Mild display gamma for screen
-    out = np.power(out_lin, 1.0 / 2.2)
-
-    if overlay:
-        # Flat, fully-opaque zone-color patches — the classic Ansel Adams
-        # 11-step zone chart (Zone 0 black .. Zone X white). Previously
-        # this blended 35% of the underlying continuous image back in,
-        # which smeared the crisp zone boundaries into ~100 nearly-
-        # identical shades instead of 11 distinct, clearly bounded steps
-        # (verified: a black-to-white test gradient produced 103 distinct
-        # colors before this fix, 11 after). A reference chart like this
-        # only works as an exposure-planning aid if each zone reads as one
-        # unambiguous flat color, so the overlay no longer mixes in any of
-        # the original image's continuous luminance/detail.
-        idx = np.clip(np.round(zone).astype(np.int32), 0, 10)
-        img = _ZONE_COLORS[idx]
-        return np.clip(img, 0, 1)
-
-    if force_bw:
-        img = np.stack([out, out, out], axis=-1)
-    return np.clip(img, 0, 1)
 
 
 def apply_hdr_look(img, amount):
