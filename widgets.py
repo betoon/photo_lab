@@ -209,7 +209,37 @@ class SliderRow(QWidget):
         self.spin.setMinimumWidth(104)
         self.spin.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.spin.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.spin.setStyleSheet("background:#2a2a2a; color:#eee; border:1px solid #444; border-radius:3px; padding:2px;")
+        # Windows can arrange styled spin buttons side-by-side and otherwise
+        # leave the editor beneath the up button.  Define a stacked button
+        # gutter explicitly so the value can never cover either arrow.
+        self.spin.setStyleSheet("""
+            QDoubleSpinBox {
+                background: #2a2a2a;
+                color: #eee;
+                border: 1px solid #444;
+                border-radius: 3px;
+                padding: 2px 26px 2px 4px;
+            }
+            QDoubleSpinBox::up-button {
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 22px;
+                border-left: 1px solid #444;
+                border-bottom: 1px solid #383838;
+                border-top-right-radius: 3px;
+                background: #303030;
+            }
+            QDoubleSpinBox::down-button {
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 22px;
+                border-left: 1px solid #444;
+                border-bottom-right-radius: 3px;
+                background: #303030;
+            }
+            QDoubleSpinBox::up-button:hover,
+            QDoubleSpinBox::down-button:hover { background: #414141; }
+        """)
         layout.addWidget(self.spin, 0, 1)
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setMinimum(int(lo * self.scale))
