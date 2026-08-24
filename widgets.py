@@ -391,6 +391,8 @@ class ImageCanvas(QWidget):
     brushStrokeFinished = pyqtSignal()
     brushMaskChanged = pyqtSignal()
     horizonLineFinished = pyqtSignal(float)  # angle degrees
+    keystoneChanged = pyqtSignal(list)
+    keystoneFinished = pyqtSignal(list)
     
     MODE_NORMAL = 0
     MODE_SPLIT = 1
@@ -444,6 +446,9 @@ class ImageCanvas(QWidget):
         self._zebra_threshold = 0.95  # luminance 0..1
         self.horizon_line_mode = False
         self._horizon_line = None  # (x0,y0,x1,y1) widget coords while dragging
+        self.keystone_mode = False
+        self.keystone_points = []
+        self._keystone_drag = -1
         self._clip_lo = 0.005
         self._clip_hi = 0.995
         self._grad_drag = None  # None | 'new' | 'p0' | 'p1' | 'line'
@@ -483,6 +488,16 @@ class ImageCanvas(QWidget):
         self.compare_mode = mode
         if mode == self.MODE_NORMAL:
             self._comparison_pixmap = None
+        self.update()
+
+    def set_keystone_mode(self, enabled, points=None):
+        self.keystone_mode = bool(enabled)
+        if points is not None:
+            self.keystone_points = [list(p) for p in points]
+        if self.keystone_mode and len(self.keystone_points) != 4:
+            self.keystone_points = [[0.08, 0.08], [0.92, 0.08], [0.92, 0.92], [0.08, 0.92]]
+        self._keystone_drag = -1
+        self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
         self.update()
 
     def set_comparison_image(self, pixmap):
@@ -884,6 +899,28 @@ class ImageCanvas(QWidget):
 
 
         # Horizon line tool preview
+        if self.keystone_mode and len(self.keystone_points) == 4 and self.compare_mode == self.MODE_NORMAL:
+            rect = self.image_rect()
+            if not rect.isEmpty():
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                screen_points = [
+                    QPointF(rect.left() + float(px) * rect.width(), rect.top() + float(py) * rect.height())
+                    for px, py in self.keystone_points
+                ]
+                path = QPainterPath(screen_points[0])
+                for point in screen_points[1:]:
+                    path.lineTo(point)
+                path.closeSubpath()
+                painter.setBrush(QBrush(QColor(35, 130, 220, 24)))
+                painter.setPen(QPen(QColor(70, 180, 255, 235), 2, Qt.PenStyle.DashLine))
+                painter.drawPath(path)
+                labels = ("TL", "TR", "BR", "BL")
+                for index, point in enumerate(screen_points):
+                    painter.setBrush(QBrush(QColor(45, 145, 235)))
+                    painter.setPen(QPen(QColor(235, 245, 255), 2))
+                    painter.drawEllipse(point, 7, 7)
+                    painter.drawText(point + QPointF(9, -7), labels[index])
+
         if getattr(self, "_horizon_line", None) is not None:
             x0, y0, x1, y1 = self._horizon_line
             painter.setPen(QPen(QColor(0, 220, 255, 220), 2, Qt.PenStyle.DashLine))
@@ -1026,6 +1063,20 @@ class ImageCanvas(QWidget):
             self._horizon_dragging = True
             self.update()
             return
+
+        if self.keystone_mode and e.button() == Qt.MouseButton.LeftButton and self._pixmap is not None:
+            rect = self.image_rect()
+            if not rect.isEmpty() and len(self.keystone_points) == 4:
+                pos = e.position().toPoint()
+                distances = []
+                for px, py in self.keystone_points:
+                    sx = rect.left() + float(px) * rect.width()
+                    sy = rect.top() + float(py) * rect.height()
+                    distances.append(math.hypot(pos.x() - sx, pos.y() - sy))
+                nearest = min(range(4), key=lambda idx: distances[idx])
+                if distances[nearest] <= 18:
+                    self._keystone_drag = nearest
+                    return
 
         # 0. Spiral move / resize (when overlay is on)
         if (self.show_spiral and self.compare_mode == self.MODE_NORMAL
@@ -1186,6 +1237,16 @@ class ImageCanvas(QWidget):
             self._horizon_line = (x0, y0, pos.x(), pos.y())
             self.update()
             return
+        if self._keystone_drag >= 0 and self.keystone_mode:
+            rect = self.image_rect()
+            if not rect.isEmpty():
+                pos = e.position().toPoint()
+                nx = max(0.0, min(1.0, (pos.x() - rect.left()) / max(rect.width(), 1)))
+                ny = max(0.0, min(1.0, (pos.y() - rect.top()) / max(rect.height(), 1)))
+                self.keystone_points[self._keystone_drag] = [nx, ny]
+                self.keystoneChanged.emit([list(p) for p in self.keystone_points])
+                self.update()
+            return
         if self._brush_painting and self.brush_mode:
             if getattr(self, "_brush_erasing", False):
                 self._erase_brush_dabs(e.position().toPoint())
@@ -1298,6 +1359,11 @@ class ImageCanvas(QWidget):
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
+        if self._keystone_drag >= 0:
+            self._keystone_drag = -1
+            self.keystoneFinished.emit([list(p) for p in self.keystone_points])
+            self.update()
+            return
         if getattr(self, "_horizon_dragging", False):
             self._horizon_dragging = False
             if self._horizon_line is not None:

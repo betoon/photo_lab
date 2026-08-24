@@ -269,8 +269,11 @@ Also: `pip install lensfunpy`. **Test match…** in Geometry shows which DB path
 - **Fibonacci / golden spiral** — composition guide  
 - **Distortion** — correct barrel/pincushion curvature and independently adjust wide-angle edge stretching
 - **Perspective** — correct converging verticals and horizontal perspective independently
+- **Auto Upright** — analyzes strong architectural lines to level the image and correct converging verticals
+- **4-Corner Tool** — drag the four labeled handles around a photographed rectangle, then release to rectify it
 - **Edge Warp** — shift the top, bottom, left, and right edges for off-axis frames, signs, and architecture
 - **Tilt-Shift / Diorama** — set the strength, position, width, and angle of a selective-focus band
+- **Auto-crop transformed edge margins** — removes reflected safety borders created by strong geometry corrections
 
 The Fibonacci guide is a continuous golden spiral. Move its yellow center handle, resize it with the blue corner, and use the eight orientation choices to rotate or mirror it.
   - Drag center handle to move  

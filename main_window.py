@@ -29,7 +29,8 @@ VIDEO_EXTENSIONS = {
 }
 
 from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
-                     load_recipe_sidecar, save_recipe_sidecar, apply_watermark)
+                     load_recipe_sidecar, save_recipe_sidecar, apply_watermark,
+                     detect_architectural_upright, normalize_keystone_points)
 from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, SdImportWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
@@ -1219,6 +1220,8 @@ class PhotoLab(QMainWindow):
         # CENTER: preview
         self.preview = ImageCanvas()
         self.preview.crop_dragged.connect(self.on_crop_dragged)
+        self.preview.keystoneChanged.connect(self._on_keystone_changed)
+        self.preview.keystoneFinished.connect(self._on_keystone_finished)
         self.preview.zoom_changed.connect(lambda s: self.zoom_label.setText(f" {s*100:.0f}% "))
         self.preview.zoom_changed.connect(lambda s: self._update_navigator_viewport())
         
@@ -1815,6 +1818,20 @@ class PhotoLab(QMainWindow):
         box, v = collapsible_group("Perspective", layout, checked=False)
         self._add_slider(v, "perspective", "Vertical", -100.0, 100.0, 1, 0, 0.0)
         self._add_slider(v, "perspective_horizontal", "Horizontal", -100.0, 100.0, 1, 0, 0.0)
+        upright_row = QHBoxLayout()
+        self.auto_upright_btn = QPushButton("Auto Upright")
+        self.auto_upright_btn.setToolTip("Analyze strong architectural lines and correct level and vertical convergence.")
+        self.auto_upright_btn.clicked.connect(self.auto_architectural_upright)
+        upright_row.addWidget(self.auto_upright_btn)
+        self.keystone_tool_btn = QPushButton("4-Corner Tool")
+        self.keystone_tool_btn.setCheckable(True)
+        self.keystone_tool_btn.setToolTip("Drag TL, TR, BR, and BL handles around a photographed rectangle to straighten it.")
+        self.keystone_tool_btn.toggled.connect(self.toggle_keystone_mode)
+        upright_row.addWidget(self.keystone_tool_btn)
+        v.addLayout(upright_row)
+        clear_keystone = QPushButton("Clear 4-Corner Correction")
+        clear_keystone.clicked.connect(self.clear_keystone)
+        v.addWidget(clear_keystone)
 
         box, v = collapsible_group("Edge Warp", layout, checked=False)
         self._add_slider(v, "warp_top", "Top edge", -100.0, 100.0, 1, 0, 0.0)
@@ -1835,6 +1852,12 @@ class PhotoLab(QMainWindow):
         diorama_tip.setWordWrap(True)
         diorama_tip.setStyleSheet("color:#777; font-size:11px;")
         v.addWidget(diorama_tip)
+
+        box, v = collapsible_group("Geometry Output", layout, checked=False)
+        self.geometry_auto_crop_cb = QCheckBox("Auto-crop transformed edge margins")
+        self.geometry_auto_crop_cb.setToolTip("Trim reflected safety margins after strong perspective and distortion corrections.")
+        self.geometry_auto_crop_cb.toggled.connect(self._on_geometry_auto_crop)
+        v.addWidget(self.geometry_auto_crop_cb)
 
         layout.addStretch(1)
         scroll.setWidget(inner)
@@ -3141,6 +3164,15 @@ class PhotoLab(QMainWindow):
         
         self.crop_tool_btn.setChecked(False)
         self.preview.set_crop_mode(False)
+        if hasattr(self, "keystone_tool_btn"):
+            self.keystone_tool_btn.blockSignals(True)
+            self.keystone_tool_btn.setChecked(False)
+            self.keystone_tool_btn.blockSignals(False)
+            self.preview.set_keystone_mode(False, getattr(r, "keystone_points", []))
+        if hasattr(self, "geometry_auto_crop_cb"):
+            self.geometry_auto_crop_cb.blockSignals(True)
+            self.geometry_auto_crop_cb.setChecked(bool(getattr(r, "geometry_auto_crop", False)))
+            self.geometry_auto_crop_cb.blockSignals(False)
 
     def on_slider(self, key, value):
         if self.current_path is None:
@@ -3956,6 +3988,7 @@ class PhotoLab(QMainWindow):
                 "horizon", "distortion", "perspective", "perspective_horizontal",
                 "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
                 "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
+                "keystone_points", "geometry_auto_crop",
                 "crop", "ca_amount", "lens_auto",
             ]
             local_keys = ["local_points", "gradients", "brush_masks"]
@@ -4043,6 +4076,7 @@ class PhotoLab(QMainWindow):
                 "horizon", "distortion", "perspective", "perspective_horizontal",
                 "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
                 "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
+                "keystone_points", "geometry_auto_crop",
                 "crop", "ca_amount", "lens_auto",
             ],
             "local": ["local_points", "gradients", "brush_masks"],
@@ -5248,6 +5282,74 @@ class PhotoLab(QMainWindow):
         self._update_brush_list()
         self._sync_brush_sliders()
         self._push_history("Clear local preset")
+        self.render_preview()
+
+    def toggle_keystone_mode(self, checked):
+        if self.original_bgr is None or self.current_path is None:
+            self.keystone_tool_btn.blockSignals(True)
+            self.keystone_tool_btn.setChecked(False)
+            self.keystone_tool_btn.blockSignals(False)
+            return
+        if checked:
+            self.crop_tool_btn.setChecked(False)
+            self.preview.set_crop_mode(False)
+            self.set_compare_mode(ImageCanvas.MODE_NORMAL)
+        points = getattr(self.recipes[self.current_path], "keystone_points", [])
+        self.preview.set_keystone_mode(checked, points)
+        self.statusBar().showMessage(
+            "Drag the four blue handles around the photographed rectangle; release to preview correction."
+            if checked else "4-corner perspective tool off"
+        )
+
+    def _on_keystone_changed(self, points):
+        if self.current_path is not None:
+            self.recipes[self.current_path].keystone_points = [list(p) for p in points]
+
+    def _on_keystone_finished(self, points):
+        if self.current_path is None:
+            return
+        valid = normalize_keystone_points(points)
+        if not valid:
+            self.statusBar().showMessage("The four corners crossed or became too small; correction was not applied.")
+            return
+        self.recipes[self.current_path].keystone_points = valid
+        self._schedule_history("4-corner perspective")
+        self.render_preview()
+
+    def clear_keystone(self):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].keystone_points = []
+        self.preview.set_keystone_mode(self.keystone_tool_btn.isChecked(), [])
+        self._schedule_history("clear 4-corner perspective")
+        self.render_preview()
+
+    def auto_architectural_upright(self):
+        if self.original_bgr is None or self.current_path is None:
+            return
+        horizon, vertical, count = detect_architectural_upright(self.original_bgr)
+        if count < 2:
+            QMessageBox.information(self, "Auto Upright", "Not enough strong architectural lines were found in this image.")
+            return
+        recipe = self.recipes[self.current_path]
+        recipe.horizon = horizon
+        recipe.perspective = vertical
+        for key, value in (("horizon", horizon), ("perspective", vertical)):
+            if key in self.sliders:
+                self.sliders[key].blockSignals(True)
+                self.sliders[key].set_value(value)
+                self.sliders[key].blockSignals(False)
+        self._schedule_history("auto architectural upright")
+        self.render_preview()
+        self.statusBar().showMessage(
+            f"Auto Upright used {count} lines: level {horizon:+.1f}°, vertical {vertical:+.0f}."
+        )
+
+    def _on_geometry_auto_crop(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].geometry_auto_crop = bool(checked)
+        self._schedule_history("geometry auto crop")
         self.render_preview()
 
     def _on_brush_preset_strength(self, value):

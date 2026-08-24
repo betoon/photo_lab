@@ -397,11 +397,14 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 
 - `apply_perspective` — vertical keystone correction
 - `apply_advanced_geometry` — horizontal perspective plus independent four-edge projective warp
+- `apply_keystone` — rectifies a normalized TL,TR,BR,BL source quadrilateral
+- `detect_architectural_upright` — Hough-line estimate for horizon and vertical convergence
+- `geometry_auto_crop_bounds` — conservative crop for transform-generated edge margins
 - `apply_wide_angle_stretch` — horizontal nonlinear remap for wide-angle edge control
 - `apply_diorama` — rotatable, feathered selective-focus band
 - `detect_horizon_angle` — Hough near-horizontal edges
 - `probe_lensfun` / `try_lensfun_correct` — status + strength blend
-- Canvas: `keystone_mode`, `keystoneChanged`
+- Canvas: `keystone_mode`, `keystoneChanged`, `keystoneFinished`
 
 
 ### Lensfun local DB

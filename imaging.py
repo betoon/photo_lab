@@ -188,6 +188,8 @@ class Recipe:
     diorama_position: float = 50.0
     diorama_width: float = 30.0
     diorama_angle: float = 0.0
+    keystone_points: list = field(default_factory=list)  # normalized TL,TR,BR,BL source quad
+    geometry_auto_crop: bool = False
     crop: Optional[Tuple[float, float, float, float]] = field(default=None)
 
     clearview: float = 0.0
@@ -662,6 +664,97 @@ def apply_advanced_geometry(img, horizontal=0.0, top=0.0, bottom=0.0,
     matrix = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, matrix, (w, h), flags=cv2.INTER_CUBIC,
                                borderMode=cv2.BORDER_REFLECT_101)
+
+
+def normalize_keystone_points(points):
+    """Validate/canonicalize normalized TL,TR,BR,BL corner points."""
+    if not isinstance(points, (list, tuple)) or len(points) != 4:
+        return []
+    clean = []
+    for point in points:
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError, IndexError):
+            return []
+        clean.append([float(np.clip(x, 0, 1)), float(np.clip(y, 0, 1))])
+    # Reject crossed or nearly degenerate quadrilaterals.
+    poly = np.asarray(clean, dtype=np.float32)
+    area = 0.5 * abs(sum(
+        poly[i, 0] * poly[(i + 1) % 4, 1] - poly[(i + 1) % 4, 0] * poly[i, 1]
+        for i in range(4)
+    ))
+    return clean if area >= 0.01 else []
+
+
+def apply_keystone(img, points):
+    """Rectify a normalized TL,TR,BR,BL source quadrilateral to the full canvas."""
+    points = normalize_keystone_points(points)
+    if not points:
+        return img
+    h, w = img.shape[:2]
+    src = np.float32([[x * (w - 1), y * (h - 1)] for x, y in points])
+    dst = np.float32([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])
+    matrix = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(img, matrix, (w, h), flags=cv2.INTER_CUBIC,
+                               borderMode=cv2.BORDER_REFLECT_101)
+
+
+def geometry_auto_crop_bounds(recipe):
+    """Return a conservative crop that trims transform-generated edge margins."""
+    magnitudes = [
+        abs(float(getattr(recipe, "distortion", 0.0))) * 0.0007,
+        abs(float(getattr(recipe, "perspective", 0.0))) * 0.0012,
+        abs(float(getattr(recipe, "perspective_horizontal", 0.0))) * 0.0012,
+        abs(float(getattr(recipe, "wide_angle", 0.0))) * 0.00045,
+    ]
+    edge = max(
+        abs(float(getattr(recipe, name, 0.0)))
+        for name in ("warp_top", "warp_bottom", "warp_left", "warp_right")
+    ) * 0.0008
+    inset = float(np.clip(sum(magnitudes) + edge, 0.0, 0.22))
+    if normalize_keystone_points(getattr(recipe, "keystone_points", [])):
+        inset = max(inset, 0.012)
+    return (inset, inset, 1.0 - inset, 1.0 - inset) if inset > 1e-4 else None
+
+
+def detect_architectural_upright(img):
+    """Estimate horizon rotation and vertical convergence from strong line segments."""
+    if img is None or img.size == 0:
+        return 0.0, 0.0, 0
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    scale = min(1.0, 1200.0 / max(gray.shape[:2]))
+    if scale < 1.0:
+        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    edges = cv2.Canny(gray, 60, 180)
+    length = max(25, int(min(gray.shape[:2]) * 0.18))
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 360, 45, minLineLength=length, maxLineGap=16)
+    if lines is None:
+        return 0.0, 0.0, 0
+    horizontal, vertical = [], []
+    width = max(gray.shape[1] - 1, 1)
+    for x1, y1, x2, y2 in np.asarray(lines).reshape(-1, 4):
+        dx, dy = float(x2 - x1), float(y2 - y1)
+        segment = np.hypot(dx, dy)
+        if segment < length:
+            continue
+        angle = np.degrees(np.arctan2(dy, dx))
+        while angle > 90:
+            angle -= 180
+        while angle < -90:
+            angle += 180
+        if abs(angle) <= 25:
+            horizontal.append((angle, segment))
+        elif abs(abs(angle) - 90) <= 30 and abs(dy) > 1:
+            center_x = ((x1 + x2) * 0.5 / width) - 0.5
+            vertical.append((dx / dy, center_x, segment))
+    horizon = 0.0
+    if horizontal:
+        horizon = -float(np.median([angle for angle, _ in horizontal]))
+    perspective = 0.0
+    if len(vertical) >= 2:
+        convergence = np.median([slope * np.sign(cx or 1.0) for slope, cx, _ in vertical])
+        perspective = float(np.clip(-convergence * 180.0, -60.0, 60.0))
+    return float(np.clip(horizon, -15, 15)), perspective, len(horizontal) + len(vertical)
 
 
 def apply_wide_angle_stretch(img, amount):
@@ -1713,8 +1806,11 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
         getattr(r, "warp_top", 0.0), getattr(r, "warp_bottom", 0.0),
         getattr(r, "warp_left", 0.0), getattr(r, "warp_right", 0.0),
     )
+    img_bgr = apply_keystone(img_bgr, getattr(r, "keystone_points", []))
     img_bgr = apply_wide_angle_stretch(img_bgr, getattr(r, "wide_angle", 0.0))
     img_bgr = apply_horizon(img_bgr, r.horizon)
+    if bool(getattr(r, "geometry_auto_crop", False)):
+        img_bgr = apply_crop(img_bgr, geometry_auto_crop_bounds(r))
     img_bgr = apply_crop(img_bgr, r.crop)
     img_bgr = apply_diorama(
         img_bgr, getattr(r, "diorama_strength", 0.0),

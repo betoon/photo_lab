@@ -39,6 +39,7 @@ PRESET_MODULE_FIELDS = {
         "horizon", "distortion", "perspective", "perspective_horizontal",
         "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
         "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
+        "keystone_points", "geometry_auto_crop",
         "crop", "ca_amount", "lens_auto", "rotate_90",
     ),
     "Effects": ("clearview", "microcontrast", "vignette", "film_grain", "hdr_look"),
