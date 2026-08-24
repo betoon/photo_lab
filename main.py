@@ -25,7 +25,6 @@ def main():
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QFont
     from PyQt6.QtCore import Qt
-    from main_window import PhotoLab
 
     try:
         QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -40,6 +39,9 @@ def main():
     if font.pointSize() <= 0:
         font.setPixelSize(13)
     app.setFont(font)
+
+    # Import widgets only after QApplication and its valid default font exist.
+    from main_window import PhotoLab
 
     win = PhotoLab()
     win.show()

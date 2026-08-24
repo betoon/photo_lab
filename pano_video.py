@@ -535,6 +535,20 @@ class RenderCancelled(Exception):
     pass
 
 
+class PhotoLabSection(tk.Frame):
+    """Compact dark settings card matching PhotoLab's correction panels."""
+    def __init__(self, parent, text):
+        super().__init__(parent, bg="#181818", highlightthickness=1,
+                         highlightbackground="#3a3a3a", highlightcolor="#3a3a3a",
+                         padx=7, pady=6)
+        title_row = tk.Frame(self, bg="#181818")
+        title_row.pack(fill="x", pady=(0, 5))
+        tk.Label(title_row, text="", width=2, height=1, bg="#2f75e8",
+                 borderwidth=0).pack(side="left", padx=(0, 7))
+        tk.Label(title_row, text=text, bg="#181818", fg="#f0f0f0",
+                 font=("Segoe UI", 9), anchor="w").pack(side="left", fill="x", expand=True)
+
+
 # ---------------------------------------------------------------------------
 # Fix #7: collect all render parameters into a dataclass so that build_pan_video
 # takes one typed object instead of 30+ positional arguments.  A wrong ordering
@@ -1090,33 +1104,44 @@ class PanoramaToVideoApp:
         self.canvas.itemconfig(self.canvas_window, width=event.width)
 
     def _apply_photolab_theme(self):
-        """Match PhotoLab dark UI (PyQt #121212 / #2a5080 accent)."""
+        """Match PhotoLab's compact dark correction-panel appearance."""
         style = ttk.Style(self.root)
         try:
             style.theme_use("clam")
         except Exception:
             pass
-        bg = "#1a1a1a"
-        bg2 = "#121212"
-        fg = "#ddd"
-        accent = "#2a5080"
-        style.configure(".", background=bg, foreground=fg, fieldbackground="#222",
-                        troughcolor="#2a2a2a", bordercolor="#2b2b2b")
+        bg = "#181818"
+        bg2 = "#111111"
+        fg = "#eeeeee"
+        accent = "#2f75e8"
+        style.configure(".", font=("Segoe UI", 9), background=bg, foreground=fg,
+                        fieldbackground="#242424", troughcolor="#303030",
+                        bordercolor="#444444", darkcolor="#242424", lightcolor="#242424")
         style.configure("TFrame", background=bg)
         style.configure("TLabelframe", background=bg, foreground="#8af")
         style.configure("TLabelframe.Label", background=bg, foreground="#8af")
         style.configure("TLabel", background=bg, foreground=fg)
-        style.configure("TButton", background="#2a2a2a", foreground=fg, padding=6)
+        style.configure("TButton", background="#292929", foreground=fg, padding=(9, 5),
+                        borderwidth=1, relief="flat")
         style.map("TButton",
-                  background=[("active", accent), ("disabled", "#333")],
+                  background=[("active", "#355f9e"), ("pressed", accent), ("disabled", "#252525")],
                   foreground=[("disabled", "#777")])
-        style.configure("TEntry", fieldbackground="#222", foreground=fg, insertcolor=fg)
-        style.configure("TCombobox", fieldbackground="#222", foreground=fg, background="#222")
-        style.map("TCombobox", fieldbackground=[("readonly", "#222")],
+        style.configure("TEntry", fieldbackground="#242424", foreground=fg, insertcolor=fg,
+                        bordercolor="#4a4a4a", padding=4)
+        style.configure("TCombobox", fieldbackground="#242424", foreground=fg, background="#303030",
+                        arrowcolor="#ddd", bordercolor="#4a4a4a", padding=3)
+        style.map("TCombobox", fieldbackground=[("readonly", "#242424")],
                   foreground=[("readonly", fg)])
-        style.configure("TCheckbutton", background=bg, foreground=fg)
-        style.configure("TRadiobutton", background=bg, foreground=fg)
-        style.configure("Horizontal.TScale", background=bg, troughcolor="#2a2a2a")
+        style.configure("TCheckbutton", background=bg, foreground=fg, indicatorcolor="#242424",
+                        indicatormargin=4, padding=2)
+        style.map("TCheckbutton", indicatorcolor=[("selected", accent), ("!selected", "#242424")],
+                  background=[("active", bg)])
+        style.configure("TRadiobutton", background=bg, foreground=fg, indicatorcolor="#242424", padding=2)
+        style.map("TRadiobutton", indicatorcolor=[("selected", accent), ("!selected", "#242424")],
+                  background=[("active", bg)])
+        style.configure("Horizontal.TScale", background=bg, troughcolor="#303030",
+                        bordercolor="#303030", lightcolor=accent, darkcolor=accent,
+                        sliderlength=13, sliderthickness=11)
         style.configure("TProgressbar", background=accent, troughcolor="#2a2a2a",
                         bordercolor="#2b2b2b", lightcolor=accent, darkcolor=accent)
         style.configure("Vertical.TScrollbar", background="#2a2a2a", troughcolor=bg2,
@@ -1125,9 +1150,9 @@ class PanoramaToVideoApp:
     def _make_slider_row(self, parent, label, float_var, string_var, from_, to, slide_cmd):
         """Fix #8: factory that builds the label + Scale + Entry triplet used by
         every slider row so the pattern isn't copy-pasted 13 times."""
-        r = tk.Frame(parent, bg="#1a1a1a")
-        r.pack(fill="x", padx=8, pady=2)
-        tk.Label(r, text=label, width=22, bg="#1a1a1a", fg="#ccc").pack(side="left")
+        r = tk.Frame(parent, bg="#181818")
+        r.pack(fill="x", padx=2, pady=3)
+        tk.Label(r, text=label, width=22, bg="#181818", fg="#eeeeee", anchor="w").pack(side="left")
         scale = ttk.Scale(r, from_=from_, to=to, variable=float_var,
                           command=slide_cmd, length=200)
         scale.pack(side="left", padx=8)
@@ -1136,31 +1161,17 @@ class PanoramaToVideoApp:
         return scale, entry
 
     def _section_frame(self, text):
-        """PhotoLab-style settings group with a subtle gray outline."""
-        return tk.LabelFrame(
-            self.scrollable_frame,
-            text=text,
-            bg="#1a1a1a",
-            fg="#8faed0",
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground="#3a3a3a",
-            highlightcolor="#46586d",
-            padx=2,
-            pady=2,
-        )
+        return PhotoLabSection(self.scrollable_frame, text)
 
     def _build_widgets(self):
         self.scrollable_frame.grid_columnconfigure(0, weight=1, uniform="settingscol")
         self.scrollable_frame.grid_columnconfigure(1, weight=1, uniform="settingscol")
 
-        header_wrap = tk.Frame(self.scrollable_frame, bg="#2a5080")
+        header_wrap = tk.Frame(self.scrollable_frame, bg="#2f75e8")
         header_wrap.grid(row=0, column=0, columnspan=2, sticky="ew")
-        header = tk.Label(header_wrap, text="Panorama to Video", font=("Segoe UI", 14, "bold"), bg="#1e2a3a", fg="#9cf", pady=8)
+        header = tk.Label(header_wrap, text="Panorama to Video", font=("Segoe UI", 13, "bold"), bg="#171717", fg="#f2f2f2", pady=9)
         header.pack(fill="x", side="top")
-        tk.Frame(header_wrap, bg="#2a5080", height=2).pack(fill="x", side="top")
+        tk.Frame(header_wrap, bg="#2f75e8", height=2).pack(fill="x", side="top")
 
         f = self._section_frame("Select Panorama Image")
         f.grid(row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=5)
