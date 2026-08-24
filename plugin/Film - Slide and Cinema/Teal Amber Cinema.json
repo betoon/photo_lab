@@ -1,0 +1,74 @@
+{
+  "name": "Teal Amber Cinema",
+  "description": "Modern cinematic separation with subtle teal shadows and amber highlights, kept skin-friendly.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0,
+    -2,
+    -8,
+    10,
+    10,
+    -6,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    -4,
+    5,
+    -15,
+    -22,
+    -3,
+    -11,
+    -14,
+    -12
+  ],
+  "hsl_lum": [
+    0,
+    5,
+    0,
+    2,
+    1,
+    -5,
+    0,
+    0
+  ],
+  "contrast": 10,
+  "highlights": -18,
+  "shadows": 6,
+  "blacks": -4,
+  "saturation": -10,
+  "vibrance": 7,
+  "film_grain": 10,
+  "split_shadow_hue": 198,
+  "split_shadow_sat": 14,
+  "split_highlight_hue": 32,
+  "split_highlight_sat": 12,
+  "split_balance": 10,
+  "curve_points": [
+    [
+      0,
+      0.012
+    ],
+    [
+      0.2,
+      0.17
+    ],
+    [
+      0.5,
+      0.495
+    ],
+    [
+      0.82,
+      0.86
+    ],
+    [
+      1,
+      0.98
+    ]
+  ]
+}

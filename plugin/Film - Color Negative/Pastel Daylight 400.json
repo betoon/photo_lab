@@ -1,0 +1,71 @@
+{
+  "name": "Pastel Daylight 400",
+  "description": "Airy pastel color with luminous skin, pale blues, lifted blacks, and protected highlights.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Color Negative",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 3,
+  "creative_tint": 2,
+  "hsl_hue": [
+    1,
+    -2,
+    -4,
+    -3,
+    -2,
+    2,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    -10,
+    -5,
+    -16,
+    -18,
+    -15,
+    -18,
+    -15,
+    -12
+  ],
+  "hsl_lum": [
+    5,
+    10,
+    8,
+    7,
+    7,
+    5,
+    3,
+    3
+  ],
+  "contrast": -12,
+  "highlights": -22,
+  "shadows": 13,
+  "whites": -4,
+  "blacks": 7,
+  "clarity": -5,
+  "vibrance": 2,
+  "saturation": -11,
+  "film_grain": 12,
+  "curve_points": [
+    [
+      0,
+      0.06
+    ],
+    [
+      0.22,
+      0.235
+    ],
+    [
+      0.5,
+      0.525
+    ],
+    [
+      0.8,
+      0.835
+    ],
+    [
+      1,
+      0.975
+    ]
+  ]
+}

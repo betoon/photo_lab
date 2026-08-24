@@ -1,0 +1,70 @@
+{
+  "name": "Neutral Chrome 100",
+  "description": "Clean, neutral transparency color with crisp midtones and restrained highlight latitude.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    2,
+    2,
+    0,
+    1,
+    1,
+    4,
+    0,
+    0
+  ],
+  "hsl_lum": [
+    0,
+    2,
+    0,
+    -1,
+    -1,
+    -3,
+    0,
+    0
+  ],
+  "contrast": 13,
+  "highlights": -8,
+  "shadows": -2,
+  "blacks": -5,
+  "clarity": 3,
+  "vibrance": 9,
+  "saturation": 2,
+  "film_grain": 5,
+  "curve_points": [
+    [
+      0,
+      0.005
+    ],
+    [
+      0.2,
+      0.16
+    ],
+    [
+      0.5,
+      0.5
+    ],
+    [
+      0.8,
+      0.85
+    ],
+    [
+      1,
+      0.995
+    ]
+  ]
+}

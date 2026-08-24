@@ -1,0 +1,70 @@
+{
+  "name": "Cool Mountain Chrome",
+  "description": "Cool, precise transparency palette for snow, rock, water, and high-altitude blue skies.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": -5,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0,
+    0,
+    1,
+    -4,
+    -4,
+    -2,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    0,
+    -2,
+    -5,
+    5,
+    9,
+    14,
+    0,
+    0
+  ],
+  "hsl_lum": [
+    0,
+    1,
+    0,
+    -2,
+    2,
+    -8,
+    0,
+    0
+  ],
+  "contrast": 15,
+  "highlights": -13,
+  "shadows": -3,
+  "blacks": -6,
+  "clarity": 5,
+  "vibrance": 12,
+  "film_grain": 5,
+  "microcontrast": 8,
+  "curve_points": [
+    [
+      0,
+      0.005
+    ],
+    [
+      0.2,
+      0.16
+    ],
+    [
+      0.5,
+      0.495
+    ],
+    [
+      0.82,
+      0.865
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}

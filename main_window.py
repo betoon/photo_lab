@@ -7,6 +7,7 @@ Collapsible correction groups matching DxO PhotoLab structure.
 from __future__ import annotations
 
 import os
+import json
 import cv2
 import numpy as np
 
@@ -278,7 +279,19 @@ class PresetBrowserDialog(QDialog):
         normalized = os.path.normcase(os.path.abspath(path))
         self.favorite_btn.setText("★ Favorited" if normalized in self._favorites else "☆ Favorite")
         ext = os.path.splitext(path)[1].upper()
-        self.detail.setText(f"{os.path.basename(path)}\n{path}\nType: {ext}")
+        description = ""
+        if ext == ".JSON":
+            try:
+                with open(path, "r", encoding="utf-8") as preset_file:
+                    metadata = json.load(preset_file)
+                description = str(metadata.get("description", "")).strip()
+            except (OSError, ValueError, TypeError):
+                pass
+        details = [os.path.basename(path)]
+        if description:
+            details.append(description)
+        details.extend((path, f"Type: {ext}"))
+        self.detail.setText("\n".join(details))
         self._preview_selected()
 
     @property

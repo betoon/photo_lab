@@ -1,0 +1,70 @@
+{
+  "name": "Available Light 1600",
+  "description": "Open-shadow high-speed monochrome for dim interiors, with soft highlights and pronounced grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    5,
+    7,
+    3,
+    0,
+    -2,
+    -5,
+    -2,
+    1
+  ],
+  "black_and_white": true,
+  "contrast": 7,
+  "highlights": -24,
+  "shadows": 14,
+  "blacks": -3,
+  "clarity": 5,
+  "film_grain": 40,
+  "microcontrast": 8,
+  "curve_points": [
+    [
+      0,
+      0.012
+    ],
+    [
+      0.18,
+      0.155
+    ],
+    [
+      0.5,
+      0.49
+    ],
+    [
+      0.82,
+      0.845
+    ],
+    [
+      1,
+      0.97
+    ]
+  ]
+}

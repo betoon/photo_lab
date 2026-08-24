@@ -1,0 +1,69 @@
+{
+  "name": "Green Filter Portrait",
+  "description": "Green-filter portrait and botanical rendering with separated foliage and controlled reds.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    -6,
+    4,
+    11,
+    22,
+    9,
+    -10,
+    -5,
+    -3
+  ],
+  "black_and_white": true,
+  "contrast": 7,
+  "highlights": -15,
+  "shadows": 6,
+  "blacks": -2,
+  "clarity": 2,
+  "film_grain": 11,
+  "curve_points": [
+    [
+      0,
+      0.012
+    ],
+    [
+      0.2,
+      0.18
+    ],
+    [
+      0.5,
+      0.505
+    ],
+    [
+      0.82,
+      0.855
+    ],
+    [
+      1,
+      0.985
+    ]
+  ]
+}

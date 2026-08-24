@@ -762,8 +762,12 @@ def _points_to_lut(points, size=256):
     unique = {}
     for x, y in pts:
         unique[float(x)] = float(y)
-    xs = np.array(sorted(unique), dtype=np.float32)
-    ys = np.array([unique[float(x)] for x in xs], dtype=np.float32)
+    # Build values from the original Python-float keys before narrowing xs to
+    # float32. Looking a narrowed 0.18 back up in the dict can become
+    # 0.180000007... and fail for otherwise valid hand-authored JSON curves.
+    ordered_xs = sorted(unique)
+    ys = np.array([unique[x] for x in ordered_xs], dtype=np.float32)
+    xs = np.array(ordered_xs, dtype=np.float32)
     return np.interp(np.linspace(0, 1, size), xs, ys).astype(np.float32)
 
 

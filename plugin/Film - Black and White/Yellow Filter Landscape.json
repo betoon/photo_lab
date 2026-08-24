@@ -1,0 +1,70 @@
+{
+  "name": "Yellow Filter Landscape",
+  "description": "Natural landscape monochrome with gently bright foliage and moderately darkened blue skies.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    6,
+    11,
+    14,
+    9,
+    0,
+    -18,
+    -8,
+    0
+  ],
+  "black_and_white": true,
+  "contrast": 12,
+  "highlights": -12,
+  "shadows": 3,
+  "blacks": -5,
+  "clarity": 7,
+  "film_grain": 12,
+  "microcontrast": 10,
+  "curve_points": [
+    [
+      0,
+      0.005
+    ],
+    [
+      0.2,
+      0.16
+    ],
+    [
+      0.5,
+      0.5
+    ],
+    [
+      0.82,
+      0.87
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}

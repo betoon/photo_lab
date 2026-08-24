@@ -1,0 +1,70 @@
+{
+  "name": "Classic Panchromatic 125",
+  "description": "Balanced traditional panchromatic response with crisp midtones and modest fine grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    4,
+    7,
+    5,
+    1,
+    -2,
+    -5,
+    -2,
+    1
+  ],
+  "black_and_white": true,
+  "contrast": 8,
+  "highlights": -10,
+  "shadows": 3,
+  "blacks": -3,
+  "clarity": 3,
+  "film_grain": 10,
+  "microcontrast": 4,
+  "curve_points": [
+    [
+      0,
+      0.008
+    ],
+    [
+      0.2,
+      0.17
+    ],
+    [
+      0.5,
+      0.5
+    ],
+    [
+      0.82,
+      0.86
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}

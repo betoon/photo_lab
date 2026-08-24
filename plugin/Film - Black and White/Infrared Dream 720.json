@@ -1,0 +1,72 @@
+{
+  "name": "Infrared Dream 720",
+  "description": "Creative infrared-like monochrome with luminous foliage, dark skies, glow, and coarse grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    18,
+    20,
+    26,
+    38,
+    2,
+    -45,
+    -30,
+    -10
+  ],
+  "black_and_white": true,
+  "ir_mono": true,
+  "contrast": 19,
+  "highlights": -22,
+  "shadows": 5,
+  "blacks": -9,
+  "clarity": -5,
+  "film_grain": 24,
+  "microcontrast": 6,
+  "vignette": 8,
+  "curve_points": [
+    [
+      0,
+      0
+    ],
+    [
+      0.18,
+      0.12
+    ],
+    [
+      0.5,
+      0.51
+    ],
+    [
+      0.82,
+      0.9
+    ],
+    [
+      1,
+      0.985
+    ]
+  ]
+}

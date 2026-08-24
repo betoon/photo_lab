@@ -1,0 +1,69 @@
+{
+  "name": "Fine Grain Portrait 50",
+  "description": "Smooth fine-grain monochrome with luminous skin, gentle contrast, and soft highlights.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    7,
+    13,
+    7,
+    1,
+    0,
+    -5,
+    -2,
+    2
+  ],
+  "black_and_white": true,
+  "contrast": -3,
+  "highlights": -17,
+  "shadows": 8,
+  "blacks": 2,
+  "clarity": -2,
+  "film_grain": 6,
+  "curve_points": [
+    [
+      0,
+      0.02
+    ],
+    [
+      0.2,
+      0.195
+    ],
+    [
+      0.5,
+      0.51
+    ],
+    [
+      0.82,
+      0.84
+    ],
+    [
+      1,
+      0.985
+    ]
+  ]
+}

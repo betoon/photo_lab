@@ -1,0 +1,68 @@
+{
+  "name": "Golden Consumer 200",
+  "description": "Sunny consumer-film warmth with cheerful reds and yellows and a lightly lifted toe.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Color Negative",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 8,
+  "creative_tint": 1,
+  "hsl_hue": [
+    -2,
+    -3,
+    -7,
+    -5,
+    1,
+    2,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    8,
+    8,
+    9,
+    -5,
+    -6,
+    -4,
+    0,
+    2
+  ],
+  "hsl_lum": [
+    2,
+    5,
+    5,
+    1,
+    0,
+    -3,
+    0,
+    0
+  ],
+  "contrast": 5,
+  "highlights": -7,
+  "shadows": 4,
+  "vibrance": 12,
+  "saturation": 3,
+  "film_grain": 10,
+  "curve_points": [
+    [
+      0,
+      0.035
+    ],
+    [
+      0.2,
+      0.21
+    ],
+    [
+      0.5,
+      0.52
+    ],
+    [
+      0.8,
+      0.83
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}

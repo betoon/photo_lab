@@ -1,0 +1,74 @@
+{
+  "name": "Day for Night Cinema",
+  "description": "Stylized moonlit cinema rendering with cool density, subdued warm colors, and deep blues.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": -18,
+  "creative_tint": 2,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    -18,
+    -22,
+    -28,
+    -20,
+    -2,
+    8,
+    -8,
+    -10
+  ],
+  "hsl_lum": [
+    -7,
+    -8,
+    -8,
+    -3,
+    1,
+    -5,
+    0,
+    0
+  ],
+  "exposure": -0.35,
+  "contrast": 15,
+  "highlights": -23,
+  "shadows": -5,
+  "blacks": -9,
+  "clarity": 5,
+  "saturation": -22,
+  "film_grain": 15,
+  "split_shadow_hue": 220,
+  "split_shadow_sat": 18,
+  "split_highlight_hue": 205,
+  "split_highlight_sat": 6,
+  "curve_points": [
+    [
+      0,
+      0
+    ],
+    [
+      0.2,
+      0.13
+    ],
+    [
+      0.5,
+      0.44
+    ],
+    [
+      0.82,
+      0.79
+    ],
+    [
+      1,
+      0.94
+    ]
+  ]
+}

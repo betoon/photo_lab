@@ -1,0 +1,71 @@
+{
+  "name": "Vivid Landscape Chrome",
+  "description": "High-saturation landscape transparency with rich greens, deep blue skies, and firm contrast.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    -2,
+    -3,
+    -8,
+    -12,
+    1,
+    4,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    8,
+    9,
+    14,
+    22,
+    12,
+    24,
+    5,
+    4
+  ],
+  "hsl_lum": [
+    0,
+    2,
+    0,
+    -4,
+    -4,
+    -10,
+    0,
+    0
+  ],
+  "contrast": 18,
+  "highlights": -10,
+  "shadows": -5,
+  "blacks": -8,
+  "clarity": 5,
+  "vibrance": 21,
+  "saturation": 6,
+  "film_grain": 6,
+  "microcontrast": 8,
+  "curve_points": [
+    [
+      0,
+      0
+    ],
+    [
+      0.18,
+      0.13
+    ],
+    [
+      0.5,
+      0.5
+    ],
+    [
+      0.82,
+      0.88
+    ],
+    [
+      1,
+      1
+    ]
+  ]
+}
