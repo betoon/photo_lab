@@ -599,6 +599,7 @@ class PhotoLab(QMainWindow):
 
         # ----- File -----
         file_m = mb.addMenu("&File")
+        add_action(file_m, "Open Image…", self.open_image, "Ctrl+Alt+O")
         add_action(file_m, "Open Folder for Editing…", self.open_folder, "Ctrl+O")
         add_action(file_m, "Scan Folder into Library…", self.scan_library_folder, "Ctrl+Shift+O")
         add_action(file_m, "Import from SD Card…", self.import_from_sd)
@@ -926,7 +927,8 @@ class PhotoLab(QMainWindow):
             tb.addAction(a)
             return a
 
-        act("Open", self.open_folder, "Ctrl+O", tip="Open folder for editing (Ctrl+O)")
+        act("Image", self.open_image, "Ctrl+Alt+O", tip="Open one image (Ctrl+Alt+O)")
+        act("Folder", self.open_folder, "Ctrl+O", tip="Open folder for editing (Ctrl+O)")
         act("Scan", self.scan_library_folder, tip="Scan folder into Library")
         tb.addSeparator()
 
@@ -1072,7 +1074,7 @@ class PhotoLab(QMainWindow):
             "Open a folder to begin  •  Ctrl+O  •  Tools menu has HDR / Stack / Panorama"
         )
         if hasattr(self, "path_label"):
-            self.path_label.setText("No image loaded — File → Open Folder, or use the Open button")
+            self.path_label.setText("No image loaded — File → Open Image or Open Folder")
 
 
     def _build_debug_console(self):
@@ -3198,6 +3200,61 @@ class PhotoLab(QMainWindow):
         if folder:
             self.show_develop_mode()
             self.open_folder_path(folder)
+
+    def open_image(self):
+        """Choose and open one supported image without loading its whole folder."""
+        rgb = " ".join(f"*{ext}" for ext in IMAGE_EXTS if not is_raw("file" + ext))
+        raw = " ".join(f"*{ext}" for ext in IMAGE_EXTS if is_raw("file" + ext))
+        supported = " ".join(f"*{ext}" for ext in IMAGE_EXTS)
+        start = self.folder or os.path.expanduser("~/Pictures")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open image for editing",
+            start,
+            f"All supported images ({supported});;RAW and DNG ({raw});;RGB images ({rgb});;All files (*)",
+        )
+        if path:
+            self.open_image_path(path)
+
+    def open_image_path(self, path: str) -> bool:
+        """Open exactly one image in Develop; return whether it was accepted."""
+        path = os.path.abspath(os.path.normpath(path or ""))
+        if not os.path.isfile(path):
+            QMessageBox.warning(self, "Open Image", f"The selected file does not exist:\n{path}")
+            return False
+        if not path.lower().endswith(IMAGE_EXTS):
+            QMessageBox.warning(
+                self, "Open Image",
+                f"PhotoLab does not recognize this image format:\n{os.path.splitext(path)[1] or '(no extension)'}",
+            )
+            return False
+        folder = os.path.dirname(path)
+        self.folder = folder
+        self._add_recent_folder(folder)
+        self.show_develop_mode()
+        self.image_paths = [path]
+        self.filmstrip.clear()
+        self.recipes = {}
+        self.meta_cache = {}
+        if hasattr(self, "folder_tree"):
+            self.folder_tree.blockSignals(True)
+            index = self.folder_model.index(folder)
+            self.folder_tree.setCurrentIndex(index)
+            self.folder_tree.scrollTo(index)
+            self.folder_tree.blockSignals(False)
+        item = QListWidgetItem(os.path.basename(path))
+        item.setData(Qt.ItemDataRole.UserRole, path)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+        item.setSizeHint(QSize(108, 118))
+        self.filmstrip.addItem(item)
+        self.thumb_worker = ThumbnailWorker([path])
+        self.thumb_worker.thumb_ready.connect(self.on_thumb_ready)
+        self.thumb_worker.start()
+        kind = "RAW" if is_raw(path) else "image"
+        self.statusBar().showMessage(f"Opening {os.path.basename(path)} ({kind})…")
+        self.log(f"Opened individual image: {path}")
+        self.load_image(path)
+        return True
 
     def import_from_sd(self):
         """Copy camera media from a card/device folder without deleting originals."""
