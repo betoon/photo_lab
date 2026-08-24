@@ -270,7 +270,8 @@ class HdrMergeWorker(QThread):
     progress = pyqtSignal(str)
 
     def __init__(self, paths, out_path, align=True, max_dim=0,
-                 method="mertens", deghost=0):
+                 method="mertens", deghost=0, reference_index=None,
+                 ca_correction=0):
         super().__init__()
         self.paths = list(paths)
         self.out_path = out_path
@@ -278,6 +279,8 @@ class HdrMergeWorker(QThread):
         self.max_dim = max_dim
         self.method = (method or "mertens").lower()
         self.deghost = float(deghost or 0)
+        self.reference_index = reference_index
+        self.ca_correction = float(ca_correction or 0)
 
     def run(self):
         try:
@@ -286,7 +289,8 @@ class HdrMergeWorker(QThread):
             if self.method.startswith("debevec"):
                 out = merge_hdr_debevec(
                     self.paths, align=self.align, max_dim=self.max_dim or 0,
-                    deghost=self.deghost,
+                    deghost=self.deghost, reference_index=self.reference_index,
+                    ca_correction=self.ca_correction,
                 )
             else:
                 # Mertens path; optional deghost via pre-load if strength > 0
@@ -295,7 +299,8 @@ class HdrMergeWorker(QThread):
                         # Prefer merge_hdr_mertens deghost kw if supported
                         out = merge_hdr_mertens(
                             self.paths, align=self.align, max_dim=self.max_dim or 0,
-                            deghost=self.deghost,
+                            deghost=self.deghost, reference_index=self.reference_index,
+                            ca_correction=self.ca_correction,
                         )
                     except TypeError:
                         out = merge_hdr_mertens(
@@ -304,6 +309,7 @@ class HdrMergeWorker(QThread):
                 else:
                     out = merge_hdr_mertens(
                         self.paths, align=self.align, max_dim=self.max_dim or 0,
+                        ca_correction=self.ca_correction,
                     )
             if out is None:
                 raise RuntimeError("HDR merge returned empty result")

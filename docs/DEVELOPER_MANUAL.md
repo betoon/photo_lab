@@ -456,9 +456,12 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 ### HDR (#13)
 
 - `detect_exposure_brackets`, `exposure_signature`
-- `deghost_stack` median motion blend
+- `_load_hdr_stack`, `_align_hdr_stack`, and `_exposure_seconds_from_meta` provide the shared, tested foundation for both merge methods
+- `analyze_hdr_stack` reports relative EV, sharpness, phase-correlation shift, and alignment confidence; `hdr_ghost_preview` creates the non-destructive motion overlay
+- `deghost_stack(..., reference_index=)` supports median or selected-frame motion replacement
 - `merge_hdr_mertens` / `merge_hdr_debevec` / `merge_hdr` dispatcher
-- `HdrMergeWorker` accepts method, deghost, tonemap
+- Both merge methods share alignment, deghost reference, and pre-merge chromatic-fringe correction
+- `HdrMergeWorker` accepts method, deghost, reference index, chromatic-fringe correction, and tonemap
 
 
 ### Pan Video (#14)

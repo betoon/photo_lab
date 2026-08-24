@@ -5802,6 +5802,18 @@ class PhotoLab(QMainWindow):
         info = QLabel(f"{len(paths)} images selected:\n{names}")
         info.setWordWrap(True)
         form.addRow(info)
+        diagnostics = QTextEdit()
+        diagnostics.setReadOnly(True)
+        diagnostics.setMaximumHeight(135)
+        diagnostics.setPlaceholderText("Press Analyze Bracket to inspect exposures and alignment.")
+        form.addRow("Bracket inspection", diagnostics)
+        ghost_preview = QLabel("Ghost preview appears after analysis")
+        ghost_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ghost_preview.setMinimumHeight(150)
+        ghost_preview.setStyleSheet("background:#111; border:1px solid #3a3a3a; color:#888;")
+        form.addRow("Motion overlay", ghost_preview)
+        analyze_btn = QPushButton("Analyze Bracket")
+        form.addRow(analyze_btn)
         align_cb = QCheckBox("Align frames (recommended for handheld)")
         align_cb.setChecked(True)
         form.addRow(align_cb)
@@ -5814,11 +5826,61 @@ class PhotoLab(QMainWindow):
         deghost_spin.setValue(0)
         deghost_spin.setToolTip("0 = off. Higher values reduce ghosting from movement.")
         form.addRow("Deghost strength", deghost_spin)
+        reference_combo = QComboBox()
+        reference_combo.addItem("Automatic (middle exposure)", None)
+        for index, path in enumerate(paths):
+            reference_combo.addItem(os.path.basename(path), index)
+        reference_combo.setToolTip("Moving areas are taken from this frame when deghosting.")
+        form.addRow("Deghost reference", reference_combo)
+        ca_spin = QSpinBox()
+        ca_spin.setRange(-100, 100)
+        ca_spin.setValue(0)
+        ca_spin.setSuffix(" %")
+        ca_spin.setToolTip("Correct red/blue edge fringing before the exposures are merged.")
+        form.addRow("Chromatic fringe", ca_spin)
         size_combo = QComboBox()
         size_combo.addItem("Full resolution", 0)
         size_combo.addItem("Preview (long edge 2000px)", 2000)
         size_combo.addItem("Fast preview (long edge 1200px)", 1200)
         form.addRow("Output size", size_combo)
+
+        def analyze_bracket():
+            try:
+                from imaging import analyze_hdr_stack, hdr_ghost_preview
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                report = analyze_hdr_stack(paths, max_dim=700)
+                lines = []
+                for frame in report["frames"]:
+                    shutter = frame["exposure_seconds"]
+                    shutter_text = f"{shutter:.5g}s" if shutter else "EXIF n/a"
+                    warning = "  ⚠ check alignment" if frame["alignment_confidence"] < 0.15 else ""
+                    lines.append(
+                        f"{frame['index'] + 1}. {os.path.basename(frame['path'])}  "
+                        f"{frame['relative_ev']:+.2f} EV  {shutter_text}  "
+                        f"shift {frame['shift_x']:+.1f}, {frame['shift_y']:+.1f}px  "
+                        f"confidence {frame['alignment_confidence']:.0%}{warning}"
+                    )
+                diagnostics.setPlainText("\n".join(lines))
+                if reference_combo.currentData() is None:
+                    reference_combo.setCurrentIndex(report["reference_index"] + 1)
+                selected_reference = reference_combo.currentData()
+                preview, ghost_mask = hdr_ghost_preview(
+                    paths, align=align_cb.isChecked(), max_dim=700,
+                    reference_index=selected_reference,
+                )
+                pixmap = cv_to_qpixmap(preview)
+                ghost_preview.setPixmap(pixmap.scaled(
+                    620, 220, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+                coverage = float(np.mean(ghost_mask > 0.25)) * 100.0
+                diagnostics.append(f"\nMagenta motion overlay: {coverage:.1f}% of the frame may need deghosting.")
+            except Exception as exc:
+                diagnostics.setPlainText(f"Could not analyze bracket: {exc}")
+            finally:
+                QApplication.restoreOverrideCursor()
+
+        analyze_btn.clicked.connect(analyze_bracket)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -5831,6 +5893,8 @@ class PhotoLab(QMainWindow):
         max_dim = int(size_combo.currentData() or 0)
         method = method_combo.currentData() or "mertens"
         deghost = int(deghost_spin.value())
+        reference_index = reference_combo.currentData()
+        ca_correction = int(ca_spin.value())
         base = os.path.splitext(os.path.basename(paths[0]))[0]
         suggested = os.path.join(self.folder or ".", f"{base}_HDR.jpg")
         out_path, _ = QFileDialog.getSaveFileName(
@@ -5840,10 +5904,11 @@ class PhotoLab(QMainWindow):
         if not out_path:
             return
         self.statusBar().showMessage(f"HDR merge: {len(paths)} frames…")
-        self.log(f"HDR merge started ({len(paths)} frames, {method}, deghost={deghost}) → {out_path}")
+        self.log(f"HDR merge started ({len(paths)} frames, {method}, deghost={deghost}, reference={reference_index}, CA={ca_correction}) → {out_path}")
         self._hdr_worker = HdrMergeWorker(
             paths, out_path, align=align, max_dim=max_dim,
-            method=method, deghost=deghost,
+            method=method, deghost=deghost, reference_index=reference_index,
+            ca_correction=ca_correction,
         )
         self._hdr_worker.progress.connect(lambda m: self.statusBar().showMessage(m))
         self._hdr_worker.finished_ok.connect(self._on_hdr_merge_done)

@@ -541,8 +541,12 @@ PhotoLab is an open, Python-based editor. It aims for a DxO-like workflow withou
 
 - **Detect brackets from open folder** — groups by EXIF exposure bias / shutter  
 - **Mertens** (default exposure fusion) or **Debevec + tonemap** (Reinhard / Drago / Mantiuk)  
-- **Deghost strength** — blends moving regions toward the stack median before merge  
+- **Analyze Bracket** — shows relative exposure, recorded shutter, estimated frame shift, alignment confidence, and a magenta motion/ghost overlay before merging
+- **Deghost strength and reference** — blends moving regions toward either the automatically chosen middle exposure or a frame you select
+- **Chromatic fringe** — corrects red/blue edge fringing on every source before alignment and merge
 - Align frames for handheld brackets  
+
+The automatic deghost reference is the middle-brightness exposure. Choose another reference when a person, animal, leaf, or other moving subject is best in a different frame. Magenta is only a diagnostic overlay and is never baked into the merged image.
 
 
 

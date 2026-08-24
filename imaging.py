@@ -2494,36 +2494,131 @@ def apply_hdr_look(img, amount):
     return np.clip(img, 0, 1)
 
 
+def _load_hdr_stack(paths, max_dim=0):
+    """Load and center-crop an HDR bracket to a common size."""
+    images, metas = [], []
+    for path in paths:
+        img, meta = load_image(path, use_camera_wb=True)
+        if img is None:
+            raise RuntimeError(f"Could not load: {path}")
+        if img.dtype != np.uint8:
+            maximum = float(np.iinfo(img.dtype).max) if np.issubdtype(img.dtype, np.integer) else 1.0
+            img = np.clip(img.astype(np.float32) / max(maximum, 1.0) * 255.0, 0, 255).astype(np.uint8)
+        if max_dim and max(img.shape[:2]) > max_dim:
+            scale = float(max_dim) / max(img.shape[:2])
+            img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        images.append(img)
+        metas.append(meta or {})
+    min_h = min(im.shape[0] for im in images)
+    min_w = min(im.shape[1] for im in images)
+    images = [im[(im.shape[0] - min_h) // 2:(im.shape[0] - min_h) // 2 + min_h,
+                 (im.shape[1] - min_w) // 2:(im.shape[1] - min_w) // 2 + min_w]
+              for im in images]
+    return images, metas
+
+
+def _align_hdr_stack(images):
+    """Return an AlignMTB-aligned copy, leaving input frames untouched."""
+    aligned = [im.copy() for im in images]
+    if len(aligned) > 1:
+        try:
+            cv2.createAlignMTB().process(aligned, aligned)
+        except Exception as exc:
+            print(f"HDR align skipped: {exc}")
+    return aligned
+
+
+def _exposure_seconds_from_meta(meta):
+    """Parse PhotoLab's normalized shutter metadata into seconds."""
+    value = (meta or {}).get("exposure_seconds") or (meta or {}).get("shutter")
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip().lower().replace("seconds", "").replace("second", "").replace("sec", "").rstrip("s")
+        if "/" in text:
+            num, den = text.split("/", 1)
+            return float(num) / float(den)
+        return float(text)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def analyze_hdr_stack(paths, max_dim=900):
+    """Return exposure, detail, motion, and alignment diagnostics."""
+    images, metas = _load_hdr_stack(paths, max_dim=max_dim)
+    grays = [cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(np.float32) for im in images]
+    medians = [max(float(np.median(gray)), 0.01) for gray in grays]
+    reference_index = int(np.argsort(medians)[len(medians) // 2])
+    ref = grays[reference_index]
+    records = []
+    for index, (path, gray, meta) in enumerate(zip(paths, grays, metas)):
+        shift, response = ((0.0, 0.0), 1.0)
+        if index != reference_index:
+            try:
+                shift, response = cv2.phaseCorrelate(ref, gray)
+            except cv2.error:
+                response = 0.0
+        records.append({
+            "index": index, "path": str(path), "median_luma": medians[index],
+            "relative_ev": float(np.log2(medians[index] / medians[reference_index])),
+            "sharpness": float(cv2.Laplacian(gray, cv2.CV_32F).var()),
+            "shift_x": float(shift[0]), "shift_y": float(shift[1]),
+            "alignment_confidence": float(np.clip(response, 0.0, 1.0)),
+            "exposure_seconds": _exposure_seconds_from_meta(meta),
+        })
+    return {"reference_index": reference_index, "frames": records}
+
+
+def hdr_ghost_preview(paths, align=True, max_dim=700, reference_index=None):
+    """Build a BGR preview with likely moving areas highlighted in magenta."""
+    images, _metas = _load_hdr_stack(paths, max_dim=max_dim)
+    if align:
+        images = _align_hdr_stack(images)
+    stack = np.stack([im.astype(np.float32) for im in images], axis=0)
+    median = np.median(stack, axis=0)
+    if reference_index is None:
+        medians = [float(np.median(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY))) for im in images]
+        reference_index = int(np.argsort(medians)[len(medians) // 2])
+    reference_index = int(np.clip(reference_index, 0, len(images) - 1))
+    reference = images[reference_index].astype(np.float32)
+    deviation = np.median(np.mean(np.abs(stack - median[None, ...]), axis=3), axis=0)
+    mask = np.clip((deviation - 5.0) / 25.0, 0.0, 1.0)
+    mask = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 1.5)
+    overlay = reference.copy()
+    magenta = np.zeros_like(overlay)
+    magenta[..., 0] = 255
+    magenta[..., 2] = 255
+    alpha = (mask * 0.72)[..., None]
+    overlay = overlay * (1.0 - alpha) + magenta * alpha
+    return np.clip(overlay, 0, 255).astype(np.uint8), mask
+
+
+def _prepare_hdr_images(paths, align=True, max_dim=0, deghost=0.0,
+                        reference_index=None, ca_correction=0.0):
+    images, metas = _load_hdr_stack(paths, max_dim=max_dim)
+    if ca_correction:
+        images = [np.clip(apply_chromatic_aberration_fix(
+            image.astype(np.float32) / 255.0, ca_correction) * 255.0, 0, 255).astype(np.uint8)
+                  for image in images]
+    if align:
+        images = _align_hdr_stack(images)
+    if deghost and float(deghost) > 0:
+        images = deghost_stack(images, strength=deghost, reference_index=reference_index)
+    return images, metas
+
+
 def merge_hdr_mertens(paths, align=True, max_dim=0,
-                      contrast_weight=1.0, saturation_weight=1.0, exposure_weight=1.0):
+                      contrast_weight=1.0, saturation_weight=1.0, exposure_weight=1.0,
+                      deghost=0.0, reference_index=None, ca_correction=0.0):
     """Fuse multiple exposures with OpenCV MergeMertens. Returns uint8 BGR."""
     if not paths or len(paths) < 2:
         raise ValueError("HDR merge needs at least 2 images")
-    images = []
-    for path in paths:
-        img, _meta = load_image(path, use_camera_wb=True)
-        if img is None:
-            raise RuntimeError(f"Could not load: {path}")
-        if max_dim and max(img.shape[:2]) > max_dim:
-            h, w = img.shape[:2]
-            scale = max_dim / max(h, w)
-            img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        images.append(img)
-    min_h = min(im.shape[0] for im in images)
-    min_w = min(im.shape[1] for im in images)
-    cropped = []
-    for im in images:
-        h, w = im.shape[:2]
-        y0 = (h - min_h) // 2
-        x0 = (w - min_w) // 2
-        cropped.append(im[y0:y0 + min_h, x0:x0 + min_w])
-    images = cropped
-    if align and len(images) >= 2:
-        try:
-            align_mtb = cv2.createAlignMTB()
-            align_mtb.process(images, images)
-        except Exception as e:
-            print(f"HDR align skipped: {e}")
+    images, _metas = _prepare_hdr_images(
+        paths, align=align, max_dim=max_dim, deghost=deghost,
+        reference_index=reference_index, ca_correction=ca_correction,
+    )
     merger = cv2.createMergeMertens(
         contrast_weight=contrast_weight,
         saturation_weight=saturation_weight,
@@ -2704,7 +2799,8 @@ def apply_zone_system(
         img = np.stack([out, out, out], axis=-1)
     return np.clip(img, 0, 1)
 
-def deghost_stack(images: List[np.ndarray], strength: float = 50.0) -> List[np.ndarray]:
+def deghost_stack(images: List[np.ndarray], strength: float = 50.0,
+                  reference_index=None) -> List[np.ndarray]:
     """Reduce motion ghosts before fusion.
 
     strength 0..100: blend each frame toward a robust reference (median of stack).
@@ -2715,6 +2811,9 @@ def deghost_stack(images: List[np.ndarray], strength: float = 50.0) -> List[np.n
     t = max(0.0, min(1.0, float(strength) / 100.0))
     stack = np.stack([im.astype(np.float32) for im in images], axis=0)
     median = np.median(stack, axis=0)
+    reference = median
+    if reference_index is not None:
+        reference = stack[int(np.clip(reference_index, 0, len(images) - 1))]
     # Per-pixel motion amount vs median
     out = []
     for im in images:
@@ -2725,7 +2824,7 @@ def deghost_stack(images: List[np.ndarray], strength: float = 50.0) -> List[np.n
         motion = np.clip(diff / (0.15 * 255.0 + 0.25 * dmax), 0, 1)
         motion = cv2.GaussianBlur(motion, (0, 0), sigmaX=2.0)
         w = (motion * t)[..., None]
-        y = x * (1.0 - w) + median * w
+        y = x * (1.0 - w) + reference * w
         out.append(np.clip(y, 0, 255).astype(np.uint8))
     return out
 
@@ -2736,6 +2835,8 @@ def merge_hdr_debevec(
     deghost=0.0,
     tonemap: str = "reinhard",
     gamma: float = 1.0,
+    reference_index=None,
+    ca_correction: float = 0.0,
 ):
     """True HDR via Debevec calibration + tonemap. Returns uint8 BGR.
 
@@ -2744,11 +2845,10 @@ def merge_hdr_debevec(
     """
     if not paths or len(paths) < 2:
         raise ValueError("HDR merge needs at least 2 images")
-    images, metas = _load_hdr_stack(paths, max_dim=max_dim)
-    if align:
-        images = _align_hdr_stack(images)
-    if deghost and float(deghost) > 0:
-        images = deghost_stack(images, strength=float(deghost))
+    images, metas = _prepare_hdr_images(
+        paths, align=align, max_dim=max_dim, deghost=deghost,
+        reference_index=reference_index, ca_correction=ca_correction,
+    )
 
     times = []
     for i, meta in enumerate(metas):
