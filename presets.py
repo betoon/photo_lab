@@ -33,7 +33,11 @@ PRESET_MODULE_FIELDS = {
         "denoise_luminance", "denoise_chroma", "denoise_strength", "denoise_detail",
         "denoise_method", "sharpen_intensity", "sharpen_radius", "sharpen_threshold",
         "sharpen_detail", "output_sharpen", "astro_stretch", "astro_bg_remove",
-        "astro_star_emphasis",
+        "astro_star_emphasis", "output_sharpen_media", "output_sharpen_ppi",
+        "output_sharpen_width_in", "portrait_detail_enabled", "portrait_skin_color",
+        "portrait_color_reach", "portrait_small_smooth", "portrait_medium_smooth",
+        "portrait_large_smooth", "portrait_edge_preserve", "portrait_texture_recovery",
+        "portrait_mask_id",
     ),
     "Geometry": (
         "horizon", "distortion", "perspective", "perspective_horizontal",

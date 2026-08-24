@@ -394,8 +394,10 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 
 ### Detail / WB (#7)
 
-- `output_sharpen_params(ppi, media)` → amount + radius for screen/matte/glossy
-- `skin_tone_mask` + `protect_skin` on sharpen and vibrance
+- `output_sharpen_params(ppi, media)` → amount + radius for screen, matte, glossy, canvas, or custom delivery
+- `build_portrait_skin_mask` → Lab chroma selection with saturation/luminance gates and edge suppression
+- `apply_portrait_detail` → three-scale smoothing, texture recovery, and optional shared-mask intersection
+- `ImageCanvas.set_sharpen_proof` → 100% proof label; main-window proof rendering targets output pixel width with a 4000-pixel cap
 - Dual illuminant: `wb_dual`, `temperature2`, `tint2`, `wb_mix` in `apply_white_balance`
 
 

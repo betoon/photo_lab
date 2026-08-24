@@ -33,7 +33,7 @@ VIDEO_EXTENSIONS = {
 from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark,
                      detect_architectural_upright, normalize_keystone_points,
-                     build_shared_mask)
+                     build_shared_mask, build_portrait_skin_mask, output_sharpen_params)
 from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, SdImportWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
@@ -1236,6 +1236,7 @@ class PhotoLab(QMainWindow):
         self.preview.controlPointAdded.connect(self._on_canvas_point_added)
         self.preview.controlPointDragFinished.connect(self._on_canvas_point_drag_finished)
         self.preview.wbPicked.connect(self._on_wb_picked)
+        self.preview.skinColorPicked.connect(self._on_skin_color_picked)
         self.preview.gradientChanged.connect(self._on_gradient_changed)
         self.preview.gradientSelected.connect(self._on_gradient_selected)
         self.preview.brushStrokeFinished.connect(self._on_brush_stroke_finished)
@@ -1698,11 +1699,77 @@ class PhotoLab(QMainWindow):
         self._add_slider(v, "sharpen_detail", "Detail", 0.0, 100.0, 1, 0, 0.0)
 
         box, v = collapsible_group("Output Sharpening", layout)
-        hint3 = QLabel("Applied last (before grain). Use for screen or print output.")
+        hint3 = QLabel("Choose the intended output. Apply Suggestion sets a conservative amount; Proof shows the image at 100% with delivery information.")
         hint3.setWordWrap(True)
         hint3.setStyleSheet("color:#888; font-size:11px;")
         v.addWidget(hint3)
         self._add_slider(v, "output_sharpen", "Output amount", 0.0, 100.0, 1, 0, 0.0)
+        output_row = QHBoxLayout()
+        output_row.addWidget(QLabel("Media"))
+        self.output_media_combo = QComboBox()
+        for label, key in (("Custom", "custom"), ("Screen", "screen"), ("Matte paper", "matte"), ("Glossy paper", "glossy"), ("Canvas", "canvas")):
+            self.output_media_combo.addItem(label, key)
+        self.output_media_combo.currentIndexChanged.connect(self._on_output_profile_changed)
+        output_row.addWidget(self.output_media_combo, 1)
+        v.addLayout(output_row)
+        ppi_row = QHBoxLayout()
+        ppi_row.addWidget(QLabel("Resolution"))
+        self.output_ppi_spin = QSpinBox()
+        self.output_ppi_spin.setRange(72, 720)
+        self.output_ppi_spin.setValue(300)
+        self.output_ppi_spin.setSuffix(" PPI")
+        self.output_ppi_spin.valueChanged.connect(self._on_output_profile_changed)
+        ppi_row.addWidget(self.output_ppi_spin)
+        self.output_width_spin = QDoubleSpinBox()
+        self.output_width_spin.setRange(1.0, 100.0)
+        self.output_width_spin.setValue(12.0)
+        self.output_width_spin.setSuffix(" in")
+        self.output_width_spin.valueChanged.connect(self._on_output_profile_changed)
+        ppi_row.addWidget(self.output_width_spin)
+        v.addLayout(ppi_row)
+        output_buttons = QHBoxLayout()
+        suggest = QPushButton("Apply Suggestion")
+        suggest.clicked.connect(self._apply_output_sharpen_suggestion)
+        output_buttons.addWidget(suggest)
+        self.output_proof_cb = QCheckBox("Sharpening Proof")
+        self.output_proof_cb.toggled.connect(self._on_output_proof)
+        output_buttons.addWidget(self.output_proof_cb)
+        v.addLayout(output_buttons)
+
+        box, v = collapsible_group("Portrait Detail", layout, checked=False)
+        portrait_hint = QLabel("Sample representative skin, refine the color reach, then balance smoothing against edge and texture preservation.")
+        portrait_hint.setWordWrap(True)
+        portrait_hint.setStyleSheet("color:#888; font-size:11px;")
+        v.addWidget(portrait_hint)
+        self.portrait_enabled_cb = QCheckBox("Enable portrait detail")
+        self.portrait_enabled_cb.toggled.connect(self._on_portrait_enabled)
+        v.addWidget(self.portrait_enabled_cb)
+        portrait_pick_row = QHBoxLayout()
+        self.portrait_pick_btn = QPushButton("Pick Skin Color")
+        self.portrait_pick_btn.setCheckable(True)
+        self.portrait_pick_btn.toggled.connect(self.toggle_skin_picker)
+        portrait_pick_row.addWidget(self.portrait_pick_btn)
+        self.portrait_swatch = QLabel("Sample")
+        self.portrait_swatch.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.portrait_swatch.setMinimumWidth(70)
+        portrait_pick_row.addWidget(self.portrait_swatch)
+        self.portrait_show_mask_btn = QPushButton("Show Mask")
+        self.portrait_show_mask_btn.setCheckable(True)
+        self.portrait_show_mask_btn.toggled.connect(self._show_portrait_mask)
+        portrait_pick_row.addWidget(self.portrait_show_mask_btn)
+        v.addLayout(portrait_pick_row)
+        self._add_slider(v, "portrait_color_reach", "Color reach", 0.0, 100.0, 1, 0, 28.0)
+        self._add_slider(v, "portrait_small_smooth", "Small details", 0.0, 100.0, 1, 0, 20.0)
+        self._add_slider(v, "portrait_medium_smooth", "Medium details", 0.0, 100.0, 1, 0, 10.0)
+        self._add_slider(v, "portrait_large_smooth", "Large details", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "portrait_edge_preserve", "Edge preservation", 0.0, 100.0, 1, 0, 75.0)
+        self._add_slider(v, "portrait_texture_recovery", "Texture recovery", 0.0, 100.0, 1, 0, 45.0)
+        portrait_mask_row = QHBoxLayout()
+        portrait_mask_row.addWidget(QLabel("Limit with shared mask"))
+        self.portrait_mask_combo = QComboBox()
+        self.portrait_mask_combo.currentIndexChanged.connect(self._on_portrait_mask_changed)
+        portrait_mask_row.addWidget(self.portrait_mask_combo, 1)
+        v.addLayout(portrait_mask_row)
 
         box, v = collapsible_group("Presets", layout)
         prow = QHBoxLayout()
@@ -3330,6 +3397,146 @@ class PhotoLab(QMainWindow):
             self.geometry_auto_crop_cb.blockSignals(False)
         if hasattr(self, "creative_filter_list"):
             self._sync_creative_ui()
+        if hasattr(self, "output_media_combo"):
+            self._sync_detail_extensions(r)
+
+    def _sync_detail_extensions(self, recipe):
+        media = str(getattr(recipe, "output_sharpen_media", "custom") or "custom")
+        self.output_media_combo.blockSignals(True)
+        self.output_media_combo.setCurrentIndex(max(0, self.output_media_combo.findData(media)))
+        self.output_media_combo.blockSignals(False)
+        for widget, value in (
+            (self.output_ppi_spin, int(round(getattr(recipe, "output_sharpen_ppi", 300.0)))),
+            (self.output_width_spin, float(getattr(recipe, "output_sharpen_width_in", 12.0))),
+        ):
+            widget.blockSignals(True); widget.setValue(value); widget.blockSignals(False)
+        self.output_proof_cb.blockSignals(True)
+        self.output_proof_cb.setChecked(bool(getattr(recipe, "output_sharpen_proof", False)))
+        self.output_proof_cb.blockSignals(False)
+        self.preview.set_sharpen_proof(
+            bool(getattr(recipe, "output_sharpen_proof", False)),
+            getattr(recipe, "output_sharpen_ppi", 300), media,
+            getattr(recipe, "output_sharpen_width_in", 12),
+        )
+        self.portrait_enabled_cb.blockSignals(True)
+        self.portrait_enabled_cb.setChecked(bool(getattr(recipe, "portrait_detail_enabled", False)))
+        self.portrait_enabled_cb.blockSignals(False)
+        color = tuple(getattr(recipe, "portrait_skin_color", (0.55, 0.62, 0.76)))
+        b, g, red = [float(np.clip(value, 0, 1)) for value in color]
+        self.portrait_swatch.setStyleSheet(
+            f"background:rgb({int(red*255)},{int(g*255)},{int(b*255)}); color:#111; border:1px solid #777; padding:4px;"
+        )
+        self._refresh_portrait_mask_combo(recipe)
+
+    def _on_output_profile_changed(self, _value=None):
+        if self.current_path is None:
+            return
+        recipe = self.recipes[self.current_path]
+        recipe.output_sharpen_media = self.output_media_combo.currentData() or "custom"
+        recipe.output_sharpen_ppi = float(self.output_ppi_spin.value())
+        recipe.output_sharpen_width_in = float(self.output_width_spin.value())
+        if bool(getattr(recipe, "output_sharpen_proof", False)):
+            self.preview.set_sharpen_proof(True, recipe.output_sharpen_ppi, recipe.output_sharpen_media, recipe.output_sharpen_width_in)
+        self._schedule_history("Output sharpening profile")
+        self.render_timer.start()
+
+    def _apply_output_sharpen_suggestion(self):
+        if self.current_path is None:
+            return
+        media = self.output_media_combo.currentData() or "custom"
+        amount, radius = output_sharpen_params(self.output_ppi_spin.value(), media)
+        recipe = self.recipes[self.current_path]
+        recipe.output_sharpen_media = media
+        recipe.output_sharpen_ppi = float(self.output_ppi_spin.value())
+        recipe.output_sharpen_width_in = float(self.output_width_spin.value())
+        recipe.output_sharpen = round(amount, 1)
+        self.sliders["output_sharpen"].blockSignals(True)
+        self.sliders["output_sharpen"].set_value(recipe.output_sharpen)
+        self.sliders["output_sharpen"].blockSignals(False)
+        self._push_history("Output sharpening suggestion")
+        self.render_preview()
+        self.statusBar().showMessage(f"Suggested output sharpening: amount {amount:.0f}, radius {radius:.2f}")
+
+    def _on_output_proof(self, checked):
+        if self.current_path is None:
+            return
+        recipe = self.recipes[self.current_path]
+        recipe.output_sharpen_proof = bool(checked)
+        self.preview.set_sharpen_proof(checked, recipe.output_sharpen_ppi, recipe.output_sharpen_media, recipe.output_sharpen_width_in)
+        self.statusBar().showMessage("Sharpening proof at 100%" if checked else "Sharpening proof off")
+
+    def _on_portrait_enabled(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].portrait_detail_enabled = bool(checked)
+        self._schedule_history("Portrait detail")
+        self.render_timer.start()
+
+    def toggle_skin_picker(self, checked):
+        if self.current_path is None or self.original_bgr is None:
+            self.portrait_pick_btn.blockSignals(True); self.portrait_pick_btn.setChecked(False); self.portrait_pick_btn.blockSignals(False)
+            return
+        self.preview.skin_picker_mode = bool(checked)
+        if checked:
+            self.preview.wb_picker_mode = False
+            self.preview.brush_mode = False
+            self.preview.gradient_mode = False
+        self.preview.setCursor(Qt.CursorShape.CrossCursor if checked else Qt.CursorShape.ArrowCursor)
+        self.statusBar().showMessage("Click representative, evenly lit skin" if checked else "Skin picker off")
+
+    def _on_skin_color_picked(self, blue, green, red):
+        if self.current_path is None:
+            return
+        recipe = self.recipes[self.current_path]
+        recipe.portrait_skin_color = (float(blue), float(green), float(red))
+        recipe.portrait_detail_enabled = True
+        self.preview.skin_picker_mode = False
+        self.portrait_pick_btn.blockSignals(True); self.portrait_pick_btn.setChecked(False); self.portrait_pick_btn.blockSignals(False)
+        self.portrait_enabled_cb.blockSignals(True); self.portrait_enabled_cb.setChecked(True); self.portrait_enabled_cb.blockSignals(False)
+        self.preview.setCursor(Qt.CursorShape.ArrowCursor)
+        self._sync_detail_extensions(recipe)
+        self._push_history("Sample portrait skin color")
+        self.render_preview()
+        if self.portrait_show_mask_btn.isChecked():
+            self._show_portrait_mask(True)
+
+    def _refresh_portrait_mask_combo(self, recipe=None):
+        if not hasattr(self, "portrait_mask_combo") or self.current_path is None:
+            return
+        recipe = recipe or self.recipes[self.current_path]
+        selected = str(getattr(recipe, "portrait_mask_id", "") or "")
+        self.portrait_mask_combo.blockSignals(True)
+        self.portrait_mask_combo.clear()
+        self.portrait_mask_combo.addItem("None", "")
+        for mask in getattr(recipe, "mask_library", []) or []:
+            self.portrait_mask_combo.addItem(mask.get("name", "Mask"), str(mask.get("id", "")))
+        self.portrait_mask_combo.setCurrentIndex(max(0, self.portrait_mask_combo.findData(selected)))
+        self.portrait_mask_combo.blockSignals(False)
+
+    def _on_portrait_mask_changed(self, _index):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].portrait_mask_id = self.portrait_mask_combo.currentData() or ""
+        self._schedule_history("Portrait shared mask")
+        self.render_timer.start()
+        if self.portrait_show_mask_btn.isChecked():
+            self._show_portrait_mask(True)
+
+    def _show_portrait_mask(self, checked):
+        if not checked or self.current_path is None or self.original_bgr is None:
+            self.preview.set_shared_mask_overlay(None)
+            return
+        recipe = self.recipes[self.current_path]
+        source = self.original_bgr.astype(np.float32)
+        if np.issubdtype(self.original_bgr.dtype, np.integer):
+            source /= float(np.iinfo(self.original_bgr.dtype).max)
+        mask = build_portrait_skin_mask(source, recipe.portrait_skin_color, recipe.portrait_color_reach, recipe.portrait_edge_preserve)
+        mask_id = str(getattr(recipe, "portrait_mask_id", "") or "")
+        if mask_id:
+            match = next((m for m in recipe.mask_library if str(m.get("id", "")) == mask_id), None)
+            if match is not None:
+                mask = np.minimum(mask, build_shared_mask(source, match, recipe.mask_library))
+        self.preview.set_shared_mask_overlay(mask)
 
     def _creative_filter_defaults(self, kind):
         names = {"basic": "Basic Tone & Color", "color_grade": "Four-Way Color Grade", "monochrome": "Monochrome Workspace"}
@@ -3406,6 +3613,8 @@ class PhotoLab(QMainWindow):
         index = self.creative_mask_combo.findData(selected)
         self.creative_mask_combo.setCurrentIndex(max(0, index))
         self.creative_mask_combo.blockSignals(False)
+        if hasattr(self, "portrait_mask_combo"):
+            self._refresh_portrait_mask_combo()
 
     def _add_creative_filter(self):
         if self.current_path is None:
@@ -3628,6 +3837,8 @@ class PhotoLab(QMainWindow):
             self._schedule_history(key)
         if key == "zebra_threshold" and hasattr(self.preview, "set_zebra_threshold"):
             self.preview.set_zebra_threshold(float(value) / 100.0)
+        if key.startswith("portrait_") and hasattr(self, "portrait_show_mask_btn") and self.portrait_show_mask_btn.isChecked():
+            self._show_portrait_mask(True)
         # Keep ToneCurveWidget graph in sync with region sliders
         if key in ("curve_shadows", "curve_darks", "curve_mids", "curve_lights", "curve_highlights"):
             if hasattr(self, "tone_curve"):
@@ -4030,7 +4241,11 @@ class PhotoLab(QMainWindow):
         recipe = self.recipes[self.current_path]
         meta = self.meta_cache.get(self.current_path, {})
         h, w = self.original_bgr.shape[:2]
-        max_dim = 1600
+        if bool(getattr(recipe, "output_sharpen_proof", False)):
+            target_width = int(float(getattr(recipe, "output_sharpen_width_in", 12.0)) * float(getattr(recipe, "output_sharpen_ppi", 300.0)))
+            max_dim = min(max(h, w), max(1600, min(4000, target_width)))
+        else:
+            max_dim = 1600
         cache_key = (self.current_path, id(self.original_bgr), max_dim)
         preview_src = self._preview_source_cache.get(cache_key)
         if preview_src is None and max(h, w) > max_dim:
@@ -4428,7 +4643,11 @@ class PhotoLab(QMainWindow):
                           "hsl_hue", "hsl_sat", "hsl_lum"]
             detail_keys = ["denoise_luminance", "denoise_chroma", "denoise_strength",
                            "denoise_detail", "denoise_method", "sharpen_intensity",
-                           "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen"]
+                           "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen",
+                           "output_sharpen_media", "output_sharpen_ppi", "output_sharpen_width_in",
+                           "portrait_detail_enabled", "portrait_skin_color", "portrait_color_reach",
+                           "portrait_small_smooth", "portrait_medium_smooth", "portrait_large_smooth",
+                           "portrait_edge_preserve", "portrait_texture_recovery", "portrait_mask_id"]
             geo_keys = [
                 "horizon", "distortion", "perspective", "perspective_horizontal",
                 "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
@@ -4518,7 +4737,12 @@ class PhotoLab(QMainWindow):
                       "soft_proof_gamut"],
             "detail": ["denoise_luminance", "denoise_chroma", "denoise_strength",
                        "denoise_detail", "denoise_method", "sharpen_intensity",
-                       "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen"],
+                       "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen",
+                       "output_sharpen_media", "output_sharpen_ppi", "output_sharpen_width_in",
+                       "output_sharpen_proof", "portrait_detail_enabled", "portrait_skin_color",
+                       "portrait_color_reach", "portrait_small_smooth", "portrait_medium_smooth",
+                       "portrait_large_smooth", "portrait_edge_preserve", "portrait_texture_recovery",
+                       "portrait_mask_id"],
             "geometry": [
                 "horizon", "distortion", "perspective", "perspective_horizontal",
                 "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",

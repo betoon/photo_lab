@@ -199,14 +199,21 @@ Light NR, Strong NR, Portrait, Landscape — one-click starting points. Always c
 
 ### Output sharpening (PPI)
 
-- Set **Output PPI** and **Media** (Screen / Matte / Glossy)  
-- **Apply suggestion** fills Output amount from PPI + media  
-- Quick buttons: Screen 96, Print 240 / 300 / 360  
+- Choose **Custom, Screen, Matte paper, Glossy paper, or Canvas**.
+- Set the intended **PPI** and output width in inches.
+- **Apply Suggestion** fills Output amount and calculates a media/PPI-aware sharpening radius.
+- **Sharpening Proof** renders toward the intended pixel width (safely capped at 4000 preview pixels), switches the image to 100%, and displays the active delivery conditions.
+- Choose **Custom** to retain the original fixed-radius output-sharpening behavior.
 
-### Skin protection
+### Portrait Detail
 
-- **Protect skin tones** reduces capture/output sharpening and vibrance on skin-like hues  
-- Portrait detail preset enables moderate skin protection  
+- Enable **Portrait Detail**, then choose **Pick Skin Color** and click representative, evenly lit skin.
+- **Color reach** expands or narrows the sampled-color selection.
+- **Small, Medium, and Large details** control smoothing at separate spatial scales.
+- **Edge preservation** protects eyes, lips, hair boundaries, jewelry, and other strong features.
+- **Texture recovery** restores controlled fine texture after smoothing.
+- **Show Mask** displays the calculated coverage as a red overlay.
+- **Limit with shared mask** intersects skin detection with a named mask—for example, a painted face or subject mask—to prevent similar-colored backgrounds from being affected.
 
 ## Batch tools
 

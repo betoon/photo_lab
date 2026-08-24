@@ -389,6 +389,7 @@ class ImageCanvas(QWidget):
     gradientChanged = pyqtSignal()  # any gradient geometry change
     gradientSelected = pyqtSignal(int)
     wbPicked = pyqtSignal(float, float, float)  # b,g,r 0..1 sample
+    skinColorPicked = pyqtSignal(float, float, float)  # b,g,r 0..1 sample
     brushStrokeFinished = pyqtSignal()
     brushMaskChanged = pyqtSignal()
     horizonLineFinished = pyqtSignal(float)  # angle degrees
@@ -431,6 +432,9 @@ class ImageCanvas(QWidget):
         self.selected_gradient = -1
         self.gradient_mode = False
         self.wb_picker_mode = False
+        self.skin_picker_mode = False
+        self.sharpen_proof = False
+        self.sharpen_proof_label = ""
         self.brush_mode = False
         self.brush_masks = []
         self.selected_brush = -1
@@ -537,6 +541,16 @@ class ImageCanvas(QWidget):
             rgba[..., 3] = (values * 150).astype(np.uint8)
             image = QImage(rgba.data, rgba.shape[1], rgba.shape[0], rgba.strides[0], QImage.Format.Format_RGBA8888)
             self._shared_mask_overlay = QPixmap.fromImage(image.copy())
+        self.update()
+
+    def set_sharpen_proof(self, enabled, ppi=300, media="custom", width_in=12.0):
+        self.sharpen_proof = bool(enabled)
+        self.sharpen_proof_label = f"Sharpening proof · {media.title()} · {float(ppi):.0f} PPI · {float(width_in):.1f} in"
+        if enabled:
+            self._fit_mode = False
+            self._scale = 1.0
+            self._offset = QPoint(0, 0)
+            self.zoom_changed.emit(self._scale)
         self.update()
 
     def _erase_brush_dabs(self, pos):
@@ -1057,6 +1071,12 @@ class ImageCanvas(QWidget):
             painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
             painter.setPen(QPen(QColor(255, 220, 80), 1, Qt.PenStyle.DashLine))
             painter.drawRect(self._drag_rect)
+        if self.sharpen_proof:
+            painter.setPen(QPen(QColor(235, 235, 235), 1))
+            painter.setBrush(QBrush(QColor(15, 15, 15, 205)))
+            label_rect = QRect(14, self.height() - 45, min(430, self.width() - 28), 30)
+            painter.drawRoundedRect(label_rect, 4, 4)
+            painter.drawText(label_rect.adjusted(10, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, self.sharpen_proof_label)
         painter.end()
 
     def mouseDoubleClickEvent(self, e):
@@ -1139,6 +1159,19 @@ class ImageCanvas(QWidget):
                     self._erase_brush_dabs(e.position().toPoint())
                 else:
                     self._add_brush_dab(e.position().toPoint())
+                return
+
+        # Skin-color eyedropper
+        if self.skin_picker_mode and e.button() == Qt.MouseButton.LeftButton and self._pixmap is not None:
+            rect = self.image_rect()
+            if not rect.isEmpty() and rect.contains(e.position().toPoint()):
+                pos = e.position().toPoint()
+                nx = max(0.0, min(1.0, (pos.x() - rect.left()) / max(rect.width(), 1)))
+                ny = max(0.0, min(1.0, (pos.y() - rect.top()) / max(rect.height(), 1)))
+                pm = self._original_pixmap or self._pixmap
+                px = int(nx * (pm.width() - 1)); py = int(ny * (pm.height() - 1))
+                color = pm.toImage().pixelColor(px, py)
+                self.skinColorPicked.emit(color.blueF(), color.greenF(), color.redF())
                 return
 
         # WB eyedropper

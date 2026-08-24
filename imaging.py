@@ -176,6 +176,19 @@ class Recipe:
     sharpen_threshold: float = 0.0     # edge masking amount 0..100
     sharpen_detail: float = 0.0        # fine structure (small radius)
     output_sharpen: float = 0.0        # output/print sharpen 0..100
+    output_sharpen_media: str = "custom"
+    output_sharpen_ppi: float = 300.0
+    output_sharpen_width_in: float = 12.0
+    output_sharpen_proof: bool = False
+    portrait_detail_enabled: bool = False
+    portrait_skin_color: tuple = field(default_factory=lambda: (0.55, 0.62, 0.76))
+    portrait_color_reach: float = 28.0
+    portrait_small_smooth: float = 20.0
+    portrait_medium_smooth: float = 10.0
+    portrait_large_smooth: float = 0.0
+    portrait_edge_preserve: float = 75.0
+    portrait_texture_recovery: float = 45.0
+    portrait_mask_id: str = ""
 
     horizon: float = 0.0
     distortion: float = 0.0
@@ -1134,6 +1147,75 @@ def apply_output_sharpen(img_float, amount, radius=0.8):
         return img_float
     return apply_sharpen(img_float, intensity=float(amount) * 0.7, radius=radius,
                          threshold=25.0, detail=float(amount) * 0.25)
+
+
+def output_sharpen_params(ppi=300.0, media="screen", amount=None):
+    """Return an output-sharpen amount/radius suggestion for a delivery condition."""
+    ppi = float(np.clip(ppi, 72.0, 720.0))
+    media = str(media or "screen").lower()
+    profiles = {
+        "screen": (28.0, 0.55), "matte": (52.0, 1.05),
+        "glossy": (42.0, 0.8), "canvas": (62.0, 1.35), "custom": (35.0, 0.8),
+    }
+    base_amount, base_radius = profiles.get(media, profiles["custom"])
+    scale = np.sqrt(ppi / (96.0 if media == "screen" else 300.0))
+    suggested = base_amount * np.clip(scale, 0.7, 1.5)
+    radius = base_radius * np.clip(scale, 0.65, 1.8)
+    return float(amount if amount is not None else np.clip(suggested, 0, 100)), float(radius)
+
+
+def build_portrait_skin_mask(img, skin_color=(0.55, 0.62, 0.76), color_reach=28.0,
+                             edge_preserve=75.0):
+    """Build a feathered color-selected skin mask with edge suppression."""
+    source = np.clip(img, 0, 1).astype(np.float32)
+    target = np.asarray(skin_color, dtype=np.float32).reshape(1, 1, 3)
+    if target.max() > 1.0:
+        target /= 255.0
+    lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB)
+    target_lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB)[0, 0]
+    chroma_distance = np.linalg.norm(lab[..., 1:3] - target_lab[1:3], axis=2)
+    tolerance = 8.0 + float(np.clip(color_reach, 0, 100)) * 0.55
+    mask = np.clip(1.0 - chroma_distance / tolerance, 0, 1)
+    hsv = cv2.cvtColor(source, cv2.COLOR_BGR2HSV)
+    mask *= np.clip(hsv[..., 1] / 0.12, 0, 1)
+    mask *= np.clip((lab[..., 0] - 8.0) / 25.0, 0, 1)
+    preserve = float(np.clip(edge_preserve, 0, 100)) / 100.0
+    if preserve > 1e-6:
+        gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+        gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+        edge = np.sqrt(gx * gx + gy * gy)
+        edge /= edge.max() + 1e-6
+        mask *= 1.0 - edge * preserve * 0.9
+    return np.clip(cv2.GaussianBlur(mask.astype(np.float32), (0, 0), sigmaX=1.5), 0, 1)
+
+
+def apply_portrait_detail(img, settings, shared_mask=None):
+    """Multi-scale skin smoothing with edge protection and texture recovery."""
+    if not bool(settings.get("enabled", True)):
+        return img
+    source = np.clip(img, 0, 1).astype(np.float32)
+    mask = build_portrait_skin_mask(
+        source, settings.get("skin_color", (0.55, 0.62, 0.76)),
+        settings.get("color_reach", 28.0), settings.get("edge_preserve", 75.0),
+    )
+    if shared_mask is not None:
+        mask = np.minimum(mask, np.clip(shared_mask, 0, 1))
+    small = float(np.clip(settings.get("small_smooth", 20.0), 0, 100)) / 100.0
+    medium = float(np.clip(settings.get("medium_smooth", 10.0), 0, 100)) / 100.0
+    large = float(np.clip(settings.get("large_smooth", 0.0), 0, 100)) / 100.0
+    if max(small, medium, large) <= 1e-6 or mask.max() <= 1e-6:
+        return source
+    fine_blur = cv2.bilateralFilter(source, d=5, sigmaColor=0.07, sigmaSpace=2.0)
+    medium_blur = cv2.bilateralFilter(source, d=11, sigmaColor=0.12, sigmaSpace=5.0)
+    large_blur = cv2.GaussianBlur(source, (0, 0), sigmaX=9.0)
+    total = max(small + medium + large, 1e-6)
+    smoothed = (fine_blur * small + medium_blur * medium + large_blur * large) / total
+    texture = float(np.clip(settings.get("texture_recovery", 45.0), 0, 100)) / 100.0
+    high_frequency = source - cv2.GaussianBlur(source, (0, 0), sigmaX=1.0)
+    smoothed = np.clip(smoothed + high_frequency * texture * 0.65, 0, 1)
+    alpha = (mask * float(np.clip(total / 1.5, 0, 1)))[..., None]
+    return np.clip(source * (1.0 - alpha) + smoothed * alpha, 0, 1)
 
 
 
@@ -2100,6 +2182,25 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
     if brushes:
         img = apply_brush_masks(img, brushes)
 
+    if bool(getattr(r, "portrait_detail_enabled", False)):
+        portrait_shared = None
+        portrait_mask_id = str(getattr(r, "portrait_mask_id", "") or "")
+        mask_library = getattr(r, "mask_library", None) or []
+        if portrait_mask_id:
+            match = next((m for m in mask_library if str(m.get("id", "")) == portrait_mask_id), None)
+            if match is not None:
+                portrait_shared = build_shared_mask(img, match, mask_library)
+        img = apply_portrait_detail(img, {
+            "enabled": True,
+            "skin_color": getattr(r, "portrait_skin_color", (0.55, 0.62, 0.76)),
+            "color_reach": getattr(r, "portrait_color_reach", 28.0),
+            "small_smooth": getattr(r, "portrait_small_smooth", 20.0),
+            "medium_smooth": getattr(r, "portrait_medium_smooth", 10.0),
+            "large_smooth": getattr(r, "portrait_large_smooth", 0.0),
+            "edge_preserve": getattr(r, "portrait_edge_preserve", 75.0),
+            "texture_recovery": getattr(r, "portrait_texture_recovery", 45.0),
+        }, portrait_shared)
+
     # Soft proof (preview only feel — still applied in pipeline for consistency)
     if r.soft_proof:
         img = apply_soft_proof(
@@ -2111,7 +2212,11 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
         detail=getattr(r, 'sharpen_detail', 0.0),
     )
     if abs(getattr(r, 'output_sharpen', 0.0)) > 1e-4:
-        img = apply_output_sharpen(img, r.output_sharpen)
+        media = str(getattr(r, "output_sharpen_media", "custom") or "custom")
+        radius = 0.8 if media == "custom" else output_sharpen_params(
+            getattr(r, "output_sharpen_ppi", 300.0), media
+        )[1]
+        img = apply_output_sharpen(img, r.output_sharpen, radius=radius)
 
     # ClearView Plus approximation: local contrast / dehaze
     if abs(getattr(r, "clearview", 0.0)) > 1e-4:
