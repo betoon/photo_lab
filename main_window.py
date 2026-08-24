@@ -329,7 +329,7 @@ class PhotoLab(QMainWindow):
             from PyQt6.QtGui import QFont as _QF
             _f = self.font()
             if _f.pointSize() <= 0:
-                _f.setPointSize(10)
+                _f.setPixelSize(13)
                 self.setFont(_f)
         except Exception:
             pass

@@ -36,9 +36,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("PhotoLab")
-    font = QFont()
-    font.setFamilies(["Segoe UI", "Arial", "Helvetica", "sans-serif"])
-    font.setPointSize(10)
+    font = QFont("Segoe UI", 10)
     if font.pointSize() <= 0:
         font.setPixelSize(13)
     app.setFont(font)

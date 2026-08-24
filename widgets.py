@@ -252,6 +252,17 @@ class ToneCurveWidget(QWidget):
         self.setMinimumWidth(200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.values = [0.0, 0.0, 0.0, 0.0, 0.0]
+        # Point curves are synchronized whenever an image/recipe is loaded.
+        # Keep identity curves available even though the current compact widget
+        # displays the five-region parametric curve by default.
+        identity = [[0.0, 0.0], [1.0, 1.0]]
+        self.point_curves = {
+            "luma": [p[:] for p in identity],
+            "r": [p[:] for p in identity],
+            "g": [p[:] for p in identity],
+            "b": [p[:] for p in identity],
+        }
+        self.channel = "param"
         self._drag_idx = None
         self.setMouseTracking(True)
 
