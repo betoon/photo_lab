@@ -7,8 +7,8 @@ import uuid
 import cv2
 import numpy as np
 from PyQt6.QtCore import Qt, QRect, QPoint, QPointF, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QMouseEvent, QPainterPath, QRadialGradient
-from PyQt6.QtWidgets import QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QMouseEvent, QPainterPath, QRadialGradient, QPolygon
+from PyQt6.QtWidgets import QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy, QStyle, QStyleOptionSpinBox
 
 
 class HistogramWidget(QWidget):
@@ -182,6 +182,35 @@ class NavigatorWidget(QWidget):
         self.panRequested.emit(max(0, min(1, nx)), max(0, min(1, ny)))
 
 
+class ArrowDoubleSpinBox(QDoubleSpinBox):
+    """Spin box with dependable high-contrast arrows on styled Windows UIs."""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        option = QStyleOptionSpinBox()
+        self.initStyleOption(option)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#ffffff") if self.isEnabled() else QColor("#8a8a8a"))
+        controls = (
+            (QStyle.SubControl.SC_SpinBoxUp, True),
+            (QStyle.SubControl.SC_SpinBoxDown, False),
+        )
+        for control, points_up in controls:
+            rect = self.style().subControlRect(
+                QStyle.ComplexControl.CC_SpinBox, option, control, self
+            )
+            if not rect.isValid() or rect.width() < 5 or rect.height() < 5:
+                continue
+            cx, cy = rect.center().x(), rect.center().y()
+            if points_up:
+                points = (QPoint(cx, cy - 3), QPoint(cx - 4, cy + 2), QPoint(cx + 4, cy + 2))
+            else:
+                points = (QPoint(cx - 4, cy - 2), QPoint(cx + 4, cy - 2), QPoint(cx, cy + 3))
+            painter.drawPolygon(QPolygon(points))
+
+
 class SliderRow(QWidget):
     valueChanged = pyqtSignal(float)
 
@@ -197,7 +226,7 @@ class SliderRow(QWidget):
         name_label = QLabel(label)
         name_label.setStyleSheet("color: #ccc; font-size: 12px;")
         layout.addWidget(name_label, 0, 0)
-        self.spin = QDoubleSpinBox()
+        self.spin = ArrowDoubleSpinBox()
         self.spin.setRange(lo, hi)
         self.spin.setDecimals(decimals)
         self.spin.setSingleStep(step)
@@ -206,8 +235,10 @@ class SliderRow(QWidget):
         # paint the text beneath the step arrows.  Keep enough room for the
         # editable value and the arrow-button gutter while still allowing a
         # layout to make the field wider when space is available.
-        self.spin.setMinimumWidth(104)
-        self.spin.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        # 128 px leaves a generous value editor plus the 23 px arrow gutter,
+        # while remaining inside narrow local-adjustment and HSL panels.
+        self.spin.setFixedWidth(128)
+        self.spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.spin.setAlignment(Qt.AlignmentFlag.AlignRight)
         # Windows can arrange styled spin buttons side-by-side and otherwise
         # leave the editor beneath the up button.  Define a stacked button
