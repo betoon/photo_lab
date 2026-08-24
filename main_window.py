@@ -42,6 +42,7 @@ from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, Co
 from catalog import Catalog
 import sys
 from datetime import datetime
+from accessibility import clamp_ui_scale, scale_font_sizes, UI_SCALE_STEP
 
 
 def collapsible_group(title: str, parent_layout, checked=True):
@@ -342,6 +343,11 @@ class PhotoLab(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PhotoLab")
+        try:
+            from config import get_config
+            self._ui_scale = clamp_ui_scale(get_config().get("ui", "interface_scale", "1.0"))
+        except Exception:
+            self._ui_scale = 1.0
         # Ensure widgets inherit a valid point size (Windows can report -1)
         try:
             from PyQt6.QtGui import QFont as _QF
@@ -392,6 +398,7 @@ class PhotoLab(QMainWindow):
         self._build_menu_bar()
         self._build_toolbar()
         self._build_layout()
+        self._apply_accessible_names()
         self._build_shortcuts()
         self._build_debug_console()
         self.statusBar().showMessage(
@@ -402,7 +409,7 @@ class PhotoLab(QMainWindow):
 
     # ------------------------------------------------------------------
     def _stylesheet(self):
-        return """
+        css = """
             QMainWindow, QWidget { background: #181818; color: #ddd; letter-spacing: 0px; }
             QGroupBox, QGroupBox::title, QLabel { letter-spacing: 0px; }
             QLabel { color: #ccc; }
@@ -484,6 +491,11 @@ class PhotoLab(QMainWindow):
                 border-radius: 3px; padding: 4px 8px; font-size: 11px;
             }
             QLineEdit:focus { border-color: #2a6ad4; }
+            QPushButton:focus, QToolButton:focus, QComboBox:focus,
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+            QListWidget:focus, QTreeView:focus, QTabBar::tab:focus {
+                border: 2px solid #f2b84b;
+            }
             QCheckBox { color: #ccc; spacing: 6px; font-size: 11px; }
             QCheckBox::indicator {
                 width: 13px; height: 13px; border: 1px solid #444; border-radius: 2px; background: #222;
@@ -492,6 +504,51 @@ class PhotoLab(QMainWindow):
                 background: #2a6ad4; border-color: #2a6ad4;
             }
         """
+        return scale_font_sizes(css, self._ui_scale)
+
+    def set_interface_scale(self, scale, announce=True):
+        """Apply and persist interface text scaling without restarting."""
+        self._ui_scale = clamp_ui_scale(scale)
+        try:
+            from config import get_config
+            cfg = get_config()
+            cfg.set("ui", "interface_scale", self._ui_scale)
+            cfg.save_user()
+        except Exception:
+            pass
+        app = QApplication.instance()
+        if app is not None:
+            font = QFont("Segoe UI")
+            font.setPointSizeF(10.0 * self._ui_scale)
+            app.setFont(font)
+            self.setFont(font)
+        self.setStyleSheet(self._stylesheet())
+        if announce and self.statusBar():
+            self.statusBar().showMessage(f"Interface text scale: {self._ui_scale:.0%}")
+
+    def increase_interface_scale(self):
+        self.set_interface_scale(self._ui_scale + UI_SCALE_STEP)
+
+    def decrease_interface_scale(self):
+        self.set_interface_scale(self._ui_scale - UI_SCALE_STEP)
+
+    def reset_interface_scale(self):
+        self.set_interface_scale(1.0)
+
+    def _apply_accessible_names(self):
+        """Label the main work areas for screen readers and automation tools."""
+        labels = (
+            ("preview", "Photo preview", "Main image editing and comparison canvas"),
+            ("filmstrip", "Image filmstrip", "Images in the currently open folder"),
+            ("folder_tree", "Folder browser", "Choose a folder containing photographs"),
+            ("histogram", "Image histogram", "Luminance and color-channel histogram"),
+            ("navigator", "Image navigator", "Navigate and zoom the current photograph"),
+        )
+        for attribute, name, description in labels:
+            widget = getattr(self, attribute, None)
+            if widget is not None:
+                widget.setAccessibleName(name)
+                widget.setAccessibleDescription(description)
 
     # ------------------------------------------------------------------
 
@@ -617,6 +674,10 @@ class PhotoLab(QMainWindow):
         view_m.addSeparator()
         self.act_debug = add_action(view_m, "Debug Console", self.toggle_debug_console, "Ctrl+Shift+D", checkable=True)
         view_m.addSeparator()
+        add_action(view_m, "Increase Interface Text", self.increase_interface_scale, "Ctrl+=")
+        add_action(view_m, "Decrease Interface Text", self.decrease_interface_scale, "Ctrl+-")
+        add_action(view_m, "Reset Interface Text", self.reset_interface_scale, "Ctrl+0")
+        view_m.addSeparator()
         add_action(view_m, "Full Screen", self.toggle_fullscreen, "F11")
         add_action(view_m, "Image Metadata…", self.show_metadata, "I")
 
@@ -682,7 +743,9 @@ class PhotoLab(QMainWindow):
             "1\tActual size 1:1\n"
             "Left/Right\tPrev / Next image\n"
             "Wheel\tZoom\n"
-            "Space+drag\tPan",
+            "Space+drag\tPan\n"
+            "Ctrl+= / Ctrl+-\tIncrease / decrease interface text\n"
+            "Ctrl+0\tReset interface text",
         )
 
 
@@ -6955,6 +7018,20 @@ class PhotoLab(QMainWindow):
         cb_remember = QCheckBox("Remember last folder")
         cb_remember.setChecked(cfg.get_bool("ui", "remember_last_folder", True))
         ur.addRow(cb_remember)
+        ui_scale_combo = QComboBox()
+        for label, value in (
+            ("Compact (80%)", 0.8), ("Small (90%)", 0.9),
+            ("Standard (100%)", 1.0), ("Large (110%)", 1.1),
+            ("Larger (125%)", 1.25), ("Extra large (140%)", 1.4),
+            ("Maximum (160%)", 1.6),
+        ):
+            ui_scale_combo.addItem(label, value)
+        current_scale = clamp_ui_scale(cfg.get("ui", "interface_scale", str(self._ui_scale)))
+        ui_scale_combo.setCurrentIndex(min(
+            range(ui_scale_combo.count()),
+            key=lambda index: abs(float(ui_scale_combo.itemData(index)) - current_scale),
+        ))
+        ur.addRow("Interface text size", ui_scale_combo)
         e_last = QLineEdit(cfg.get("ui", "last_folder", ""))
         ur.addRow("Last folder", e_last)
         e_updates = QLineEdit(cfg.get("ui", "check_for_updates_url", ""))
@@ -7001,6 +7078,7 @@ class PhotoLab(QMainWindow):
             cfg.set("performance", "proxy_max_dimension", sp_proxy.value())
             cfg.set("performance", "use_16bit_pipeline", "true" if cb_16.isChecked() else "false")
             cfg.set("ui", "remember_last_folder", "true" if cb_remember.isChecked() else "false")
+            cfg.set("ui", "interface_scale", ui_scale_combo.currentData())
             cfg.set("ui", "last_folder", e_last.text().strip())
             cfg.set("ui", "check_for_updates_url", e_updates.text().strip())
             cfg.set("licensing", "serial", e_serial.text().strip())
@@ -7009,6 +7087,7 @@ class PhotoLab(QMainWindow):
             cfg.set("integrations", "api_endpoint", e_endpoint.text().strip())
             path = cfg.save_user()
             reload_config()
+            self.set_interface_scale(float(ui_scale_combo.currentData()), announce=False)
             self.log(f"Preferences saved → {path}")
             self.statusBar().showMessage(f"Preferences saved → {path}")
             QMessageBox.information(

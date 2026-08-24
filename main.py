@@ -35,7 +35,14 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("PhotoLab")
-    font = QFont("Segoe UI", 10)
+    try:
+        from config import get_config
+        from accessibility import clamp_ui_scale
+        interface_scale = clamp_ui_scale(get_config().get("ui", "interface_scale", "1.0"))
+    except Exception:
+        interface_scale = 1.0
+    font = QFont("Segoe UI")
+    font.setPointSizeF(10.0 * interface_scale)
     if font.pointSize() <= 0:
         font.setPixelSize(13)
     app.setFont(font)

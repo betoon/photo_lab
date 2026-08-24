@@ -42,6 +42,7 @@ _DEFAULTS: Dict[str, Dict[str, str]] = {
     "ui": {
         "remember_last_folder": "true",
         "last_folder": "",
+        "interface_scale": "1.0",
         "check_for_updates_url": "https://github.com/betoon/photo_lab/releases",
     },
     "licensing": {

@@ -305,6 +305,7 @@ rawpy output rendered with camera white balance already has the camera multiplie
 | `workers.py` | Background threads |
 | `catalog.py` | Library database |
 | `focus_stack.py` | Focus-stack alignment + fusion engine (no Qt) |
+| `accessibility.py` | Qt-free UI-scale bounds and stylesheet font scaling |
 | `panorama.py` | OpenCV Stitcher v1 panorama engine (no Qt) |
 | `presets.py` | Preset I/O |
 | `qt_utils.py` | Qt image helpers |
@@ -484,3 +485,11 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 - `imaging.format_raw_error` — actionable RAW decode messages
 - `logging_setup.recent_log_lines` / `system_info_text` / `build_problem_report`
 - UI: `export_problem_report` from Help and Debug Console
+
+
+### Accessibility
+
+- `[ui] interface_scale` persists a clamped 0.8–1.6 text scale in the user INI
+- `main.py` applies the scale before constructing widgets; `PhotoLab.set_interface_scale` supports live changes and rescales stylesheet font declarations without changing fixed geometry
+- View menu shortcuts: `Ctrl+=`, `Ctrl+-`, and `Ctrl+0`; Preferences provides named scale presets
+- High-contrast `:focus` styling improves keyboard traversal, and the primary preview/navigation widgets expose accessible names and descriptions

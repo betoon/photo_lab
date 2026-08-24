@@ -509,6 +509,16 @@ Edits are non-destructive **recipes**.
 | Ctrl+R | Reset image |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Ctrl+Shift+C / V | Copy / paste settings |
+| Ctrl+= / Ctrl+- | Increase / decrease interface text |
+| Ctrl+0 | Reset interface text to 100% |
+
+---
+
+## Accessibility and interface scaling
+
+Use **View → Increase Interface Text**, **Decrease Interface Text**, or **Reset Interface Text** to change text immediately. The selected scale is saved and restored the next time PhotoLab starts. Preset sizes from 80% through 160% are also available under **File → Preferences… → UI → Interface text size**.
+
+Keyboard focus is shown with a high-contrast amber outline around buttons, input fields, lists, trees, tabs, and selection controls. The main preview, filmstrip, folder browser, histogram, and navigator also expose descriptive names to screen readers.
 
 ---
 

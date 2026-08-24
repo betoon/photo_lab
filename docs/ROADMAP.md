@@ -52,6 +52,10 @@ When implementing the next item, mark its status here and update USER/DEVELOPER 
 - Versioned plugin API and automated packaged-application smoke tests.
 - Accessibility pass for scalable type, keyboard traversal, screen readers, and color-safe overlays.
 
+Accessibility phase: persistent 80–160% interface text scaling, keyboard shortcuts,
+high-contrast focus indicators, and screen-reader names for the main work areas are complete.
+Additional color-safe overlay palettes and a full screen-reader audit remain future work.
+
 ### Panorama quality phase
 
 Exposure/WB reference and strength, capture-time ordering, adjacent overlap diagnostics,
