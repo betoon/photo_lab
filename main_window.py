@@ -2829,9 +2829,19 @@ class PhotoLab(QMainWindow):
         if path in self.image_paths:
             self.filmstrip.setCurrentRow(self.image_paths.index(path))
         kind = "RAW" if meta.get("is_raw") else "RGB"
+        if meta.get("raw_fallback") == "embedded_preview":
+            kind = "RAW embedded preview"
         self.statusBar().showMessage(
             f"{os.path.basename(path)}  •  {img.shape[1]}×{img.shape[0]}  •  {kind}"
         )
+        if meta.get("raw_fallback") == "embedded_preview":
+            QMessageBox.information(
+                self, "RAW opened using embedded preview",
+                "The sensor RAW compression is not supported by the installed LibRaw decoder.\n\n"
+                "PhotoLab opened the camera's embedded JPEG so you can edit and export it. "
+                "Highlight recovery and true 16-bit RAW latitude are not available for this file.\n\n"
+                f"Decoder detail: {meta.get('raw_decode_error', 'unsupported format')}",
+            )
         if hasattr(self, "path_label"):
             self.path_label.setText(path)
         if hasattr(self, "count_label") and self.image_paths:

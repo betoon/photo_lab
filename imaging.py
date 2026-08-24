@@ -509,18 +509,33 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                     print(f"rawpy retry failed for {path}: {e2}")
     if img_bgr is None:
         if is_raw(path):
-            # Don't fall back to cv2.imread() for RAW files — OpenCV's TIFF
-            # reader can't parse the sensor IFD in NEF/CR2/etc. and will
-            # just spew misleading TIFF warnings/errors before failing anyway.
-            raise RuntimeError(format_raw_error(path, raw_failure))
-        flags = cv2.IMREAD_UNCHANGED if decode_bps == 16 else cv2.IMREAD_COLOR
-        img_bgr = _silent_imread(path, flags)
-        if img_bgr is None:
-            raise RuntimeError(f"Could not read image: {path}")
-        if img_bgr.ndim == 2:
-            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
-        elif img_bgr.shape[2] == 4:
-            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2BGR)
+            # Some cameras expose a full-size embedded JPEG even when LibRaw
+            # cannot unpack the sensor compression. This preserves an editable
+            # image instead of failing completely, but is explicitly tagged so
+            # callers never mistake it for a true RAW decode.
+            fallback = extract_embedded_preview(path, max_side=0)
+            if fallback is not None:
+                img_bgr = fallback
+                meta.update({
+                    "is_raw": True,
+                    "wb_baked": True,
+                    "decode_bps": 8,
+                    "raw_fallback": "embedded_preview",
+                    "raw_decode_error": str(raw_failure or "unsupported RAW data"),
+                })
+            else:
+                # Don't fall back to cv2.imread() for RAW files — OpenCV's TIFF
+                # reader cannot safely decode the sensor IFD.
+                raise RuntimeError(format_raw_error(path, raw_failure))
+        else:
+            flags = cv2.IMREAD_UNCHANGED if decode_bps == 16 else cv2.IMREAD_COLOR
+            img_bgr = _silent_imread(path, flags)
+            if img_bgr is None:
+                raise RuntimeError(f"Could not read image: {path}")
+            if img_bgr.ndim == 2:
+                img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+            elif img_bgr.shape[2] == 4:
+                img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2BGR)
     
     # Extract EXIF and merge
     exif_data = extract_exif(path)
@@ -1008,7 +1023,7 @@ def extract_embedded_preview(path: str, max_side: int = 160):
                                 img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                                 if img is not None:
                                     h, w = img.shape[:2]
-                                    if max(h, w) > max_side:
+                                    if max_side and max(h, w) > max_side:
                                         scale = max_side / max(h, w)
                                         img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
                                     return img
@@ -1018,7 +1033,7 @@ def extract_embedded_preview(path: str, max_side: int = 160):
                                 if rgb.ndim == 3:
                                     img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                                     h, w = img.shape[:2]
-                                    if max(h, w) > max_side:
+                                    if max_side and max(h, w) > max_side:
                                         scale = max_side / max(h, w)
                                         img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
                                     return img
@@ -1034,7 +1049,7 @@ def extract_embedded_preview(path: str, max_side: int = 160):
                         )
                         img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                         h, w = img.shape[:2]
-                        if max(h, w) > max_side:
+                        if max_side and max(h, w) > max_side:
                             scale = max_side / max(h, w)
                             img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
                         return img
@@ -1046,7 +1061,7 @@ def extract_embedded_preview(path: str, max_side: int = 160):
     if img is None:
         return None
     h, w = img.shape[:2]
-    if max(h, w) > max_side:
+    if max_side and max(h, w) > max_side:
         scale = max_side / max(h, w)
         img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
     return img
