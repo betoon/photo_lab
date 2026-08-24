@@ -80,7 +80,11 @@ class ExportWorker(QThread):
                 bps = 16 if self.export_16bit else None
                 img, meta = load_image(self.path, use_camera_wb=True, output_bps=bps)
                 multipliers = self.wb_multipliers or meta.get("wb_multipliers")
-                out = apply_recipe(img, self.recipe, wb_multipliers=multipliers, meta=meta)
+                out_dtype = np.uint16 if self.export_16bit else np.uint8
+                out = apply_recipe(
+                    img, self.recipe, wb_multipliers=multipliers, meta=meta,
+                    output_dtype=out_dtype,
+                )
                 if self.max_dim and max(out.shape[:2]) > self.max_dim:
                     h, w = out.shape[:2]
                     scale = self.max_dim / max(h, w)
@@ -91,8 +95,7 @@ class ExportWorker(QThread):
                 if ext in ("jpg", "jpeg"):
                     cv2.imwrite(self.out_path, out, [cv2.IMWRITE_JPEG_QUALITY, int(self.jpeg_quality)])
                 elif ext in ("tif", "tiff") and self.export_16bit:
-                    u16 = (out.astype(np.float32) / 255.0 * 65535.0).astype(np.uint16)
-                    cv2.imwrite(self.out_path, u16)
+                    cv2.imwrite(self.out_path, out)
                 else:
                     cv2.imwrite(self.out_path, out)
             self.finished_ok.emit(self.out_path)
@@ -105,14 +108,17 @@ class LoadImageWorker(QThread):
     loaded = pyqtSignal(str, object, object)  # path, img_bgr, meta
     failed = pyqtSignal(str, str)
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, output_bps: int = 8):
         super().__init__()
         self.path = path
+        self.output_bps = 16 if int(output_bps or 8) >= 16 else 8
 
     def run(self):
         try:
             with _HEAVY_SEM:
-                img, meta = load_image(self.path, use_camera_wb=True)
+                img, meta = load_image(
+                    self.path, use_camera_wb=True, output_bps=self.output_bps
+                )
             self.loaded.emit(self.path, img, meta)
         except Exception as e:
             self.failed.emit(self.path, str(e))

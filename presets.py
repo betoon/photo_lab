@@ -11,9 +11,33 @@ import os
 import re
 import copy
 import xml.etree.ElementTree as ET
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Iterable
 
 from imaging import Recipe
+
+
+PRESET_MODULE_FIELDS = {
+    "Tone": (
+        "exposure", "smart_light", "contrast", "highlights", "shadows", "whites", "blacks",
+        "clarity", "gamma", "curve_shadows", "curve_darks", "curve_mids", "curve_lights",
+        "curve_highlights", "curve_points", "curve_r_points", "curve_g_points", "curve_b_points",
+    ),
+    "Color": (
+        "temperature", "tint", "wb_as_shot", "creative_temperature", "creative_tint",
+        "vibrance", "saturation", "hsl_hue", "hsl_sat", "hsl_lum", "split_shadow_hue",
+        "split_shadow_sat", "split_highlight_hue", "split_highlight_sat", "split_balance",
+        "black_and_white", "ir_channel_swap", "ir_false_color", "ir_mono",
+    ),
+    "Detail": (
+        "denoise_luminance", "denoise_chroma", "denoise_strength", "denoise_detail",
+        "denoise_method", "sharpen_intensity", "sharpen_radius", "sharpen_threshold",
+        "sharpen_detail", "output_sharpen", "astro_stretch", "astro_bg_remove",
+        "astro_star_emphasis",
+    ),
+    "Geometry": ("horizon", "distortion", "perspective", "crop", "ca_amount", "lens_auto", "rotate_90"),
+    "Effects": ("clearview", "microcontrast", "vignette", "film_grain", "hdr_look"),
+    "Local": ("local_points", "gradients", "brush_masks"),
+}
 
 # Namespaces seen in LR/ACR XMP
 _NS = {
@@ -149,10 +173,14 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     if has_absolute_temp:
         r.temperature = min(12000.0, temp)
         r.wb_as_shot = False
+    elif temp is not None:
+        r.creative_temperature = max(-100.0, min(100.0, temp))
     tint = _f(g("Tint"))
     if tint is not None and has_absolute_temp:
         r.tint = max(-150.0, min(150.0, tint))
         r.wb_as_shot = False
+    elif tint is not None:
+        r.creative_tint = max(-100.0, min(100.0, tint))
 
     # Sharpening
     sharp = _f(g("Sharpness"))
@@ -229,12 +257,48 @@ def load_preset_file(path: str, base: Optional[Recipe] = None) -> Recipe:
     raise ValueError(f"Unsupported preset format: {ext} (use .json or .xmp)")
 
 
-def list_preset_files(folder: str) -> List[str]:
-    """List .xmp and .json presets in a folder (non-recursive)."""
+def apply_preset_file(path: str, base: Optional[Recipe] = None, strength: float = 1.0,
+                      modules: Optional[Iterable[str]] = None) -> Recipe:
+    """Apply a preset non-destructively with strength and module filtering."""
+    original = copy.deepcopy(base) if base is not None else Recipe()
+    target = load_preset_file(path, base=original)
+    amount = max(0.0, min(1.0, float(strength)))
+    enabled = set(PRESET_MODULE_FIELDS.keys() if modules is None else modules)
+    result = copy.deepcopy(original)
+
+    for module, names in PRESET_MODULE_FIELDS.items():
+        if module not in enabled:
+            continue
+        for name in names:
+            if not hasattr(target, name) or not hasattr(result, name):
+                continue
+            before = getattr(original, name)
+            after = getattr(target, name)
+            if isinstance(before, (int, float)) and not isinstance(before, bool) and isinstance(after, (int, float)):
+                value = float(before) + (float(after) - float(before)) * amount
+                if isinstance(before, int) and isinstance(after, int):
+                    value = int(round(value))
+            elif isinstance(before, tuple) and isinstance(after, tuple) and len(before) == len(after):
+                value = tuple(float(a) + (float(b) - float(a)) * amount for a, b in zip(before, after))
+            else:
+                value = copy.deepcopy(after if amount >= 0.5 else before)
+            setattr(result, name, value)
+    return result
+
+
+def list_preset_files(folder: str, recursive: bool = False) -> List[str]:
+    """List .xmp and .json presets, optionally including category subfolders."""
     out = []
     if not os.path.isdir(folder):
         return out
-    for name in sorted(os.listdir(folder)):
-        if name.lower().endswith((".xmp", ".json")):
-            out.append(os.path.join(folder, name))
+    if recursive:
+        for root, dirs, names in os.walk(folder):
+            dirs.sort(key=str.lower)
+            for name in sorted(names, key=str.lower):
+                if name.lower().endswith((".xmp", ".json")):
+                    out.append(os.path.join(root, name))
+    else:
+        for name in sorted(os.listdir(folder)):
+            if name.lower().endswith((".xmp", ".json")):
+                out.append(os.path.join(folder, name))
     return out

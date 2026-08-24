@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from imaging import Recipe, apply_recipe
-from presets import xmp_to_recipe
+from presets import apply_preset_file, xmp_to_recipe
 
 
 def _xmp(tmp_path: Path, attrs: str) -> str:
@@ -33,6 +33,8 @@ def test_relative_xmp_wb_does_not_replace_as_shot_wb(tmp_path):
     assert result.temperature == 6100
     assert result.tint == -7
     assert result.wb_as_shot is True
+    assert result.creative_temperature == 6
+    assert result.creative_tint == 2
 
 
 def test_absolute_xmp_wb_is_applied(tmp_path):
@@ -58,3 +60,24 @@ def test_baked_raw_camera_wb_is_not_applied_twice():
 
     assert np.array_equal(baked, src)
     assert not np.array_equal(unbaked, src)
+
+
+def test_preset_strength_and_module_filtering(tmp_path):
+    path = tmp_path / "controlled.json"
+    Recipe(exposure=2.0, saturation=80.0, sharpen_intensity=40.0).save_json(str(path))
+    base = Recipe(exposure=0.0, saturation=10.0, sharpen_intensity=5.0)
+
+    result = apply_preset_file(str(path), base=base, strength=0.5, modules=["Tone", "Color"])
+
+    assert result.exposure == pytest.approx(1.0)
+    assert result.saturation == pytest.approx(45.0)
+    assert result.sharpen_intensity == 5.0
+
+
+def test_apply_recipe_can_return_true_uint16_precision():
+    src = np.linspace(0, 65535, 256 * 3, dtype=np.uint16).reshape(1, 256, 3)
+    out = apply_recipe(src, Recipe(), output_dtype=np.uint16)
+
+    assert out.dtype == np.uint16
+    assert np.unique(out).size > 256
+    assert np.any((out % 257) != 0)  # not an 8-bit image expanded to 16-bit

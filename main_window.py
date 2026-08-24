@@ -10,7 +10,7 @@ import os
 import cv2
 import numpy as np
 
-from PyQt6.QtCore import Qt, QTimer, QSize, QRect, QDir
+from PyQt6.QtCore import Qt, QTimer, QSize, QRect, QDir, QSettings
 from PyQt6.QtGui import QIcon, QAction, QKeySequence, QFont, QFileSystemModel, QColor
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QFrame, QLineEdit, QToolButton, QSizePolicy, QMessageBox, QStackedWidget, QButtonGroup, QMenu,
     QTreeView, QTextEdit, QTextBrowser, QDockWidget, QPlainTextEdit, QApplication,
     QDialog, QDialogButtonBox, QFormLayout, QInputDialog, QProgressDialog,
-    QSpinBox, QDoubleSpinBox,
+    QSpinBox, QDoubleSpinBox, QSlider,
 )
 
 VIDEO_EXTENSIONS = {
@@ -29,7 +29,7 @@ VIDEO_EXTENSIONS = {
 
 from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark)
-from presets import load_preset_file, list_preset_files
+from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
 from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
@@ -81,6 +81,8 @@ class PresetBrowserDialog(QDialog):
         self._plugin_dir = plugin_dir or ""
         self._extra = list(extra_dirs or [])
         self.selected_path = None
+        self._settings = QSettings("PhotoLab", "PhotoLab")
+        self._favorites = set(filter(None, str(self._settings.value("preset_favorites", "")).split("\n")))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
@@ -112,6 +114,11 @@ class PresetBrowserDialog(QDialog):
         self.type_combo.addItem("XMP", "xmp")
         self.type_combo.currentIndexChanged.connect(self._filter)
         filt_row.addWidget(self.type_combo)
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("All categories", "all")
+        self.category_combo.addItem("Favorites", "favorites")
+        self.category_combo.currentIndexChanged.connect(self._filter)
+        filt_row.addWidget(self.category_combo)
         root.addLayout(filt_row)
 
         self.list = QListWidget()
@@ -129,6 +136,42 @@ class PresetBrowserDialog(QDialog):
         self.detail.setWordWrap(True)
         self.detail.setStyleSheet("color:#aaa; font-size:12px; padding:4px;")
         root.addWidget(self.detail)
+
+        preset_controls = QGroupBox("Preset controls")
+        controls = QVBoxLayout(preset_controls)
+        strength_row = QHBoxLayout()
+        strength_row.addWidget(QLabel("Strength"))
+        self.strength_slider = QSlider(Qt.Orientation.Horizontal)
+        self.strength_slider.setRange(0, 100)
+        self.strength_slider.setValue(100)
+        self.strength_slider.valueChanged.connect(self._controls_changed)
+        strength_row.addWidget(self.strength_slider, 1)
+        self.strength_label = QLabel("100%")
+        self.strength_label.setMinimumWidth(38)
+        strength_row.addWidget(self.strength_label)
+        controls.addLayout(strength_row)
+        module_row = QHBoxLayout()
+        module_row.addWidget(QLabel("Include"))
+        self.module_checks = {}
+        for module in PRESET_MODULE_FIELDS:
+            cb = QCheckBox(module)
+            cb.setChecked(True)
+            cb.toggled.connect(self._controls_changed)
+            self.module_checks[module] = cb
+            module_row.addWidget(cb)
+        controls.addLayout(module_row)
+        options_row = QHBoxLayout()
+        self.preview_cb = QCheckBox("Live preview")
+        self.preview_cb.setChecked(True)
+        self.preview_cb.toggled.connect(self._controls_changed)
+        options_row.addWidget(self.preview_cb)
+        self.favorite_btn = QPushButton("☆ Favorite")
+        self.favorite_btn.setEnabled(False)
+        self.favorite_btn.clicked.connect(self._toggle_favorite)
+        options_row.addWidget(self.favorite_btn)
+        options_row.addStretch(1)
+        controls.addLayout(options_row)
+        root.addWidget(preset_controls)
 
         btn_row = QHBoxLayout()
         refresh = QPushButton("Refresh")
@@ -162,7 +205,7 @@ class PresetBrowserDialog(QDialog):
                 dirs.append(d)
         for d in dirs:
             try:
-                files.extend(list_preset_files(d))
+                files.extend(list_preset_files(d, recursive=True))
             except Exception:
                 pass
         # de-dupe by basename preference for plugin dir order
@@ -176,22 +219,39 @@ class PresetBrowserDialog(QDialog):
             unique.append(f)
         unique.sort(key=lambda p: os.path.basename(p).lower())
         self._all_files = unique
+        current = self.category_combo.currentData()
+        categories = sorted({os.path.basename(os.path.dirname(p)) for p in unique if os.path.dirname(p)})
+        self.category_combo.blockSignals(True)
+        self.category_combo.clear()
+        self.category_combo.addItem("All categories", "all")
+        self.category_combo.addItem("Favorites", "favorites")
+        for category in categories:
+            self.category_combo.addItem(category, category)
+        idx = self.category_combo.findData(current)
+        self.category_combo.setCurrentIndex(max(0, idx))
+        self.category_combo.blockSignals(False)
         self._filter()
 
     def _filter(self, *_):
         q = (self.search.text() or "").strip().lower()
         kind = self.type_combo.currentData() or "all"
+        category = self.category_combo.currentData() or "all"
         self.list.clear()
         for path in self._all_files:
             name = os.path.basename(path)
             ext = os.path.splitext(name)[1].lower()
+            normalized = os.path.normcase(os.path.abspath(path))
             if kind == "json" and ext != ".json":
                 continue
             if kind == "xmp" and ext != ".xmp":
                 continue
+            if category == "favorites" and normalized not in self._favorites:
+                continue
+            if category not in ("all", "favorites") and os.path.basename(os.path.dirname(path)) != category:
+                continue
             if q and q not in name.lower():
                 continue
-            item = QListWidgetItem(name)
+            item = QListWidgetItem(("★ " if normalized in self._favorites else "") + name)
             item.setData(Qt.ItemDataRole.UserRole, path)
             tip = path
             item.setToolTip(tip)
@@ -208,13 +268,44 @@ class PresetBrowserDialog(QDialog):
     def _on_sel(self, cur, _prev=None):
         if cur is None:
             self.apply_btn.setEnabled(False)
+            self.favorite_btn.setEnabled(False)
             self.selected_path = None
             return
         path = cur.data(Qt.ItemDataRole.UserRole)
         self.selected_path = path
         self.apply_btn.setEnabled(True)
+        self.favorite_btn.setEnabled(True)
+        normalized = os.path.normcase(os.path.abspath(path))
+        self.favorite_btn.setText("★ Favorited" if normalized in self._favorites else "☆ Favorite")
         ext = os.path.splitext(path)[1].upper()
         self.detail.setText(f"{os.path.basename(path)}\n{path}\nType: {ext}")
+        self._preview_selected()
+
+    @property
+    def strength(self):
+        return self.strength_slider.value() / 100.0
+
+    def selected_modules(self):
+        return [name for name, cb in self.module_checks.items() if cb.isChecked()]
+
+    def _controls_changed(self, *_):
+        self.strength_label.setText(f"{self.strength_slider.value()}%")
+        self._preview_selected()
+
+    def _preview_selected(self):
+        if self.selected_path and self.preview_cb.isChecked() and hasattr(self.parent(), "_preview_preset"):
+            self.parent()._preview_preset(self.selected_path, self.strength, self.selected_modules())
+
+    def _toggle_favorite(self):
+        if not self.selected_path:
+            return
+        normalized = os.path.normcase(os.path.abspath(self.selected_path))
+        if normalized in self._favorites:
+            self._favorites.remove(normalized)
+        else:
+            self._favorites.add(normalized)
+        self._settings.setValue("preset_favorites", "\n".join(sorted(self._favorites)))
+        self._filter()
 
     def _accept_item(self, item):
         self.selected_path = item.data(Qt.ItemDataRole.UserRole)
@@ -1459,6 +1550,12 @@ class PhotoLab(QMainWindow):
         v.addWidget(self.wb_as_shot_cb)
         self._add_slider(v, "temperature", "Temperature (K)", 2000, 12000, 50, 0, 5500)
         self._add_slider(v, "tint", "Tint", -150, 150, 1, 0, 0)
+        creative_hint = QLabel("Creative adjustment (relative; presets use these controls)")
+        creative_hint.setWordWrap(True)
+        creative_hint.setStyleSheet("color:#888; font-size:11px; margin-top:5px;")
+        v.addWidget(creative_hint)
+        self._add_slider(v, "creative_temperature", "Creative warmth", -100, 100, 1, 0, 0)
+        self._add_slider(v, "creative_tint", "Creative tint", -100, 100, 1, 0, 0)
 
         # Color Accentuation
         box, v = collapsible_group("Color Accentuation", layout)
@@ -2618,7 +2715,12 @@ class PhotoLab(QMainWindow):
                 self._load_worker.terminate()
             except Exception:
                 pass
-        self._load_worker = LoadImageWorker(path)
+        try:
+            from config import get_config
+            working_bps = 16 if get_config().get_bool("performance", "use_16bit_pipeline", False) else 8
+        except Exception:
+            working_bps = 8
+        self._load_worker = LoadImageWorker(path, output_bps=working_bps)
         self._load_worker.loaded.connect(self._on_image_loaded)
         self._load_worker.failed.connect(self._on_image_failed)
         self._load_worker.start()
@@ -3529,7 +3631,7 @@ class PhotoLab(QMainWindow):
             tone_keys = ["exposure", "smart_light", "contrast", "highlights", "shadows",
                          "whites", "blacks", "clarity", "gamma", "curve_shadows", "curve_darks",
                          "curve_mids", "curve_lights", "curve_highlights"]
-            color_keys = ["temperature", "tint", "wb_as_shot", "vibrance", "saturation",
+            color_keys = ["temperature", "tint", "wb_as_shot", "creative_temperature", "creative_tint", "vibrance", "saturation",
                           "hsl_hue", "hsl_sat", "hsl_lum"]
             detail_keys = ["denoise_luminance", "denoise_chroma", "denoise_strength",
                            "denoise_detail", "denoise_method", "sharpen_intensity",
@@ -5332,24 +5434,48 @@ class PhotoLab(QMainWindow):
         if self.current_path is None:
             QMessageBox.information(self, "Load Preset", "Open an image first.")
             return
+        self._preset_preview_base = Recipe.from_dict(self.recipes[self.current_path].to_dict())
         dlg = PresetBrowserDialog(self, self._preset_start_dir())
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        self.recipes[self.current_path] = Recipe.from_dict(self._preset_preview_base.to_dict())
+        if not accepted:
+            self.sync_sliders_to_recipe()
+            self.render_preview()
+            self._preset_preview_base = None
             return
         path = dlg.selected_path
         if not path:
+            self._preset_preview_base = None
             return
-        self._apply_preset_path(path)
+        self._apply_preset_path(path, dlg.strength, dlg.selected_modules())
+        self._preset_preview_base = None
 
-    def _apply_preset_path(self, path: str):
+    def _preview_preset(self, path: str, strength: float, modules):
+        if self.current_path is None or not path or not getattr(self, "_preset_preview_base", None):
+            return
+        try:
+            self.recipes[self.current_path] = apply_preset_file(
+                path, base=self._preset_preview_base, strength=strength, modules=modules
+            )
+            self.sync_sliders_to_recipe()
+            self.render_preview()
+        except Exception as exc:
+            self.statusBar().showMessage(f"Preset preview unavailable: {exc}")
+
+    def _apply_preset_path(self, path: str, strength: float = 1.0, modules=None):
         if self.current_path is None or not path:
             return
         try:
-            r = load_preset_file(path, base=self.recipes.get(self.current_path))
+            r = apply_preset_file(
+                path, base=self.recipes.get(self.current_path), strength=strength, modules=modules
+            )
             self.recipes[self.current_path] = r
             self.sync_sliders_to_recipe()
             self._push_history(f"Preset: {os.path.basename(path)}")
             self.render_preview()
-            self.statusBar().showMessage(f"Preset loaded ← {os.path.basename(path)}")
+            self.statusBar().showMessage(
+                f"Preset loaded ← {os.path.basename(path)} ({round(strength * 100)}%)"
+            )
         except Exception as e:
             QMessageBox.warning(self, "Load Preset", f"Could not load preset:\n{e}")
 

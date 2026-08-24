@@ -119,6 +119,10 @@ class Recipe:
     temperature: float = 5500.0
     tint: float = 0.0
     wb_as_shot: bool = True
+    # Creative WB is relative and independent of the camera/absolute WB.
+    # This is what converted presets with small +/- Temperature values use.
+    creative_temperature: float = 0.0  # -100..100 warm/cool shift
+    creative_tint: float = 0.0         # -100..100 green/magenta shift
 
     vibrance: float = 0.0
     saturation: float = 0.0
@@ -397,12 +401,10 @@ def format_raw_error(path: str, err: Optional[BaseException] = None) -> str:
 _RAW_OUTPUT_BPS = 8
 
 def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] = None) -> Tuple[np.ndarray, dict]:
-    """Decode into the pipeline's uint8 BGR working format.
-
-    ``output_bps`` is accepted for export-worker compatibility. The current
-    processing pipeline remains 8-bit/display-referred internally.
-    """
-    meta = {"is_raw": False, "wb_multipliers": None, "wb_baked": False}
+    """Decode BGR image data at 8-bit preview or 16-bit export precision."""
+    decode_bps = 16 if int(output_bps or 8) >= 16 else 8
+    meta = {"is_raw": False, "wb_multipliers": None, "wb_baked": False,
+            "decode_bps": decode_bps}
     img_bgr = None
     if is_raw(path):
         try:
@@ -418,7 +420,7 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                         rgb = raw.postprocess(
                             use_camera_wb=use_camera_wb,
                             no_auto_bright=True,
-                            output_bps=8,
+                            output_bps=decode_bps,
                             bright=1.0,
                             gamma=(2.222, 4.5),  # approximate sRGB-ish display gamma
                             demosaic_algorithm=None,  # libraw default (AHD/DHT depending on build)
@@ -428,7 +430,7 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                         rgb = raw.postprocess(
                             use_camera_wb=True,
                             no_auto_bright=False,
-                            output_bps=8,
+                            output_bps=decode_bps,
                         )
                     img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                     meta["is_raw"] = True
@@ -491,7 +493,7 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                             rgb = raw.postprocess(
                                 use_camera_wb=True,
                                 no_auto_bright=False,
-                                output_bps=8,
+                                output_bps=decode_bps,
                             )
                             img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                             meta["is_raw"] = True
@@ -508,9 +510,14 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
             # reader can't parse the sensor IFD in NEF/CR2/etc. and will
             # just spew misleading TIFF warnings/errors before failing anyway.
             raise RuntimeError(f"Could not decode RAW file: {path}")
-        img_bgr = _silent_imread(path, cv2.IMREAD_COLOR)
+        flags = cv2.IMREAD_UNCHANGED if decode_bps == 16 else cv2.IMREAD_COLOR
+        img_bgr = _silent_imread(path, flags)
         if img_bgr is None:
             raise RuntimeError(f"Could not read image: {path}")
+        if img_bgr.ndim == 2:
+            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+        elif img_bgr.shape[2] == 4:
+            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2BGR)
     
     # Extract EXIF and merge
     exif_data = extract_exif(path)
@@ -613,6 +620,40 @@ def apply_white_balance(img, temperature, tint, as_shot=False, multipliers=None)
     rgb /= (rgb[1] + 1e-6)
     bgr_gain = np.array([rgb[2], rgb[1], rgb[0]], dtype=np.float32)
     return np.clip(img * bgr_gain[None, None, :], 0, 1)
+
+
+def apply_creative_white_balance(img, temperature_shift=0.0, tint_shift=0.0):
+    """Apply a relative creative WB shift without replacing technical WB."""
+    temperature_shift = float(np.clip(temperature_shift or 0.0, -100.0, 100.0))
+    tint_shift = float(np.clip(tint_shift or 0.0, -100.0, 100.0))
+    if abs(temperature_shift) < 1e-5 and abs(tint_shift) < 1e-5:
+        return img
+    # Map the relative slider around the neutral reference. Positive is warm.
+    kelvin = 5500.0 + temperature_shift * 35.0
+    return apply_white_balance(img, kelvin, tint_shift, as_shot=False, multipliers=None)
+
+
+def _image_to_float01(image):
+    """Normalize uint8/uint16/float image data into float32 0..1."""
+    if np.issubdtype(image.dtype, np.integer):
+        scale = float(np.iinfo(image.dtype).max)
+        return image.astype(np.float32) / scale
+    out = image.astype(np.float32, copy=False)
+    if out.size and float(np.nanmax(out)) > 1.5:
+        out = out / 255.0
+    return out
+
+
+def _float01_to_dtype(image, output_dtype):
+    clipped = np.clip(image, 0, 1)
+    dtype = np.dtype(output_dtype)
+    if np.issubdtype(dtype, np.floating):
+        return clipped.astype(dtype)
+    maximum = float(np.iinfo(dtype).max)
+    if dtype == np.dtype(np.uint8):
+        # Preserve the established preview/render rounding behavior exactly.
+        return (clipped * maximum).astype(dtype)
+    return np.rint(clipped * maximum).astype(dtype)
 
 
 def apply_vibrance_saturation(img, vibrance, saturation):
@@ -729,8 +770,12 @@ def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0
 
     # Work in uint8 LAB for OpenCV NR filters
     if img_bgr.dtype != np.uint8:
-        u8 = np.clip(img_bgr, 0, 255).astype(np.uint8) if img_bgr.max() > 1.5 else \
-             np.clip(img_bgr * 255.0, 0, 255).astype(np.uint8)
+        if np.issubdtype(img_bgr.dtype, np.integer):
+            maximum = float(np.iinfo(img_bgr.dtype).max)
+            u8 = np.rint(np.clip(img_bgr, 0, maximum) / maximum * 255.0).astype(np.uint8)
+        else:
+            scale = 255.0 if img_bgr.size and float(np.nanmax(img_bgr)) <= 1.5 else 1.0
+            u8 = np.clip(img_bgr * scale, 0, 255).astype(np.uint8)
     else:
         u8 = img_bgr
     original_u8 = u8.copy()
@@ -1393,7 +1438,7 @@ def apply_astro_processing(img, r):
     return out.astype(np.float32)
 
 
-def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
+def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uint8):
     rot = int(getattr(r, "rotate_90", 0)) % 4
     if rot:
         img_bgr = np.rot90(img_bgr, rot).copy()
@@ -1407,13 +1452,18 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         method=getattr(r, 'denoise_method', 'auto'),
     )
 
-    img = img_bgr.astype(np.float32) / 255.0
+    img = _image_to_float01(img_bgr)
     wb_already_baked = bool(meta and meta.get("wb_baked"))
     if not (r.wb_as_shot and wb_already_baked):
         img = apply_white_balance(
             img, r.temperature, r.tint,
             as_shot=r.wb_as_shot, multipliers=wb_multipliers,
         )
+    img = apply_creative_white_balance(
+        img,
+        getattr(r, "creative_temperature", 0.0),
+        getattr(r, "creative_tint", 0.0),
+    )
 
     if abs(r.exposure) > 1e-4:
         img *= (2.0 ** r.exposure)
@@ -1558,7 +1608,7 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
             overlay=True,
         )
 
-    return (np.clip(img, 0, 1) * 255.0).astype(np.uint8)
+    return _float01_to_dtype(img, output_dtype)
 
 
 def apply_hdr_look(img, amount):
@@ -1686,7 +1736,7 @@ def load_recipe_sidecar(image_path: str):
 
 
 def apply_watermark(img_bgr, text, opacity=0.45, scale=0.035, margin=0.02):
-    """Draw a simple text watermark bottom-right on uint8 BGR image."""
+    """Draw a text watermark bottom-right while preserving image precision."""
     if not text or img_bgr is None:
         return img_bgr
     out = img_bgr.copy()
@@ -1700,8 +1750,11 @@ def apply_watermark(img_bgr, text, opacity=0.45, scale=0.035, margin=0.02):
     x = max(0, x)
     y = max(th + 2, y)
     overlay = out.copy()
-    cv2.putText(overlay, text, (x, y), font, font_scale, (255, 255, 255), thickness + 2, cv2.LINE_AA)
-    cv2.putText(overlay, text, (x, y), font, font_scale, (20, 20, 20), thickness, cv2.LINE_AA)
+    maximum = float(np.iinfo(out.dtype).max) if np.issubdtype(out.dtype, np.integer) else 1.0
+    light = (maximum, maximum, maximum)
+    dark = (maximum * 20.0 / 255.0,) * 3
+    cv2.putText(overlay, text, (x, y), font, font_scale, light, thickness + 2, cv2.LINE_AA)
+    cv2.putText(overlay, text, (x, y), font, font_scale, dark, thickness, cv2.LINE_AA)
     cv2.addWeighted(overlay, float(opacity), out, 1.0 - float(opacity), 0, out)
     return out
 
