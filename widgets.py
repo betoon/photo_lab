@@ -202,7 +202,13 @@ class SliderRow(QWidget):
         self.spin.setDecimals(decimals)
         self.spin.setSingleStep(step)
         self.spin.setValue(value)
-        self.spin.setFixedWidth(72)
+        # A fixed 72 px field clipped common values such as 5500 K and could
+        # paint the text beneath the step arrows.  Keep enough room for the
+        # editable value and the arrow-button gutter while still allowing a
+        # layout to make the field wider when space is available.
+        self.spin.setMinimumWidth(104)
+        self.spin.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.spin.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.spin.setStyleSheet("background:#2a2a2a; color:#eee; border:1px solid #444; border-radius:3px; padding:2px;")
         layout.addWidget(self.spin, 0, 1)
         self.slider = QSlider(Qt.Orientation.Horizontal)

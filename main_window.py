@@ -4138,7 +4138,7 @@ class PhotoLab(QMainWindow):
             lay.setSpacing(0)
             for i, name in enumerate(self._HSL_NAMES):
                 row = SliderRow(name, -100.0, 100.0, 0.0, 1.0, decimals=0)
-                row.setMaximumHeight(28)
+                row.setMinimumHeight(42)
                 for child in row.findChildren(QLabel):
                     if child.text() == name:
                         child.setStyleSheet(
@@ -4171,7 +4171,7 @@ class PhotoLab(QMainWindow):
             trio = []
             for which, label in (("hue", "H"), ("sat", "S"), ("lum", "L")):
                 row = SliderRow(label, -100.0, 100.0, 0.0, 1.0, decimals=0)
-                row.setMaximumHeight(26)
+                row.setMinimumHeight(42)
                 row.valueChanged.connect(
                     lambda val, w=which, idx=i: self._on_hsl_channel_value(w, idx, val)
                 )
@@ -4184,12 +4184,12 @@ class PhotoLab(QMainWindow):
         all_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         all_scroll.setWidget(all_inner)
         all_scroll.setMinimumHeight(220)
-        all_scroll.setMaximumHeight(320)
+        all_scroll.setMaximumHeight(420)
         tabs.addTab(all_scroll, "All")
 
         # Cap tab height so Hue/Sat/Lum don't grow into empty void
         tabs.setMinimumHeight(0)
-        tabs.setMaximumHeight(280)
+        tabs.setMaximumHeight(420)
         parent_layout.addWidget(tabs)
         self.hsl_tabs = tabs
         self.color_wheel = None
