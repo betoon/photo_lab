@@ -7,6 +7,7 @@
 - `PhotoLab_User_Manual_with_Developer_Annex.pdf` — combined printable manual.
 - `PACKAGING.md` — portable-build notes.
 - `ROADMAP.md` — completed work and future candidates.
+- `PhotoLab_Workflow_Acceptance_Test_Plan.docx` — printable 25-scenario release and regression checklist.
 
 Display and camera profiling require an external ArgyllCMS installation plus measurement hardware or reference-chart files.
 
