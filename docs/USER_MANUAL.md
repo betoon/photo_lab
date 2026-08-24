@@ -541,6 +541,8 @@ PhotoLab is an open, Python-based editor. It aims for a DxO-like workflow withou
 - **Output projection** optionally finishes the stitched result as cylindrical, rectilinear, or Mercator; Automatic/unchanged preserves the standard OpenCV result exactly
 - **Projection strength** blends continuously from the automatic result, while **Field of view** controls the geometric intensity
 - **Projection edges** can reflect or extend nearby pixels, or retain black edges for a later crop/compositing workflow
+- **Automatically soften suspected stitch seams** is an optional, conservative finishing pass. It detects column-wide tonal discontinuities, reports their count, and blends only a narrow band around them
+- **Seam refinement** controls blend strength and **Seam blend width** controls the affected pixel radius. Leave the option off when the panorama contains intentional full-height hard edges
 - Report notes projection behavior; optional match style from first source frame  
 
 

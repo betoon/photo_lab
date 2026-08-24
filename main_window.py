@@ -5503,6 +5503,21 @@ class PhotoLab(QMainWindow):
         projection_border.addItem("Black / transparent-workflow edge", "black")
         form.addRow("Projection edges", projection_border)
 
+        seam_cb = QCheckBox("Automatically soften suspected stitch seams")
+        seam_cb.setChecked(False)
+        seam_cb.setToolTip("Off by default. Targets only strong discontinuities spanning much of the panorama height.")
+        form.addRow(seam_cb)
+        seam_strength = QSpinBox()
+        seam_strength.setRange(0, 100)
+        seam_strength.setValue(45)
+        seam_strength.setSuffix(" %")
+        form.addRow("Seam refinement", seam_strength)
+        seam_radius = QSpinBox()
+        seam_radius.setRange(2, 80)
+        seam_radius.setValue(12)
+        seam_radius.setSuffix(" px")
+        form.addRow("Seam blend width", seam_radius)
+
         size_combo = QComboBox()
         size_combo.addItem("Full resolution", 0)
         size_combo.addItem("Long edge 3000 px", 3000)
@@ -5619,6 +5634,8 @@ class PhotoLab(QMainWindow):
             projection_strength=float(projection_strength.value()) / 100.0,
             projection_fov=float(projection_fov.value()),
             projection_border=projection_border.currentData() or "reflect",
+            seam_refine_strength=(float(seam_strength.value()) / 100.0) if seam_cb.isChecked() else 0.0,
+            seam_refine_radius=int(seam_radius.value()),
         )
         self._pano_worker.progress.connect(
             lambda m: self.statusBar().showMessage(f"Panorama: {m}")
@@ -5639,6 +5656,14 @@ class PhotoLab(QMainWindow):
         if isinstance(report, dict) and report.get("result_size"):
             w, h = report["result_size"]
             self.log(f"Panorama size: {w}×{h}")
+            seams = report.get("suspected_seams") or []
+            if seams:
+                refined = float(report.get("seam_refine_strength") or 0) > 0
+                action = "refined" if refined else "reported"
+                self.log(f"Panorama seam diagnostics: {len(seams)} suspected seam(s) {action}")
+                self.statusBar().showMessage(
+                    f"Panorama saved — {len(seams)} suspected seam(s) {action} → {out_path}"
+                )
         folder = os.path.dirname(out_path)
         try:
             if self.folder != folder:

@@ -454,6 +454,8 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 - `reproject_panorama` provides a shape-preserving, strength-blended finishing remap for cylindrical, rectilinear, and Mercator output; `original` and zero strength are exact no-ops
 - `order_paths_by_capture_time`; the UI and `PanoramaWorker` now forward ordering, matching, reference, strength, confidence, wave-correction, and crop controls to the engine
 - Projection name, strength, approximate horizontal FOV, and border mode pass through `PanoramaWorker` and are recorded in the stitch report
+- `detect_panorama_seams` scores robust Lab discontinuities with vertical-coverage and edge-margin rejection; diagnostics are always included in successful stitch reports
+- `refine_panorama_seams` is an exact no-op at zero strength and applies a narrow Gaussian-weighted horizontal blend only at accepted seam positions
 - UI report dialogs + `_match_style_from_source`
 
 

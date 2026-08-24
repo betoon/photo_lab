@@ -533,7 +533,8 @@ class PanoramaWorker(QThread):
                  exposure_strength=1.0, confidence_threshold=1.0,
                  wave_correction=True, crop_borders=True,
                  output_projection="original", projection_strength=1.0,
-                 projection_fov=120.0, projection_border="reflect"):
+                 projection_fov=120.0, projection_border="reflect",
+                 seam_refine_strength=0.0, seam_refine_radius=12):
         super().__init__()
         self.paths = list(paths)
         self.out_path = out_path
@@ -550,6 +551,8 @@ class PanoramaWorker(QThread):
         self.projection_strength = float(projection_strength)
         self.projection_fov = float(projection_fov)
         self.projection_border = projection_border
+        self.seam_refine_strength = float(seam_refine_strength)
+        self.seam_refine_radius = int(seam_refine_radius)
 
     def run(self):
         try:
@@ -574,6 +577,8 @@ class PanoramaWorker(QThread):
                 projection_strength=self.projection_strength,
                 projection_fov=self.projection_fov,
                 projection_border=self.projection_border,
+                seam_refine_strength=self.seam_refine_strength,
+                seam_refine_radius=self.seam_refine_radius,
                 progress_cb=cb,
             )
             ext = self.out_path.lower().rsplit(".", 1)[-1]

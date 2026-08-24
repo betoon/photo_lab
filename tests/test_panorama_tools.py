@@ -2,7 +2,10 @@ import cv2
 import numpy as np
 
 import panorama
-from panorama import analyze_panorama_sequence, match_exposure_wb, reproject_panorama, stitch_panorama
+from panorama import (
+    analyze_panorama_sequence, detect_panorama_seams, match_exposure_wb,
+    refine_panorama_seams, reproject_panorama, stitch_panorama,
+)
 
 
 def _overlap_paths(tmp_path):
@@ -98,3 +101,43 @@ def test_projection_settings_appear_in_stitch_report(monkeypatch, tmp_path):
     assert report["output_projection"] == "cylindrical"
     assert report["projection_strength"] == 0.5
     assert report["projection_fov"] == 100
+
+
+def test_seam_detector_finds_column_wide_tonal_jump():
+    image = np.full((120, 300, 3), 60, np.uint8)
+    image[:, 150:] = 150
+    seams = detect_panorama_seams(image)
+    assert seams
+    assert abs(seams[0]["x"] - 150) <= 1
+    assert seams[0]["coverage"] > 0.9
+
+
+def test_seam_refinement_is_noop_when_disabled_and_reduces_jump():
+    image = np.full((120, 300, 3), 60, np.uint8)
+    image[:, 150:] = 150
+    unchanged, seams = refine_panorama_seams(image, strength=0)
+    refined, _ = refine_panorama_seams(image, strength=0.7, radius=12, seams=seams)
+    before = np.mean(np.abs(image[:, 150].astype(float) - image[:, 149].astype(float)))
+    after = np.mean(np.abs(refined[:, 150].astype(float) - refined[:, 149].astype(float)))
+    assert np.array_equal(unchanged, image)
+    assert after < before * 0.6
+
+
+def test_stitch_report_contains_seam_diagnostics(monkeypatch, tmp_path):
+    paths = _overlap_paths(tmp_path)[:2]
+
+    class FakeStitcher:
+        def setPanoConfidenceThresh(self, _value): pass
+        def setWaveCorrection(self, _value): pass
+        def stitch(self, _images):
+            result = np.full((80, 240, 3), 50, np.uint8)
+            result[:, 120:] = 180
+            return 0, result
+
+    monkeypatch.setattr(panorama, "_make_stitcher", lambda _mode: FakeStitcher())
+    _result, report = stitch_panorama(
+        paths, match_exposure=False, crop_borders=False,
+        seam_refine_strength=0.5, seam_refine_radius=10,
+    )
+    assert report["suspected_seams"]
+    assert report["seam_refine_strength"] == 0.5

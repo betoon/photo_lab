@@ -204,6 +204,67 @@ def reproject_panorama(image: np.ndarray, projection: str = "original",
     )
 
 
+def detect_panorama_seams(image: np.ndarray, max_seams: int = 8) -> List[dict]:
+    """Find suspicious column-wide tonal discontinuities in a stitched result."""
+    if image is None or image.ndim != 3 or image.shape[1] < 16:
+        return []
+    lab = cv2.cvtColor(_to_bgr8(image), cv2.COLOR_BGR2LAB).astype(np.float32)
+    delta = np.mean(np.abs(lab[:, 1:] - lab[:, :-1]), axis=2)
+    column_energy = np.median(delta, axis=0)
+    baseline = cv2.GaussianBlur(column_energy.reshape(1, -1), (0, 0), 9.0).ravel()
+    excess = np.maximum(column_energy - baseline, 0.0)
+    median = float(np.median(excess))
+    mad = float(np.median(np.abs(excess - median))) + 1e-4
+    robust_z = (excess - median) / (1.4826 * mad)
+    h, w = image.shape[:2]
+    candidates = []
+    for x in np.argsort(robust_z)[::-1]:
+        if robust_z[x] < 6.0:
+            break
+        # A stitch seam normally affects a substantial portion of the image
+        # height; this rejects isolated poles, windows, and other short edges.
+        local_threshold = max(float(np.median(delta[:, x]) + 2.5 * np.std(delta[:, x])), 8.0)
+        coverage = float(np.mean(delta[:, x] > min(local_threshold, column_energy[x] * 0.8)))
+        if coverage < 0.18:
+            continue
+        xpos = int(x + 1)
+        if xpos < max(4, int(w * 0.02)) or xpos > min(w - 5, int(w * 0.98)):
+            continue
+        if any(abs(xpos - item["x"]) < max(8, w // 80) for item in candidates):
+            continue
+        candidates.append({
+            "x": xpos, "x_normalized": float(xpos / max(w - 1, 1)),
+            "score": float(np.clip(robust_z[x] / 20.0, 0.0, 1.0)),
+            "coverage": coverage,
+        })
+        if len(candidates) >= int(max_seams):
+            break
+    return sorted(candidates, key=lambda item: item["x"])
+
+
+def refine_panorama_seams(image: np.ndarray, strength: float = 0.0,
+                          radius: int = 12, seams=None) -> Tuple[np.ndarray, List[dict]]:
+    """Softly blend only automatically detected, column-wide stitch seams."""
+    amount = float(np.clip(strength, 0.0, 1.0))
+    found = list(detect_panorama_seams(image) if seams is None else seams)
+    if image is None or amount <= 0.0 or not found:
+        return image.copy() if image is not None else image, found
+    radius = max(2, int(radius))
+    source = _to_bgr8(image)
+    softened = cv2.GaussianBlur(source, (0, 0), sigmaX=max(1.0, radius / 3.0), sigmaY=0.15)
+    h, w = source.shape[:2]
+    weight = np.zeros((h, w), np.float32)
+    for seam in found:
+        x = int(seam["x"])
+        lo, hi = max(0, x - radius), min(w, x + radius + 1)
+        offsets = np.arange(lo, hi, dtype=np.float32) - x
+        band = np.exp(-0.5 * (offsets / max(radius / 2.5, 1.0)) ** 2)
+        weight[:, lo:hi] = np.maximum(weight[:, lo:hi], band[None, :])
+    weight = (weight * amount)[..., None]
+    result = source.astype(np.float32) * (1.0 - weight) + softened.astype(np.float32) * weight
+    return np.clip(result, 0, 255).astype(np.uint8), found
+
+
 def stitch_panorama(
     paths: List[str],
     mode: str = "panoramas",
@@ -220,6 +281,8 @@ def stitch_panorama(
     projection_strength: float = 1.0,
     projection_fov: float = 120.0,
     projection_border: str = "reflect",
+    seam_refine_strength: float = 0.0,
+    seam_refine_radius: int = 12,
     progress_cb=None,
 ) -> Tuple[np.ndarray, dict]:
     """
@@ -285,6 +348,8 @@ def stitch_panorama(
         "projection_strength": float(projection_strength),
         "projection_fov": float(projection_fov),
         "projection_border": str(projection_border),
+        "seam_refine_strength": float(seam_refine_strength),
+        "seam_refine_radius": int(seam_refine_radius),
         "projection_note": (
             "OpenCV Stitcher_PANORAMA uses a spherical-like projection for wide "
             "horizons; SCANS is closer to a planar/cylindrical flat-copy. "
@@ -310,6 +375,15 @@ def stitch_panorama(
         pano = reproject_panorama(
             pano, output_projection, projection_strength,
             projection_fov, projection_border,
+        )
+
+    seams = detect_panorama_seams(pano)
+    report["suspected_seams"] = seams
+    if seam_refine_strength and seams:
+        prog(f"Refining {len(seams)} suspected seam(s)…", 0.88)
+        pano, _ = refine_panorama_seams(
+            pano, strength=seam_refine_strength,
+            radius=seam_refine_radius, seams=seams,
         )
 
     # Crop mostly-black borders from the warped canvas
