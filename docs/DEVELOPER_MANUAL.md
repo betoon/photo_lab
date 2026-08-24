@@ -60,6 +60,8 @@ Central **non-destructive** image pipeline. No Qt imports.
 
 Color grading is implemented by `apply_four_way_color_grade`; expanded monochrome processing is implemented by `apply_monochrome_workspace`. Both operate on float BGR data and are mask-safe within the creative stack.
 
+`apply_analog_effects` implements the `analog` creative-filter type. Dust uses a stored deterministic seed. Double exposure treats a missing/unreadable source path as a no-op. All analog processing occurs before the stack block's opacity, blend mode, and shared-mask composite.
+
 **Thumbnails:** `ThumbnailWorker` and `CatalogThumbWorker` call `extract_embedded_preview` first (embedded JPEG from RAW, else half-size postprocess, else downscaled image).
 
 ---
@@ -397,6 +399,8 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 - `output_sharpen_params(ppi, media)` → amount + radius for screen, matte, glossy, canvas, or custom delivery
 - `build_portrait_skin_mask` → Lab chroma selection with saturation/luminance gates and edge suppression
 - `apply_portrait_detail` → three-scale smoothing, texture recovery, and optional shared-mask intersection
+- `measure_noise_profile` → robust flat-region luminance/chroma estimates plus row/column banding score
+- `apply_denoise` also accepts edge preservation, debanding orientation/strength, and JPEG artifact reduction; the default edge-preservation value reproduces the legacy detail-recovery formula
 - `ImageCanvas.set_sharpen_proof` → 100% proof label; main-window proof rendering targets output pixel width with a 4000-pixel cap
 - Dual illuminant: `wb_dual`, `temperature2`, `tint2`, `wb_mix` in `apply_white_balance`
 

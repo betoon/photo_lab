@@ -31,7 +31,9 @@ PRESET_MODULE_FIELDS = {
     ),
     "Detail": (
         "denoise_luminance", "denoise_chroma", "denoise_strength", "denoise_detail",
-        "denoise_method", "sharpen_intensity", "sharpen_radius", "sharpen_threshold",
+        "denoise_method", "noise_profile", "denoise_edge_preserve", "denoise_deband",
+        "denoise_deband_orientation", "denoise_jpeg_artifacts",
+        "sharpen_intensity", "sharpen_radius", "sharpen_threshold",
         "sharpen_detail", "output_sharpen", "astro_stretch", "astro_bg_remove",
         "astro_star_emphasis", "output_sharpen_media", "output_sharpen_ppi",
         "output_sharpen_width_in", "portrait_detail_enabled", "portrait_skin_color",

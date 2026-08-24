@@ -34,6 +34,7 @@ from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark,
                      detect_architectural_upright, normalize_keystone_points,
                      build_shared_mask, build_portrait_skin_mask, output_sharpen_params)
+from imaging import measure_noise_profile
 from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, SdImportWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
@@ -1684,6 +1685,30 @@ class PhotoLab(QMainWindow):
         self.denoise_method_combo.currentIndexChanged.connect(self._on_denoise_method)
         method_row.addWidget(self.denoise_method_combo, 1)
         v.addLayout(method_row)
+        self._add_slider(v, "denoise_edge_preserve", "Edge preservation", 0.0, 100.0, 1, 0, 70.0)
+        self._add_slider(v, "denoise_deband", "Banding correction", 0.0, 100.0, 1, 0, 0.0)
+        band_row = QHBoxLayout()
+        band_row.addWidget(QLabel("Band direction"))
+        self.denoise_band_combo = QComboBox()
+        self.denoise_band_combo.addItem("Auto", "auto")
+        self.denoise_band_combo.addItem("Horizontal bands", "horizontal")
+        self.denoise_band_combo.addItem("Vertical bands", "vertical")
+        self.denoise_band_combo.currentIndexChanged.connect(self._on_denoise_band_direction)
+        band_row.addWidget(self.denoise_band_combo, 1)
+        v.addLayout(band_row)
+        self._add_slider(v, "denoise_jpeg_artifacts", "JPEG artifact reduction", 0.0, 100.0, 1, 0, 0.0)
+        profile_row = QHBoxLayout()
+        measure_noise = QPushButton("Measure Image Noise")
+        measure_noise.clicked.connect(self._measure_current_noise)
+        profile_row.addWidget(measure_noise)
+        apply_noise = QPushButton("Apply Measured Profile")
+        apply_noise.clicked.connect(self._apply_measured_noise_profile)
+        profile_row.addWidget(apply_noise)
+        v.addLayout(profile_row)
+        self.noise_profile_label = QLabel("No measured noise profile")
+        self.noise_profile_label.setWordWrap(True)
+        self.noise_profile_label.setStyleSheet("color:#888; font-size:11px;")
+        v.addWidget(self.noise_profile_label)
 
         box, v = collapsible_group("Capture Sharpening", layout)
         hint2 = QLabel(
@@ -2309,6 +2334,7 @@ class PhotoLab(QMainWindow):
         self.creative_add_type.addItem("Basic Tone & Color", "basic")
         self.creative_add_type.addItem("Four-Way Color Grade", "color_grade")
         self.creative_add_type.addItem("Monochrome Workspace", "monochrome")
+        self.creative_add_type.addItem("Analog Effects", "analog")
         add_row.addWidget(self.creative_add_type, 1)
         add_btn = QPushButton("Add")
         add_btn.clicked.connect(self._add_creative_filter)
@@ -2384,6 +2410,26 @@ class PhotoLab(QMainWindow):
             ("burn_edges", "Burned edges", 0, 100, 1, 0, ("monochrome",)),
             ("border_strength", "Border darkness", 0, 100, 1, 0, ("monochrome",)),
             ("border_width", "Border width", 0.2, 15, 0.2, 1, ("monochrome",)),
+            ("halation", "Halation", 0, 100, 1, 0, ("analog",)),
+            ("diffusion", "Diffusion / bloom", 0, 100, 1, 0, ("analog",)),
+            ("diffusion_radius", "Diffusion radius", 0.5, 20, 0.5, 1, ("analog",)),
+            ("bokeh", "Bokeh blur", 0, 100, 1, 0, ("analog",)),
+            ("bokeh_x", "Bokeh center X", 0, 100, 1, 0, ("analog",)),
+            ("bokeh_y", "Bokeh center Y", 0, 100, 1, 0, ("analog",)),
+            ("bokeh_size", "Bokeh focus size", 5, 100, 1, 0, ("analog",)),
+            ("light_leak", "Light leak", 0, 100, 1, 0, ("analog",)),
+            ("leak_hue", "Light leak hue", 0, 360, 1, 0, ("analog",)),
+            ("leak_x", "Light leak X", 0, 100, 1, 0, ("analog",)),
+            ("leak_y", "Light leak Y", 0, 100, 1, 0, ("analog",)),
+            ("leak_size", "Light leak size", 10, 100, 1, 0, ("analog",)),
+            ("chromatic_shift", "Chromatic shift", 0, 100, 1, 0, ("analog",)),
+            ("chromatic_angle", "Chromatic angle", -180, 180, 1, 0, ("analog",)),
+            ("motion_blur", "Motion blur", 0, 100, 1, 0, ("analog",)),
+            ("motion_angle", "Motion angle", -180, 180, 1, 0, ("analog",)),
+            ("zoom_blur", "Zoom blur", 0, 100, 1, 0, ("analog",)),
+            ("rotation_blur", "Rotation blur", 0, 100, 1, 0, ("analog",)),
+            ("dust_scratches", "Dust & scratches", 0, 100, 1, 0, ("analog",)),
+            ("double_exposure", "Double exposure", 0, 100, 1, 0, ("analog",)),
         )
         self.creative_setting_types = {}
         for key, label, lo, hi, step, decimals, types in settings:
@@ -2391,6 +2437,22 @@ class PhotoLab(QMainWindow):
             self.creative_setting_rows[key] = row
             self.creative_setting_types[key] = types
             editor.addWidget(row)
+        self.analog_source_box = QWidget()
+        analog_source_layout = QVBoxLayout(self.analog_source_box)
+        analog_source_layout.setContentsMargins(0, 0, 0, 0)
+        self.analog_source_label = QLabel("No double-exposure image")
+        self.analog_source_label.setWordWrap(True)
+        analog_source_layout.addWidget(self.analog_source_label)
+        analog_row = QHBoxLayout()
+        choose_source = QPushButton("Choose Double Exposure…")
+        choose_source.clicked.connect(self._choose_double_exposure)
+        analog_row.addWidget(choose_source)
+        self.analog_double_blend = QComboBox()
+        self.analog_double_blend.addItems(["Screen", "Multiply", "Normal", "Overlay", "Soft Light"])
+        self.analog_double_blend.currentTextChanged.connect(self._on_analog_double_blend)
+        analog_row.addWidget(self.analog_double_blend)
+        analog_source_layout.addLayout(analog_row)
+        editor.addWidget(self.analog_source_box)
         self.creative_filter_editor.setEnabled(False)
         v.addWidget(self.creative_filter_editor)
 
@@ -3427,6 +3489,20 @@ class PhotoLab(QMainWindow):
             f"background:rgb({int(red*255)},{int(g*255)},{int(b*255)}); color:#111; border:1px solid #777; padding:4px;"
         )
         self._refresh_portrait_mask_combo(recipe)
+        if hasattr(self, "denoise_band_combo"):
+            band = str(getattr(recipe, "denoise_deband_orientation", "auto") or "auto")
+            self.denoise_band_combo.blockSignals(True)
+            self.denoise_band_combo.setCurrentIndex(max(0, self.denoise_band_combo.findData(band)))
+            self.denoise_band_combo.blockSignals(False)
+        profile = getattr(recipe, "noise_profile", None) or {}
+        if profile:
+            self.noise_profile_label.setText(
+                f"Measured: luminance σ {profile.get('luminance_sigma', 0):.4f} · "
+                f"chroma σ {profile.get('chroma_sigma', 0):.4f} · "
+                f"{profile.get('banding_orientation', 'auto')} band score {profile.get('banding_score', 0):.4f}"
+            )
+        else:
+            self.noise_profile_label.setText("No measured noise profile")
 
     def _on_output_profile_changed(self, _value=None):
         if self.current_path is None:
@@ -3539,7 +3615,7 @@ class PhotoLab(QMainWindow):
         self.preview.set_shared_mask_overlay(mask)
 
     def _creative_filter_defaults(self, kind):
-        names = {"basic": "Basic Tone & Color", "color_grade": "Four-Way Color Grade", "monochrome": "Monochrome Workspace"}
+        names = {"basic": "Basic Tone & Color", "color_grade": "Four-Way Color Grade", "monochrome": "Monochrome Workspace", "analog": "Analog Effects"}
         settings = {}
         if kind == "color_grade":
             settings = {key: 0.0 for key in (
@@ -3556,6 +3632,16 @@ class PhotoLab(QMainWindow):
                 "tone_highlight_hue": 45.0, "tone_highlight_sat": 0.0,
                 "tone_balance": 0.0, "grain": 0.0, "grain_size": 1.0,
                 "burn_edges": 0.0, "border_strength": 0.0, "border_width": 2.0,
+            }
+        elif kind == "analog":
+            settings = {
+                "halation": 0.0, "diffusion": 0.0, "diffusion_radius": 5.0,
+                "bokeh": 0.0, "bokeh_x": 50.0, "bokeh_y": 50.0, "bokeh_size": 35.0,
+                "light_leak": 0.0, "leak_hue": 18.0, "leak_x": 0.0, "leak_y": 45.0, "leak_size": 45.0,
+                "chromatic_shift": 0.0, "chromatic_angle": 0.0,
+                "motion_blur": 0.0, "motion_angle": 0.0, "zoom_blur": 0.0, "rotation_blur": 0.0,
+                "dust_scratches": 0.0, "dust_seed": 1977,
+                "double_exposure": 0.0, "double_exposure_path": "", "double_blend": "screen",
             }
         else:
             settings = {"exposure": 0.0, "contrast": 0.0, "saturation": 0.0, "clarity": 0.0}
@@ -3690,6 +3776,31 @@ class PhotoLab(QMainWindow):
                 slider.blockSignals(True)
                 slider.set_value(float(values.get(key, 0.0)))
                 slider.blockSignals(False)
+        self.analog_source_box.setVisible(kind == "analog")
+        if kind == "analog":
+            path = str(values.get("double_exposure_path", "") or "")
+            self.analog_source_label.setText(path if path else "No double-exposure image")
+            self.analog_double_blend.blockSignals(True)
+            self.analog_double_blend.setCurrentText(str(values.get("double_blend", "screen")).title())
+            self.analog_double_blend.blockSignals(False)
+
+    def _choose_double_exposure(self):
+        item = self._current_creative_filter()
+        if item is None or item.get("type") != "analog":
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Choose Double Exposure Image", "", "Images (*.jpg *.jpeg *.png *.tif *.tiff *.bmp *.webp)")
+        if path:
+            item.setdefault("settings", {})["double_exposure_path"] = path
+            self.analog_source_label.setText(path)
+            self._push_history("Choose double exposure")
+            self.render_preview()
+
+    def _on_analog_double_blend(self, text_value):
+        item = self._current_creative_filter()
+        if item is not None and item.get("type") == "analog":
+            item.setdefault("settings", {})["double_blend"] = str(text_value).lower()
+            self._schedule_history("Double exposure blend")
+            self.render_timer.start()
 
     def _set_creative_filter_value(self, key, value):
         item = self._current_creative_filter()
@@ -4642,7 +4753,8 @@ class PhotoLab(QMainWindow):
             color_keys = ["temperature", "tint", "wb_as_shot", "creative_temperature", "creative_tint", "vibrance", "saturation",
                           "hsl_hue", "hsl_sat", "hsl_lum"]
             detail_keys = ["denoise_luminance", "denoise_chroma", "denoise_strength",
-                           "denoise_detail", "denoise_method", "sharpen_intensity",
+                           "denoise_detail", "denoise_method", "noise_profile", "denoise_edge_preserve",
+                           "denoise_deband", "denoise_deband_orientation", "denoise_jpeg_artifacts", "sharpen_intensity",
                            "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen",
                            "output_sharpen_media", "output_sharpen_ppi", "output_sharpen_width_in",
                            "portrait_detail_enabled", "portrait_skin_color", "portrait_color_reach",
@@ -4736,7 +4848,8 @@ class PhotoLab(QMainWindow):
                       "hsl_hue", "hsl_sat", "hsl_lum", "soft_proof", "soft_proof_profile",
                       "soft_proof_gamut"],
             "detail": ["denoise_luminance", "denoise_chroma", "denoise_strength",
-                       "denoise_detail", "denoise_method", "sharpen_intensity",
+                       "denoise_detail", "denoise_method", "noise_profile", "denoise_edge_preserve",
+                       "denoise_deband", "denoise_deband_orientation", "denoise_jpeg_artifacts", "sharpen_intensity",
                        "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen",
                        "output_sharpen_media", "output_sharpen_ppi", "output_sharpen_width_in",
                        "output_sharpen_proof", "portrait_detail_enabled", "portrait_skin_color",
@@ -6378,6 +6491,45 @@ class PhotoLab(QMainWindow):
         self.recipes[self.current_path].denoise_method = method or "auto"
         self._schedule_history("Denoise method")
         self.render_timer.start()
+
+    def _on_denoise_band_direction(self, _idx=None):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].denoise_deband_orientation = self.denoise_band_combo.currentData() or "auto"
+        self._schedule_history("Banding direction")
+        self.render_timer.start()
+
+    def _measure_current_noise(self):
+        if self.current_path is None or self.original_bgr is None:
+            return
+        profile = measure_noise_profile(self.original_bgr)
+        self.recipes[self.current_path].noise_profile = profile
+        self._sync_detail_extensions(self.recipes[self.current_path])
+        self._push_history("Measure image noise")
+        self.statusBar().showMessage("Noise profile measured; review it, then choose Apply Measured Profile.")
+
+    def _apply_measured_noise_profile(self):
+        if self.current_path is None:
+            return
+        recipe = self.recipes[self.current_path]
+        profile = getattr(recipe, "noise_profile", None) or {}
+        if not profile:
+            QMessageBox.information(self, "Noise Profile", "Measure image noise first.")
+            return
+        values = {
+            "denoise_luminance": profile.get("suggested_luminance", 0.0),
+            "denoise_chroma": profile.get("suggested_chroma", 0.0),
+            "denoise_strength": profile.get("suggested_strength", 0.0),
+            "denoise_deband": profile.get("suggested_deband", 0.0),
+        }
+        for key, value in values.items():
+            setattr(recipe, key, round(float(value), 1))
+            if key in self.sliders:
+                self.sliders[key].blockSignals(True); self.sliders[key].set_value(getattr(recipe, key)); self.sliders[key].blockSignals(False)
+        recipe.denoise_deband_orientation = profile.get("banding_orientation", "auto")
+        self._sync_detail_extensions(recipe)
+        self._push_history("Apply measured noise profile")
+        self.render_preview()
 
     def _apply_detail_preset(self, **kwargs):
         if self.current_path is None:

@@ -185,6 +185,13 @@ Use **Auto Exposure** from the Image menu for a starting point.
 - **Strength** — biases toward stronger NLM denoise  
 - **Detail Recovery** — restores fine structure after NR (edge-aware)  
 - **Method:** Auto · Bilateral (fast) · NLM (stronger, slower)
+- **Edge preservation** controls whether recovered detail is concentrated on strong edges or restored more uniformly.
+- **Banding correction** reduces repeated horizontal or vertical sensor bands; direction may be automatic or selected manually.
+- **JPEG artifact reduction** softens block boundaries and ringing independently of sensor-noise reduction.
+- **Measure Image Noise** analyzes flatter image regions and records luminance noise, chroma noise, and banding orientation without changing the image.
+- **Apply Measured Profile** transfers the stored measurements into editable starting values.
+
+Noise profiles are stored in the image recipe. Measurement and application are separate so an automatic estimate never changes an edit without confirmation.
 
 ### Sharpening
 
@@ -343,6 +350,7 @@ Open the **Creative** tab to build an ordered, non-destructive finishing stack. 
 - **Basic Tone & Color** — exposure, contrast, saturation, and clarity.
 - **Four-Way Color Grade** — independent global, shadow, midtone, and highlight color plus tonal luminance controls.
 - **Monochrome Workspace** — RGB channel mixing, virtual colored filters, brightness, contrast, structure, split toning, grain, burned edges, and borders.
+- **Analog Effects** — halation, diffusion, positional bokeh, colored light leaks, chromatic shift, motion/zoom/rotation blur, dust and scratches, and double exposure.
 
 Select a filter to change its opacity, enable or disable it, choose a blending mode, invert its assigned mask, duplicate it, delete it, or move it up and down. Available blending modes are Normal, Multiply, Screen, Overlay, Soft Light, Luminosity, and Color.
 
@@ -357,6 +365,21 @@ Shared masks are named selections that can be assigned to any number of creative
 - Selecting a shared mask displays its calculated coverage as a red overlay, including luminance restrictions and intersections.
 
 Deleting a shared mask safely removes its references from filters and other mask intersections; it does not delete painted Local masks.
+
+### Analog Effects workflow
+
+Add **Analog Effects** from the Creative Filter Stack. Because it is a stack filter, the complete result supports opacity, blending modes, duplication, ordering, and shared masks.
+
+- **Halation** adds a restrained warm halo around bright regions.
+- **Diffusion / bloom** softens and spreads highlights; Radius controls its scale.
+- **Bokeh blur** uses X/Y center and focus-size controls to preserve a chosen area.
+- **Light leak** provides hue, position, size, and strength controls.
+- **Chromatic shift** separates red and blue channels along an adjustable angle.
+- **Motion, zoom, and rotation blur** can be used independently or together.
+- **Dust & scratches** is deterministic: the same recipe produces the same marks on every render.
+- **Double exposure** loads a second image and supports Screen, Multiply, Normal, Overlay, and Soft Light blending.
+
+If a double-exposure source is moved or deleted, PhotoLab safely skips that component while retaining the rest of the analog filter.
 
 
 ## HDR

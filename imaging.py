@@ -171,6 +171,11 @@ class Recipe:
     denoise_strength: float = 0.0
     denoise_detail: float = 50.0       # 0..100 preserve fine detail after NR
     denoise_method: str = "auto"       # auto | bilateral | nlm
+    noise_profile: dict = field(default_factory=dict)
+    denoise_edge_preserve: float = 70.0
+    denoise_deband: float = 0.0
+    denoise_deband_orientation: str = "auto"
+    denoise_jpeg_artifacts: float = 0.0
     sharpen_intensity: float = 0.0     # capture / creative sharpen
     sharpen_radius: float = 1.0
     sharpen_threshold: float = 0.0     # edge masking amount 0..100
@@ -1029,16 +1034,51 @@ def apply_split_tone(img, sh_hue, sh_sat, hi_hue, hi_sat, balance=0.0):
     return np.clip(out, 0, 1)
 
 
-def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0, method="auto"):
+def measure_noise_profile(img_bgr):
+    """Estimate luminance/chroma noise and row/column banding from flat regions."""
+    if img_bgr is None or img_bgr.size == 0:
+        return {}
+    source = img_bgr.astype(np.float32)
+    if np.issubdtype(img_bgr.dtype, np.integer):
+        source /= float(np.iinfo(img_bgr.dtype).max)
+    elif source.max() > 1.5:
+        source /= 255.0
+    lab = cv2.cvtColor(np.clip(source, 0, 1), cv2.COLOR_BGR2LAB)
+    light = lab[..., 0] / 100.0
+    local_mean = cv2.GaussianBlur(light, (0, 0), sigmaX=3.0)
+    residual = light - local_mean
+    gradient = cv2.magnitude(cv2.Sobel(light, cv2.CV_32F, 1, 0), cv2.Sobel(light, cv2.CV_32F, 0, 1))
+    flat = gradient < np.percentile(gradient, 35)
+    sample = residual[flat] if np.any(flat) else residual.ravel()
+    lum_sigma = float(1.4826 * np.median(np.abs(sample - np.median(sample))))
+    chroma_residual = lab[..., 1:3] - cv2.GaussianBlur(lab[..., 1:3], (0, 0), sigmaX=3.0)
+    chroma_sample = chroma_residual[flat] if np.any(flat) else chroma_residual.reshape(-1, 2)
+    chroma_sigma = float(np.sqrt(np.mean(chroma_sample * chroma_sample)) / 128.0)
+    row_score = float(np.std(np.mean(residual, axis=1)))
+    col_score = float(np.std(np.mean(residual, axis=0)))
+    banding = max(row_score, col_score)
+    return {
+        "luminance_sigma": lum_sigma, "chroma_sigma": chroma_sigma,
+        "banding_score": banding,
+        "banding_orientation": "horizontal" if row_score >= col_score else "vertical",
+        "suggested_luminance": float(np.clip(lum_sigma * 1100.0, 0, 100)),
+        "suggested_chroma": float(np.clip(chroma_sigma * 950.0, 0, 100)),
+        "suggested_strength": float(np.clip(max(lum_sigma * 700.0, chroma_sigma * 650.0), 0, 100)),
+        "suggested_deband": float(np.clip(banding * 2200.0, 0, 100)),
+    }
+
+
+def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0, method="auto",
+                  edge_preserve=70.0, deband=0.0, deband_orientation="auto", jpeg_artifacts=0.0):
     """Edge-aware denoise in LAB with optional detail recovery.
 
     luminance / chroma / strength: 0..100
     detail_preserve: 0..100 — blend high-frequency residual back after NR
     method: auto | bilateral | nlm
     """
-    if luminance <= 0 and chroma <= 0 and strength <= 0:
+    if luminance <= 0 and chroma <= 0 and strength <= 0 and deband <= 0 and jpeg_artifacts <= 0:
         return img_bgr
-    if max(luminance, chroma, strength) / 100.0 < 0.01:
+    if max(luminance, chroma, strength, deband, jpeg_artifacts) / 100.0 < 0.01:
         return img_bgr
 
     # Work in uint8 LAB for OpenCV NR filters
@@ -1052,6 +1092,29 @@ def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0
     else:
         u8 = img_bgr
     original_u8 = u8.copy()
+    artifact_amount = float(np.clip(jpeg_artifacts, 0, 100)) / 100.0
+    if artifact_amount > 1e-6:
+        smoothed = cv2.bilateralFilter(u8, d=5, sigmaColor=8.0 + artifact_amount * 32.0, sigmaSpace=2.0)
+        smoothed = cv2.GaussianBlur(smoothed, (3, 3), sigmaX=0.45 + artifact_amount * 0.55)
+        u8 = cv2.addWeighted(u8, 1.0 - artifact_amount * 0.75, smoothed, artifact_amount * 0.75, 0)
+    deband_amount = float(np.clip(deband, 0, 100)) / 100.0
+    if deband_amount > 1e-6:
+        work = u8.astype(np.float32)
+        orientation = str(deband_orientation or "auto").lower()
+        gray = cv2.cvtColor(u8, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        residual_gray = gray - cv2.GaussianBlur(gray, (0, 0), 5)
+        row_score = float(np.std(np.mean(residual_gray, axis=1)))
+        col_score = float(np.std(np.mean(residual_gray, axis=0)))
+        if orientation == "auto":
+            orientation = "horizontal" if row_score >= col_score else "vertical"
+        if orientation == "horizontal":
+            signal = np.mean(work, axis=1, keepdims=True)
+            smooth = cv2.GaussianBlur(signal, (1, 0), sigmaX=0, sigmaY=max(2.0, u8.shape[0] * 0.025))
+        else:
+            signal = np.mean(work, axis=0, keepdims=True)
+            smooth = cv2.GaussianBlur(signal, (0, 1), sigmaX=max(2.0, u8.shape[1] * 0.025), sigmaY=0)
+        work -= (signal - smooth) * deband_amount
+        u8 = np.clip(work, 0, 255).astype(np.uint8)
     lab = cv2.cvtColor(u8, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
 
@@ -1094,7 +1157,15 @@ def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0
         edge = np.sqrt(gx * gx + gy * gy)
         edge = edge / (edge.max() + 1e-6)
         edge = edge[..., None]
-        mix = preserve * (0.35 + 0.65 * edge)
+        edge_setting = float(np.clip(edge_preserve, 0, 100))
+        legacy_mix = 0.35 + 0.65 * edge
+        if edge_setting >= 70.0:
+            emphasis = (edge_setting - 70.0) / 30.0
+            recovery_map = legacy_mix * (1.0 - emphasis) + edge * emphasis
+        else:
+            uniformity = (70.0 - edge_setting) / 70.0
+            recovery_map = legacy_mix * (1.0 - uniformity) + 1.0 * uniformity
+        mix = preserve * recovery_map
         out = denoised.astype(np.float32) + residual * mix
         denoised = np.clip(out, 0, 255).astype(np.uint8)
 
@@ -1880,6 +1951,102 @@ def blend_filter_result(base, filtered, opacity=1.0, mode="normal"):
     return np.clip(a * (1.0 - amount) + mixed * amount, 0, 1)
 
 
+def apply_analog_effects(img, settings):
+    """Composable analog/camera effects used by an Analog creative-filter block."""
+    out = np.clip(img, 0, 1).astype(np.float32).copy()
+    h, w = out.shape[:2]
+    halation = float(settings.get("halation", 0.0)) / 100.0
+    if halation > 1e-6:
+        lum = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
+        highlights = np.clip((lum - 0.65) / 0.35, 0, 1)
+        glow = cv2.GaussianBlur(highlights, (0, 0), sigmaX=max(2.0, min(h, w) * 0.012))
+        warm = np.dstack((glow * 0.12, glow * 0.38, glow))
+        out = np.clip(out + warm * halation * 0.38, 0, 1)
+    diffusion = float(settings.get("diffusion", 0.0)) / 100.0
+    if diffusion > 1e-6:
+        radius = max(0.5, float(settings.get("diffusion_radius", 5.0)))
+        blurred = cv2.GaussianBlur(out, (0, 0), sigmaX=radius)
+        screened = 1.0 - (1.0 - out) * (1.0 - blurred)
+        out = out * (1.0 - diffusion * 0.45) + screened * diffusion * 0.45
+    bokeh = float(settings.get("bokeh", 0.0)) / 100.0
+    if bokeh > 1e-6:
+        cx = float(settings.get("bokeh_x", 50.0)) / 100.0 * (w - 1)
+        cy = float(settings.get("bokeh_y", 50.0)) / 100.0 * (h - 1)
+        size = max(0.05, float(settings.get("bokeh_size", 35.0)) / 100.0)
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        distance = np.sqrt(((xx - cx) / max(w, 1)) ** 2 + ((yy - cy) / max(h, 1)) ** 2)
+        mask = np.clip((distance - size * 0.5) / max(size * 0.35, 0.02), 0, 1) * bokeh
+        blurred = cv2.GaussianBlur(out, (0, 0), sigmaX=1.0 + bokeh * 14.0)
+        out = out * (1.0 - mask[..., None]) + blurred * mask[..., None]
+    leak = float(settings.get("light_leak", 0.0)) / 100.0
+    if leak > 1e-6:
+        x0 = float(settings.get("leak_x", 0.0)) / 100.0 * (w - 1)
+        y0 = float(settings.get("leak_y", 45.0)) / 100.0 * (h - 1)
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        radius = max(w, h) * max(0.1, float(settings.get("leak_size", 45.0)) / 100.0)
+        falloff = np.clip(1.0 - np.sqrt((xx - x0) ** 2 + (yy - y0) ** 2) / radius, 0, 1) ** 1.5
+        color = _hue_bgr(settings.get("leak_hue", 18.0))
+        out = 1.0 - (1.0 - out) * (1.0 - color[None, None, :] * falloff[..., None] * leak * 0.8)
+    shift = float(settings.get("chromatic_shift", 0.0)) / 100.0
+    if shift > 1e-6:
+        pixels = shift * max(1.0, min(h, w) * 0.018)
+        angle = np.deg2rad(float(settings.get("chromatic_angle", 0.0)))
+        dx, dy = pixels * np.cos(angle), pixels * np.sin(angle)
+        matrix_pos = np.float32([[1, 0, dx], [0, 1, dy]])
+        matrix_neg = np.float32([[1, 0, -dx], [0, 1, -dy]])
+        b, g, r = cv2.split(out)
+        b = cv2.warpAffine(b, matrix_neg, (w, h), borderMode=cv2.BORDER_REFLECT_101)
+        r = cv2.warpAffine(r, matrix_pos, (w, h), borderMode=cv2.BORDER_REFLECT_101)
+        out = cv2.merge((b, g, r))
+    motion = float(settings.get("motion_blur", 0.0)) / 100.0
+    if motion > 1e-6:
+        length = max(3, int(3 + motion * 35) | 1)
+        kernel = np.zeros((length, length), np.float32)
+        kernel[length // 2, :] = 1.0 / length
+        matrix = cv2.getRotationMatrix2D((length / 2 - 0.5, length / 2 - 0.5), float(settings.get("motion_angle", 0.0)), 1.0)
+        kernel = cv2.warpAffine(kernel, matrix, (length, length))
+        kernel /= kernel.sum() + 1e-6
+        blurred = cv2.filter2D(out, -1, kernel, borderType=cv2.BORDER_REFLECT_101)
+        out = out * (1.0 - motion) + blurred * motion
+    zoom = float(settings.get("zoom_blur", 0.0)) / 100.0
+    rotation = float(settings.get("rotation_blur", 0.0)) / 100.0
+    if zoom > 1e-6 or rotation > 1e-6:
+        accum = out.copy()
+        samples = 7
+        for index in range(1, samples):
+            fraction = index / (samples - 1)
+            matrix = cv2.getRotationMatrix2D((w / 2, h / 2), rotation * 8.0 * fraction, 1.0 + zoom * 0.08 * fraction)
+            accum += cv2.warpAffine(out, matrix, (w, h), borderMode=cv2.BORDER_REFLECT_101)
+        transformed = accum / samples
+        amount = max(zoom, rotation)
+        out = out * (1.0 - amount) + transformed * amount
+    dust = float(settings.get("dust_scratches", 0.0)) / 100.0
+    if dust > 1e-6:
+        rng = np.random.default_rng(int(settings.get("dust_seed", 1977)))
+        overlay = np.zeros((h, w), np.float32)
+        count = int(4 + dust * 90)
+        for _ in range(count):
+            if rng.random() < 0.3:
+                x = int(rng.integers(0, max(w, 1)))
+                cv2.line(overlay, (x, int(rng.integers(0, max(h // 2, 1)))),
+                         (x + int(rng.integers(-3, 4)), int(rng.integers(max(h // 2, 1), max(h, 1)))),
+                         float(rng.uniform(0.2, 0.8)), int(rng.integers(1, 3)))
+            else:
+                cv2.circle(overlay, (int(rng.integers(0, max(w, 1))), int(rng.integers(0, max(h, 1)))),
+                           int(rng.integers(1, max(2, int(min(h, w) * 0.008)))), float(rng.uniform(0.2, 1.0)), -1)
+        out = np.clip(out * (1.0 - overlay[..., None] * dust * 0.7), 0, 1)
+    path = str(settings.get("double_exposure_path", "") or "")
+    double_amount = float(settings.get("double_exposure", 0.0)) / 100.0
+    if path and double_amount > 1e-6:
+        second = cv2.imread(path, cv2.IMREAD_COLOR)
+        if second is not None:
+            second = cv2.resize(second, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
+            mode = str(settings.get("double_blend", "screen")).lower()
+            double = blend_filter_result(out, second, 1.0, mode)
+            out = out * (1.0 - double_amount) + double * double_amount
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
 def apply_creative_filter_stack(img, filters, mask_library=None):
     """Apply ordered, repeatable creative filters with blend, opacity, and shared masks."""
     if not filters:
@@ -1896,6 +2063,8 @@ def apply_creative_filter_stack(img, filters, mask_library=None):
             filtered = apply_four_way_color_grade(out, settings)
         elif kind == "monochrome":
             filtered = apply_monochrome_workspace(out, settings)
+        elif kind == "analog":
+            filtered = apply_analog_effects(out, settings)
         elif kind == "basic":
             filtered = out.copy()
             exposure = float(settings.get("exposure", 0.0))
@@ -2101,6 +2270,10 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
         img_bgr, r.denoise_luminance, r.denoise_chroma, r.denoise_strength,
         detail_preserve=getattr(r, 'denoise_detail', 50.0),
         method=getattr(r, 'denoise_method', 'auto'),
+        edge_preserve=getattr(r, "denoise_edge_preserve", 70.0),
+        deband=getattr(r, "denoise_deband", 0.0),
+        deband_orientation=getattr(r, "denoise_deband_orientation", "auto"),
+        jpeg_artifacts=getattr(r, "denoise_jpeg_artifacts", 0.0),
     )
 
     img = _image_to_float01(img_bgr)
