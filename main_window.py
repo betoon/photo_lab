@@ -680,6 +680,7 @@ class PhotoLab(QMainWindow):
         view_m.addSeparator()
         add_action(view_m, "Full Screen", self.toggle_fullscreen, "F11")
         add_action(view_m, "Image Metadata…", self.show_metadata, "I")
+        add_action(view_m, "Edit Metadata…", self.edit_metadata)
 
         # ----- Image -----
         image_m = mb.addMenu("&Image")
@@ -1279,6 +1280,10 @@ class PhotoLab(QMainWindow):
         self.gps_folder_btn.setToolTip("Find geotagged photos in the filmstrip, select them, and open the map")
         self.gps_folder_btn.clicked.connect(self.select_gps_photos_and_map)
         mb_layout.addWidget(self.gps_folder_btn)
+        self.edit_metadata_btn = QPushButton("Edit metadata…")
+        self.edit_metadata_btn.setToolTip("Add a place, description, or GPS coordinates without modifying the image")
+        self.edit_metadata_btn.clicked.connect(self.edit_metadata)
+        mb_layout.addWidget(self.edit_metadata_btn)
         self._set_gps_status(None)
         ll.addWidget(meta_box)
 
@@ -4658,10 +4663,93 @@ class PhotoLab(QMainWindow):
         browser = QTextBrowser()
         browser.setPlainText("\n".join(lines) if len(lines) > 2 else "No metadata found.")
         layout.addWidget(browser)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dlg.accept)
-        layout.addWidget(close_btn)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        edit_btn = buttons.addButton("Edit metadata…", QDialogButtonBox.ButtonRole.ActionRole)
+        edit_btn.clicked.connect(lambda: (dlg.accept(), self.edit_metadata()))
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
         dlg.exec()
+
+    def edit_metadata(self):
+        """Edit descriptive and GPS metadata in a safe XMP sidecar."""
+        if self.current_path is None:
+            QMessageBox.information(self, "Edit Metadata", "Open an image first.")
+            return
+        from imaging import extract_exif, write_editable_metadata
+        current = extract_exif(self.current_path)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Edit Metadata")
+        dlg.setMinimumWidth(520)
+        root = QVBoxLayout(dlg)
+        note = QLabel(
+            "These changes are saved beside the image in a PhotoLab XMP sidecar. "
+            "The original image and camera metadata are not modified."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#999;")
+        root.addWidget(note)
+        form = QFormLayout()
+        fields = {}
+        for key, label in (
+            ("title", "Title"), ("description", "Description"),
+            ("location", "Location / landmark"), ("city", "City"),
+            ("state", "State / province"), ("country", "Country"),
+        ):
+            edit = QLineEdit(str(current.get(key, "") or ""))
+            edit.setClearButtonEnabled(True)
+            form.addRow(label, edit)
+            fields[key] = edit
+        gps_cb = QCheckBox("Store GPS coordinates")
+        gps = current.get("gps")
+        gps_cb.setChecked(bool(gps and len(gps) >= 2))
+        form.addRow(gps_cb)
+        latitude = QDoubleSpinBox()
+        latitude.setRange(-90.0, 90.0)
+        latitude.setDecimals(7)
+        latitude.setSingleStep(0.0001)
+        latitude.setValue(float(gps[0]) if gps else 0.0)
+        latitude.setToolTip("Decimal degrees; south is negative")
+        longitude = QDoubleSpinBox()
+        longitude.setRange(-180.0, 180.0)
+        longitude.setDecimals(7)
+        longitude.setSingleStep(0.0001)
+        longitude.setValue(float(gps[1]) if gps else 0.0)
+        longitude.setToolTip("Decimal degrees; west is negative")
+        form.addRow("Latitude", latitude)
+        form.addRow("Longitude", longitude)
+        gps_cb.toggled.connect(latitude.setEnabled)
+        gps_cb.toggled.connect(longitude.setEnabled)
+        latitude.setEnabled(gps_cb.isChecked())
+        longitude.setEnabled(gps_cb.isChecked())
+        root.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        root.addWidget(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = {key: edit.text() for key, edit in fields.items()}
+        values.update({
+            "gps_enabled": gps_cb.isChecked(),
+            "gps_latitude": latitude.value(),
+            "gps_longitude": longitude.value(),
+        })
+        try:
+            sidecar = write_editable_metadata(self.current_path, values)
+            refreshed = extract_exif(self.current_path)
+            cached = self.meta_cache.setdefault(self.current_path, {})
+            for key in (
+                "title", "description", "location", "city", "state", "country",
+                "gps", "gps_latitude", "gps_longitude", "metadata_sidecar",
+            ):
+                cached.pop(key, None)
+            cached.update(refreshed)
+            self._update_metadata_display(cached)
+            self.statusBar().showMessage(f"Metadata saved → {sidecar}")
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Edit Metadata", f"Could not save metadata:\n{exc}")
 
     def start_horizon_line(self):
         if self.current_path is None:
@@ -7432,6 +7520,10 @@ class PhotoLab(QMainWindow):
             lines.append(f"⚙️ <b>Settings:</b> {' • '.join(settings)}")
         if dt:
             lines.append(f"📅 <b>Taken:</b> {dt}")
+        place = ", ".join(str(meta.get(key, "")).strip() for key in
+                          ("location", "city", "state", "country") if meta.get(key))
+        if place:
+            lines.append(f"📍 <b>Location:</b> {place}")
             
         if not lines:
             self.metadata_label.setText("No metadata available")

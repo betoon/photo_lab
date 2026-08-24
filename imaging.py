@@ -12,6 +12,7 @@ import json
 import os
 import logging
 import threading
+import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field, fields
 from typing import Optional, Tuple
@@ -381,7 +382,100 @@ def extract_exif(path: str) -> dict:
                 meta.setdefault("datetime", meta["datetime_original"])
         except Exception:
             pass
+    # User-editable descriptive metadata lives in a separate PhotoLab XMP
+    # sidecar so camera originals (especially RAW/DNG files) are never
+    # rewritten.  Sidecar values intentionally take precedence over EXIF.
+    sidecar = read_editable_metadata(path)
+    if sidecar.pop("_gps_override", False):
+        for key in ("gps", "gps_latitude", "gps_longitude"):
+            meta.pop(key, None)
+    meta.update(sidecar)
+    if meta.get("gps_latitude") is not None and meta.get("gps_longitude") is not None:
+        meta["gps"] = (float(meta["gps_latitude"]), float(meta["gps_longitude"]))
     return meta
+
+
+_PL_METADATA_NS = "https://github.com/betoon/photo_lab/ns/metadata/1.0/"
+_RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+_XMP_NS = "adobe:ns:meta/"
+_DC_NS = "http://purl.org/dc/elements/1.1/"
+_PHOTOSHOP_NS = "http://ns.adobe.com/photoshop/1.0/"
+_IPTC_NS = "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"
+
+
+def metadata_sidecar_path(path: str) -> str:
+    """Return the non-destructive editable-metadata sidecar for an image."""
+    return os.path.splitext(os.path.abspath(path))[0] + ".photolab.xmp"
+
+
+def read_editable_metadata(path: str) -> dict:
+    """Read PhotoLab's editable location/description XMP sidecar."""
+    sidecar = metadata_sidecar_path(path)
+    if not os.path.isfile(sidecar):
+        return {}
+    try:
+        root = ET.parse(sidecar).getroot()
+        description = root.find(f".//{{{_RDF_NS}}}Description")
+        if description is None:
+            return {}
+        get = lambda namespace, name: description.get(f"{{{namespace}}}{name}", "")
+        result = {
+            "title": get(_PL_METADATA_NS, "title"),
+            "description": get(_PL_METADATA_NS, "description"),
+            "location": get(_PL_METADATA_NS, "location"),
+            "city": get(_PL_METADATA_NS, "city"),
+            "state": get(_PL_METADATA_NS, "state"),
+            "country": get(_PL_METADATA_NS, "country"),
+            "_gps_override": True,
+            "metadata_sidecar": sidecar,
+        }
+        if get(_PL_METADATA_NS, "gpsEnabled").lower() == "true":
+            lat = float(get(_PL_METADATA_NS, "gpsLatitude"))
+            lon = float(get(_PL_METADATA_NS, "gpsLongitude"))
+            if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                result["gps_latitude"] = lat
+                result["gps_longitude"] = lon
+        return result
+    except (OSError, ValueError, ET.ParseError):
+        return {}
+
+
+def write_editable_metadata(path: str, values: dict) -> str:
+    """Atomically write descriptive/GPS metadata without modifying the image."""
+    ET.register_namespace("x", _XMP_NS)
+    ET.register_namespace("rdf", _RDF_NS)
+    ET.register_namespace("pl", _PL_METADATA_NS)
+    ET.register_namespace("dc", _DC_NS)
+    ET.register_namespace("photoshop", _PHOTOSHOP_NS)
+    ET.register_namespace("Iptc4xmpCore", _IPTC_NS)
+    root = ET.Element(f"{{{_XMP_NS}}}xmpmeta")
+    rdf = ET.SubElement(root, f"{{{_RDF_NS}}}RDF")
+    desc = ET.SubElement(rdf, f"{{{_RDF_NS}}}Description")
+    text_fields = ("title", "description", "location", "city", "state", "country")
+    for name in text_fields:
+        desc.set(f"{{{_PL_METADATA_NS}}}{name}", str(values.get(name, "")).strip())
+    # Standard location attributes improve interoperability without touching
+    # any pre-existing Adobe/Lightroom XMP file.
+    desc.set(f"{{{_PHOTOSHOP_NS}}}City", str(values.get("city", "")).strip())
+    desc.set(f"{{{_PHOTOSHOP_NS}}}State", str(values.get("state", "")).strip())
+    desc.set(f"{{{_PHOTOSHOP_NS}}}Country", str(values.get("country", "")).strip())
+    desc.set(f"{{{_IPTC_NS}}}Location", str(values.get("location", "")).strip())
+    gps_enabled = bool(values.get("gps_enabled", False))
+    desc.set(f"{{{_PL_METADATA_NS}}}gpsEnabled", "true" if gps_enabled else "false")
+    if gps_enabled:
+        lat = float(values.get("gps_latitude"))
+        lon = float(values.get("gps_longitude"))
+        if not -90.0 <= lat <= 90.0:
+            raise ValueError("Latitude must be between -90 and 90 degrees.")
+        if not -180.0 <= lon <= 180.0:
+            raise ValueError("Longitude must be between -180 and 180 degrees.")
+        desc.set(f"{{{_PL_METADATA_NS}}}gpsLatitude", f"{lat:.8f}")
+        desc.set(f"{{{_PL_METADATA_NS}}}gpsLongitude", f"{lon:.8f}")
+    sidecar = metadata_sidecar_path(path)
+    temporary = sidecar + ".tmp"
+    ET.ElementTree(root).write(temporary, encoding="utf-8", xml_declaration=True)
+    os.replace(temporary, sidecar)
+    return sidecar
 
 
 def _gps_ratio_to_float(rat):
