@@ -267,6 +267,12 @@ Also: `pip install lensfunpy`. **Test match…** in Geometry shows which DB path
 - **Keystone (4 corners)** lets you drag TL/TR/BR/BL handles directly on the image
 - **Show grid** — rule of thirds + center crosshair  
 - **Fibonacci / golden spiral** — composition guide  
+- **Distortion** — correct barrel/pincushion curvature and independently adjust wide-angle edge stretching
+- **Perspective** — correct converging verticals and horizontal perspective independently
+- **Edge Warp** — shift the top, bottom, left, and right edges for off-axis frames, signs, and architecture
+- **Tilt-Shift / Diorama** — set the strength, position, width, and angle of a selective-focus band
+
+The Fibonacci guide is a continuous golden spiral. Move its yellow center handle, resize it with the blue corner, and use the eight orientation choices to rotate or mirror it.
   - Drag center handle to move  
   - Drag blue corner to resize  
   - Size slider and Orientation (A–D + mirrored)  

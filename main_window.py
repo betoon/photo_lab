@@ -1805,10 +1805,36 @@ class PhotoLab(QMainWindow):
         v.addLayout(ar_row)
 
         box, v = collapsible_group("Distortion", layout, checked=False)
-        self._add_slider(v, "distortion", "Amount", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "distortion", "Barrel / pincushion", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "wide_angle", "Wide-angle edge stretch", -100.0, 100.0, 1, 0, 0.0)
+        distortion_tip = QLabel("Positive edge stretch opens the sides; negative values compress exaggerated edges.")
+        distortion_tip.setWordWrap(True)
+        distortion_tip.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(distortion_tip)
 
         box, v = collapsible_group("Perspective", layout, checked=False)
         self._add_slider(v, "perspective", "Vertical", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "perspective_horizontal", "Horizontal", -100.0, 100.0, 1, 0, 0.0)
+
+        box, v = collapsible_group("Edge Warp", layout, checked=False)
+        self._add_slider(v, "warp_top", "Top edge", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "warp_bottom", "Bottom edge", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "warp_left", "Left edge", -100.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "warp_right", "Right edge", -100.0, 100.0, 1, 0, 0.0)
+        warp_tip = QLabel("Fine-tune converging buildings, signs, frames, and off-axis subjects. Reflected edges prevent empty wedges.")
+        warp_tip.setWordWrap(True)
+        warp_tip.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(warp_tip)
+
+        box, v = collapsible_group("Tilt-Shift / Diorama", layout, checked=False)
+        self._add_slider(v, "diorama_strength", "Blur strength", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "diorama_position", "Focus position", 0.0, 100.0, 1, 0, 50.0)
+        self._add_slider(v, "diorama_width", "Focus band width", 5.0, 90.0, 1, 0, 30.0)
+        self._add_slider(v, "diorama_angle", "Focus band angle", -45.0, 45.0, 1, 0, 0.0)
+        diorama_tip = QLabel("Places a rotatable sharp band through the scene and progressively blurs both sides.")
+        diorama_tip.setWordWrap(True)
+        diorama_tip.setStyleSheet("color:#777; font-size:11px;")
+        v.addWidget(diorama_tip)
 
         layout.addStretch(1)
         scroll.setWidget(inner)
@@ -3926,7 +3952,12 @@ class PhotoLab(QMainWindow):
             detail_keys = ["denoise_luminance", "denoise_chroma", "denoise_strength",
                            "denoise_detail", "denoise_method", "sharpen_intensity",
                            "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen"]
-            geo_keys = ["horizon", "distortion", "perspective", "crop", "ca_amount", "lens_auto"]
+            geo_keys = [
+                "horizon", "distortion", "perspective", "perspective_horizontal",
+                "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
+                "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
+                "crop", "ca_amount", "lens_auto",
+            ]
             local_keys = ["local_points", "gradients", "brush_masks"]
             fx_keys = ["clearview", "microcontrast", "vignette", "film_grain", "black_and_white",
                        "rotate_90", "hdr_look"]
@@ -4008,7 +4039,12 @@ class PhotoLab(QMainWindow):
             "detail": ["denoise_luminance", "denoise_chroma", "denoise_strength",
                        "denoise_detail", "denoise_method", "sharpen_intensity",
                        "sharpen_radius", "sharpen_threshold", "sharpen_detail", "output_sharpen"],
-            "geometry": ["horizon", "distortion", "perspective", "crop", "ca_amount", "lens_auto"],
+            "geometry": [
+                "horizon", "distortion", "perspective", "perspective_horizontal",
+                "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
+                "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
+                "crop", "ca_amount", "lens_auto",
+            ],
             "local": ["local_points", "gradients", "brush_masks"],
             "effects": ["clearview", "microcontrast", "vignette", "film_grain",
                         "black_and_white", "rotate_90", "hdr_look"],

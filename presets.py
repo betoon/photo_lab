@@ -35,7 +35,12 @@ PRESET_MODULE_FIELDS = {
         "sharpen_detail", "output_sharpen", "astro_stretch", "astro_bg_remove",
         "astro_star_emphasis",
     ),
-    "Geometry": ("horizon", "distortion", "perspective", "crop", "ca_amount", "lens_auto", "rotate_90"),
+    "Geometry": (
+        "horizon", "distortion", "perspective", "perspective_horizontal",
+        "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
+        "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
+        "crop", "ca_amount", "lens_auto", "rotate_90",
+    ),
     "Effects": ("clearview", "microcontrast", "vignette", "film_grain", "hdr_look"),
     "Local": ("local_points", "gradients", "brush_masks"),
 }

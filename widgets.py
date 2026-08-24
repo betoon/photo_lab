@@ -834,51 +834,38 @@ class ImageCanvas(QWidget):
             if bounds is not None:
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing)
                 x, y, gw, gh, ix0, iy0, sw, sh = bounds
-                phi = 1.618033988749895
                 _, _, c_box, c_arc = self._guide_colors()
                 pen_box = QPen(c_box, 1)
                 pen_arc = QPen(c_arc, 2)
-                # Starting orientation maps which corner the spiral grows from
+                # Draw one continuous logarithmic golden spiral. The previous
+                # shrinking-rectangle arc construction could become negative
+                # after a few turns, leaving a visibly incomplete curve.
                 orient = self.spiral_orient % 4
                 mirror = self.spiral_orient >= 4
-                sx, sy, rw, rh = x, y, gw, gh
-                for step in range(16):
-                    if rw < 4 or rh < 4:
-                        break
-                    painter.setPen(pen_box)
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.drawRect(int(round(sx)), int(round(sy)), int(round(rw)), int(round(rh)))
-                    painter.setPen(pen_arc)
-                    o = (orient + step) % 4
+                path = QPainterPath()
+                turns = 3.25
+                theta_max = turns * 2.0 * math.pi
+                phi = 1.618033988749895
+                points = 360
+                for index in range(points + 1):
+                    theta = theta_max * index / points
+                    radius = 0.47 * (phi ** (2.0 * theta / math.pi)) / (phi ** (2.0 * theta_max / math.pi))
+                    nx = 0.5 + radius * math.cos(theta)
+                    ny = 0.5 + radius * math.sin(theta)
                     if mirror:
-                        o = (4 - o) % 4
-                    # Qt arc: 0=3 o'clock, positive = counter-clockwise, unit = 1/16 degree
-                    if o == 0:  # square on left of remaining
-                        side = rh
-                        painter.drawArc(int(round(sx)), int(round(sy)),
-                                        int(round(side * 2)), int(round(side * 2)),
-                                        90 * 16, -90 * 16)
-                        sx += side
-                        rw -= side
-                    elif o == 1:  # square on top
-                        side = rw
-                        painter.drawArc(int(round(sx - side)), int(round(sy)),
-                                        int(round(side * 2)), int(round(side * 2)),
-                                        0, -90 * 16)
-                        sy += side
-                        rh -= side
-                    elif o == 2:  # square on right
-                        side = rh
-                        painter.drawArc(int(round(sx + rw - 2 * side)), int(round(sy - side)),
-                                        int(round(side * 2)), int(round(side * 2)),
-                                        270 * 16, -90 * 16)
-                        rw -= side
-                    else:  # square on bottom
-                        side = rw
-                        painter.drawArc(int(round(sx)), int(round(sy + rh - 2 * side)),
-                                        int(round(side * 2)), int(round(side * 2)),
-                                        180 * 16, -90 * 16)
-                        rh -= side
+                        nx = 1.0 - nx
+                    for _ in range(orient):
+                        nx, ny = 1.0 - ny, nx
+                    point = QPointF(x + nx * gw, y + ny * gh)
+                    if index == 0:
+                        path.moveTo(point)
+                    else:
+                        path.lineTo(point)
+                painter.setPen(pen_box)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(int(round(x)), int(round(y)), int(round(gw)), int(round(gh)))
+                painter.setPen(pen_arc)
+                painter.drawPath(path)
                 # Outer frame + move/resize handles
                 _, g_center, _, _ = self._guide_colors()
                 painter.setPen(QPen(g_center, 1, Qt.PenStyle.DashLine))

@@ -178,6 +178,16 @@ class Recipe:
     horizon: float = 0.0
     distortion: float = 0.0
     perspective: float = 0.0
+    perspective_horizontal: float = 0.0
+    warp_top: float = 0.0
+    warp_bottom: float = 0.0
+    warp_left: float = 0.0
+    warp_right: float = 0.0
+    wide_angle: float = 0.0
+    diorama_strength: float = 0.0
+    diorama_position: float = 50.0
+    diorama_width: float = 30.0
+    diorama_angle: float = 0.0
     crop: Optional[Tuple[float, float, float, float]] = field(default=None)
 
     clearview: float = 0.0
@@ -624,6 +634,74 @@ def apply_perspective(img, amount):
         dst = np.float32([[0, 0], [w, 0], [inset, h], [w - inset, h]])
     M = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+
+
+def apply_advanced_geometry(img, horizontal=0.0, top=0.0, bottom=0.0,
+                            left=0.0, right=0.0):
+    """Four-edge projective warp; values are signed percentages (-100..100)."""
+    values = (horizontal, top, bottom, left, right)
+    if all(abs(float(v)) < 1e-4 for v in values):
+        return img
+    h, w = img.shape[:2]
+    # Keep corners inside a conservative 35% envelope so the homography cannot
+    # fold over itself. Horizontal perspective moves the left/right edges in
+    # opposite vertical directions; the four edge values provide fine control.
+    scale_x, scale_y = w * 0.0035, h * 0.0035
+    hp = float(horizontal) * scale_y
+    t, b = float(top) * scale_x, float(bottom) * scale_x
+    l, r = float(left) * scale_y, float(right) * scale_y
+    clamp_x = lambda value: float(np.clip(value, 0.0, w - 1.0))
+    clamp_y = lambda value: float(np.clip(value, 0.0, h - 1.0))
+    dst = np.float32([
+        [clamp_x(t), clamp_y(l + hp)],
+        [clamp_x(w - 1 + t), clamp_y(r - hp)],
+        [clamp_x(w - 1 + b), clamp_y(h - 1 + r - hp)],
+        [clamp_x(b), clamp_y(h - 1 + l + hp)],
+    ])
+    src = np.float32([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])
+    matrix = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(img, matrix, (w, h), flags=cv2.INTER_CUBIC,
+                               borderMode=cv2.BORDER_REFLECT_101)
+
+
+def apply_wide_angle_stretch(img, amount):
+    """Adjust horizontal edge stretching without changing the canvas size."""
+    amount = float(np.clip(amount, -100.0, 100.0))
+    if abs(amount) < 1e-4:
+        return img
+    h, w = img.shape[:2]
+    x = np.linspace(-1.0, 1.0, w, dtype=np.float32)
+    strength = abs(amount) / 100.0 * 1.5
+    curved = np.arctan(strength * x) / max(np.arctan(strength), 1e-6)
+    if amount < 0:
+        # Approximate inverse: stretch the center and compress the outer edges.
+        curved = np.tan(np.arctan(strength) * x) / max(strength, 1e-6)
+    map_x = ((curved + 1.0) * 0.5 * (w - 1))[None, :].repeat(h, axis=0).astype(np.float32)
+    map_y = np.arange(h, dtype=np.float32)[:, None].repeat(w, axis=1)
+    return cv2.remap(img, map_x, map_y, cv2.INTER_CUBIC,
+                     borderMode=cv2.BORDER_REFLECT_101)
+
+
+def apply_diorama(img, strength=0.0, position=50.0, width=30.0, angle=0.0):
+    """Blend a soft tilt-shift blur outside a rotatable in-focus band."""
+    amount = float(np.clip(strength, 0.0, 100.0)) / 100.0
+    if amount <= 1e-4:
+        return img
+    h, w = img.shape[:2]
+    sigma = 0.8 + amount * 11.0
+    blurred = cv2.GaussianBlur(img, (0, 0), sigmaX=sigma, sigmaY=sigma)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    cx, cy = (w - 1) * 0.5, (h - 1) * float(np.clip(position, 0, 100)) / 100.0
+    theta = np.deg2rad(float(angle))
+    distance = np.abs(-(xx - cx) * np.sin(theta) + (yy - cy) * np.cos(theta))
+    half_band = max(1.0, min(h, w) * float(np.clip(width, 5, 90)) / 200.0)
+    feather = max(2.0, min(h, w) * 0.12)
+    mask = np.clip((distance - half_band) / feather, 0.0, 1.0)
+    mask = (mask * mask * (3.0 - 2.0 * mask) * amount)[..., None]
+    out = img.astype(np.float32) * (1.0 - mask) + blurred.astype(np.float32) * mask
+    if np.issubdtype(img.dtype, np.integer):
+        return np.clip(out, 0, np.iinfo(img.dtype).max).astype(img.dtype)
+    return out.astype(img.dtype)
 
 
 def apply_crop(img, crop):
@@ -1629,8 +1707,20 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
         img_bgr = np.rot90(img_bgr, rot).copy()
     img_bgr = apply_distortion(img_bgr, r.distortion)
     img_bgr = apply_perspective(img_bgr, r.perspective)
+    img_bgr = apply_advanced_geometry(
+        img_bgr,
+        getattr(r, "perspective_horizontal", 0.0),
+        getattr(r, "warp_top", 0.0), getattr(r, "warp_bottom", 0.0),
+        getattr(r, "warp_left", 0.0), getattr(r, "warp_right", 0.0),
+    )
+    img_bgr = apply_wide_angle_stretch(img_bgr, getattr(r, "wide_angle", 0.0))
     img_bgr = apply_horizon(img_bgr, r.horizon)
     img_bgr = apply_crop(img_bgr, r.crop)
+    img_bgr = apply_diorama(
+        img_bgr, getattr(r, "diorama_strength", 0.0),
+        getattr(r, "diorama_position", 50.0), getattr(r, "diorama_width", 30.0),
+        getattr(r, "diorama_angle", 0.0),
+    )
     img_bgr = apply_denoise(
         img_bgr, r.denoise_luminance, r.denoise_chroma, r.denoise_strength,
         detail_preserve=getattr(r, 'denoise_detail', 50.0),

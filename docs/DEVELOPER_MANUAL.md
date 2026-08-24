@@ -395,7 +395,10 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 
 ### Geometry (#8)
 
-- `apply_keystone` — 4-corner perspective from normalized TL,TR,BR,BL
+- `apply_perspective` — vertical keystone correction
+- `apply_advanced_geometry` — horizontal perspective plus independent four-edge projective warp
+- `apply_wide_angle_stretch` — horizontal nonlinear remap for wide-angle edge control
+- `apply_diorama` — rotatable, feathered selective-focus band
 - `detect_horizon_angle` — Hough near-horizontal edges
 - `probe_lensfun` / `try_lensfun_correct` — status + strength blend
 - Canvas: `keystone_mode`, `keystoneChanged`
