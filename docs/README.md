@@ -1,5 +1,17 @@
 # PhotoLab — DxO-inspired photo editor (Python)
 
+## Documentation set
+
+- `USER_MANUAL.md` — in-app and printable end-user guide.
+- `DEVELOPER_MANUAL.md` — architecture, testing, packaging, and extension annex.
+- `PhotoLab_User_Manual_with_Developer_Annex.pdf` — combined printable manual.
+- `PACKAGING.md` — portable-build notes.
+- `ROADMAP.md` — completed work and future candidates.
+
+Display and camera profiling require an external ArgyllCMS installation plus measurement hardware or reference-chart files.
+
+The Help menu reads the Markdown manuals directly. Update them whenever controls, shortcuts, formats, sidecar fields, dependencies, or processing order change.
+
 ## Layout (from DxO PhotoLab)
 - **Left:** Histogram (R/G/B/L toggles) · Move/Zoom navigator · Advanced History
 - **Center:** Large preview with zoom/pan/crop/compare

@@ -244,7 +244,43 @@ Export → ExportWorker → load full → apply_recipe → watermark → imwrite
 
 - **Required:** Python 3.10+, PyQt6, NumPy, OpenCV, Pillow  
 - **RAW:** rawpy  
-- **Optional:** lensfunpy (optics auto-correct)  
+- **RAW metadata fallback:** ExifRead (recommended for NEF and other containers Pillow cannot open)
+- **Optional:** lensfunpy (optics auto-correct), send2trash, pygame, ffmpeg
+
+## GPS metadata and map workflow
+
+`imaging.extract_exif` first uses Pillow and then performs a best-effort ExifRead pass when GPS was not found. This fallback reads metadata IFDs without decoding sensor pixels. `extract_gps` normalizes DMS ratios to signed decimal degrees. Keep metadata extraction independent of RAW decode success.
+
+The Metadata panel updates its red/green GPS indicator from `meta_cache`. The bulk action scans filmstrip paths, selects only geotagged items, and passes those paths to `MapDialog`. `map_view.py` writes a temporary Leaflet document; map tiles are loaded from OpenStreetMap, while PhotoLab does not upload the image files.
+
+## Color Calibration Studio
+
+`color_calibration.py` is a PyQt wrapper around ArgyllCMS, not a replacement color engine. Pure helpers locate executables, build deterministic argument lists, and validate ICC files with Pillow ImageCms. `ColorCalibrationDialog` exposes:
+
+- display profiling through interactive `dispcal -o`, with display, white-point, luminance, gamma, and quality targets;
+- camera chart recognition through `scanin`, followed by matrix/shaper input-profile creation through `colprof`;
+- ICC validation and confirmed operating-system installation through `dispwin -I`.
+
+Display calibration opens a separate console because Argyll's instrument workflow is interactive. Camera profiling uses `QProcess`, merges output channels into the visible log, and sequences `colprof` only after successful chart recognition. Never mark a profile successful solely because a process exited: require the expected ICC file and validate it.
+
+Profile installation is a material external-state change and must remain behind explicit confirmation. Keep generated calibration/profile files in user-selected locations. ArgyllCMS is an external executable dependency and is not bundled by PyInstaller.
+
+## SD-card import
+
+`SdImportWorker` recursively enumerates supported image/video extensions, copies to a user-selected destination, optionally preserves relative card folders, skips identical destination files, and creates unique names for collisions. It emits progress and supports cooperative cancellation. Keep import copy-only unless a separately confirmed move workflow is introduced; a card should never be erased by PhotoLab.
+
+## White-balance invariant
+
+rawpy output rendered with camera white balance already has the camera multipliers baked into RGB. `meta["wb_baked"]` prevents `apply_recipe` from multiplying by `camera_whitebalance` a second time. Recipe temperature/tint are creative offsets. Preset parsing must preserve as-shot WB unless a preset explicitly declares absolute white balance. Pipeline reordering requires golden-image and preset/WB regression tests.
+
+## Release checklist
+
+1. Review the Git diff and preserve unrelated user changes.
+2. Run the complete test suite with a repository-local temporary directory.
+3. Open representative RGB, RAW, DNG, and embedded-preview-fallback files.
+4. Verify as-shot WB, presets, masks, sidecar reload, SD import, GPS selection/map, and full-resolution export.
+5. Build the portable package and confirm manuals, presets, Lensfun data, and companion applications resolve correctly.
+6. Update both manuals and the roadmap; commit/push only when explicitly requested.
 
 ---
 

@@ -15,6 +15,10 @@ PhotoLab is a non-destructive photo editor inspired by applications such as DxO 
 
 **Open Folder** only fills the Develop filmstrip. It does **not** add photos to the Library catalog.
 
+### Import from an SD card
+
+Choose **File → Import from SD Card…**, then choose the card/camera folder as the source and a normal local folder as the destination. PhotoLab discovers supported photos and videos, skips identical files already copied, gives safe unique names to collisions, and can preserve the card's folder structure. The progress dialog can cancel the remaining copies. Verify the import and backup before formatting a card.
+
 ---
 
 ## Develop vs Library
@@ -57,6 +61,15 @@ PhotoLab is a non-destructive photo editor inspired by applications such as DxO 
 ### Metadata
 
 - **I** or **View → Image Metadata…** — path, size, camera, lens, exposure, dates, and other tags  
+
+The Metadata panel also shows GPS availability:
+
+- A **green dot** means valid coordinates are present; **Map this photo** opens that location.
+- A **red dot** means no coordinates were found.
+- **Select GPS photos & show map** scans the filmstrip, selects geotagged images, and opens the map list.
+- The browser map uses Leaflet/OpenStreetMap and needs internet access for map tiles.
+
+RAW metadata is read independently of sensor decoding when possible, so camera and GPS fields may remain available even when a new RAW compression requires a newer LibRaw build.
 
 ### Filmstrip filters & multi-select
 
@@ -250,6 +263,8 @@ Also: `pip install lensfunpy`. **Test match…** in Geometry shows which DB path
 - Horizon angle, Distortion, Perspective  
 - **Level horizon (L):** drag a line along the real horizon; angle is applied for you  
 - Or use the **Level: draw line on image** button under Geometry → Horizon  
+- **Auto level** uses Hough edge detection as a starting suggestion
+- **Keystone (4 corners)** lets you drag TL/TR/BR/BL handles directly on the image
 - **Show grid** — rule of thirds + center crosshair  
 - **Fibonacci / golden spiral** — composition guide  
   - Drag center handle to move  
@@ -267,66 +282,6 @@ Also: `pip install lensfunpy`. **Test match…** in Geometry shows which DB path
 - Black & white  
 - HDR Look (single-image HDR-style tone mapping)  
 - Rotate 90°  
-
----
-
-## Batch tools
-
-- **Apply Preset to Selected…** — load one JSON/XMP preset onto all selected filmstrip/library images (writes sidecars)  
-- **Batch Rename / Move…** — rename patterns (`keep`, date+seq, date+orig), optional destination folder; **catalog paths update**  
-- **Export queue** (survives restart; stored in `~/.photolab/export_queue.json`):  
-  - **Add Selected to Export Queue**  
-  - **View Export Queue…**  
-  - **Process Export Queue…**  
-
-Import also accepts an optional **default preset** applied to every imported file.
-
-## Import & culling
-
-### Import Photos (Ctrl+Shift+I)
-
-- Choose **source** and **destination** folders  
-- **Copy** or **Move**  
-- Rename: keep names, `YYYYMMDD_0001`, or `YYYYMMDD_original`  
-- Optional **Year / YYYY-MM-DD** subfolders  
-- Optionally scan into Library and open the destination when done  
-
-### Culling Mode (F7)
-
-Full-screen review of the filmstrip (or library selection):
-
-| Key | Action |
-|-----|--------|
-| ← → / Space | Previous / next |
-| 0–5 | Rating |
-| X | Reject toggle |
-| U | Pick toggle |
-| Esc | Exit |
-
-## Library catalog
-
-- **Collections** — create, add selected photos, browse members  
-- **People / faces** — comma-separated person tags (saved on selected thumbs)  
-- **Find duplicates** — groups images with the same content fingerprint (built at scan)  
-- **Virtual copy** — stores a named recipe clone of the current Develop image in the catalog  
-
-## Lensfun database
-
-Place the Lensfun XML database next to the app, for example:
-
-- `photo_lab/lensfun/`
-- `photo_lab/lensfun/data/db/`
-- `photo_lab/lensfun/version_1/`
-
-Also: `pip install lensfunpy`. **Test match…** in Geometry shows which DB path was used.
-
-## Geometry
-
-- **Horizon** — angle slider, **Draw level line**, or **Auto level** (Hough edge detection)  
-- **Perspective** — vertical + horizontal trapezoid sliders  
-- **Keystone (4 corners)** — drag TL/TR/BR/BL handles on the image  
-- **Lensfun** — enable correction, strength slider, **Test match…** shows camera/lens resolution from EXIF  
-- **Distortion**, crop, CA as before  
 
 ## Local adjustments
 
@@ -487,6 +442,8 @@ Edits are non-destructive **recipes**.
 - Prefer original camera RAW files; partial “Copy” NEFs often fail to decode.  
 - Library and Develop are separate workflows—scan only when you want catalog features.  
 - Use the **Debug Console** (View menu) if something misbehaves.
+- If a RAW sensor decode is unsupported, PhotoLab may open the full embedded JPEG and labels the fallback clearly. It remains editable, but it does not provide true RAW highlight recovery or 16-bit sensor latitude.
+- DNG is an openly documented container, but vendor-specific compression and tags can still require a newer rawpy/LibRaw version.
 
 ---
 
@@ -532,6 +489,27 @@ PhotoLab is an open, Python-based editor. It aims for a DxO-like workflow withou
 
 - **Help → Report a Problem…** (also on the Debug Console) saves a text report with system info, the last 50 log-file lines, and the Debug Console buffer. The report is also copied to the clipboard.
 - RAW failures show clearer messages (partial file, unsupported compression, camera-specific tips) instead of a bare path error.
+
+## Color Calibration Studio
+
+Open **Tools → Color Calibration Studio…** for measurement-based color profiling. PhotoLab uses the external, open-source ArgyllCMS tools; it does not attempt visual software-only calibration.
+
+### Display calibration
+
+1. Install ArgyllCMS and choose its `bin` folder if PhotoLab does not find it automatically.
+2. Connect a supported colorimeter or spectrophotometer and warm the display for about 30 minutes.
+3. Disable Night Light, HDR, automatic brightness, and competing calibration loaders.
+4. Choose the display, white point, brightness, response curve, quality, and output name.
+5. Select **Start guided display calibration…** and follow Argyll's measured prompts.
+6. In **ICC profiles**, validate the result and optionally install it for the selected display. Installation requires confirmation because it changes the operating-system profile.
+
+For a typical dim-to-moderate editing room, D65, gamma 2.2, and about 100-120 cd/m² are reasonable starting targets. Print-matching environments may use D50 and brightness chosen to match controlled viewing light.
+
+### Camera chart profile
+
+Use an evenly lit, glare-free photograph of a supported color chart. Provide the Argyll `.cht` recognition layout and corresponding reference-values file. A neutral TIFF converted from RAW with automatic and creative corrections disabled is preferred. **Build camera ICC profile** runs `scanin` followed by `colprof`; review the Delta E fit report in the log before using the result.
+
+Camera profiles are specific to the camera response and lighting spectrum. Create separate profiles for materially different illuminants when accuracy matters.
 
 
 

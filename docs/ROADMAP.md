@@ -7,21 +7,22 @@ Tracked suggestions so nothing is lost. Status is updated as items ship.
 | 1 | Preview | Proxy pipeline (persistent downscale) + recipe-hash cache; optional GPU later | **Done** (proxy + cache; GPU deferred) |
 | 2 | Filmstrip | Multi-select rating/reject/pick; color labels; solo/compare selected; keyboard nav respects filter | **Done** |
 | 3 | History | Persist named snapshots with sidecar; visual before/after per history entry; copy settings from history entry | **Done** |
-| 4 | Soft-proof | Real ICC soft-proof when profile present; gamut %; simulate paper white | Pending |
-| 5 | Local | Control-point luminance range; brush flow/opacity; mask subtract/intersect; optional offline AI subject mask | Pending |
-| 6 | Tone/Color | Full parametric + point curve; split-toning; per-channel RGB curves; match exposure/WB across selection | Pending |
-| 7 | Detail | Print/screen sharpen presets from output PPI; dual-illuminant WB UI; protect skin tones | Pending |
-| 8 | Geometry | Interactive 4-corner keystone; auto level from EXIF/edges; clearer Lensfun match UI | Pending |
-| 9 | Catalog | Saved collections/smart collections; face keywords; duplicate detection; virtual copies | Pending |
-| 10 | Import/culling | Import dialog (copy/move/rename/preset); full-screen culling mode | Pending |
-| 11 | Batch | Apply preset to selected; batch rename/move; export queue on disk | Pending |
-| 12 | Stack/Pano | Alignment confidence UI; exclude bad frames; exposure/WB match before stitch; order-by-time helper | Pending |
-| 13 | HDR | Bracket detection from EXIF; deghosting strength; optional Debevec path | Pending |
-| 14 | Pan Video | Preview-only re-render; ETA; pass current recipe grade from PhotoLab | Pending |
-| 15 | Diagnostics | Exportable problem report (debug log + system info); clearer RAW failure messages | Pending |
-| 16 | Perf/memory | Clear cache command; limit concurrent workers; optional 16-bit internal path | Pending |
-| 17 | Packaging | One-click / portable build; optional update check | Pending (foundation: app_paths + docs/plugin data) |
-| 18 | Quality | Golden-image tests for apply_recipe; Recipe/catalog unit tests | Pending |
+| 4 | Soft-proof | Real ICC soft-proof when profile present; gamut %; simulate paper white | **Done** |
+| 5 | Local | Luminance/color range, flow/opacity, overlays, feather/edge refinement, subtract/intersect, offline subject mask | **Done** |
+| 6 | Tone/Color | Parametric + point curve; split-toning; RGB curves; match exposure/WB | **Done** |
+| 7 | Detail | Output-PPI sharpening, dual-illuminant WB, skin protection | **Done** |
+| 8 | Geometry | Four-corner keystone, auto level, Lensfun match UI | **Done** |
+| 9 | Catalog | Collections, smart filters, people tags, duplicates, virtual copies | **Done** |
+| 10 | Import/culling | Import workflow, SD-card import, full-screen culling | **Done** |
+| 11 | Batch | Preset application, rename/move, persistent export queue | **Done** |
+| 12 | Stack/Pano | Confidence/exclusion, exposure/WB matching, order-by-time | **Done** |
+| 13 | HDR | Bracket detection, deghosting, Debevec option | **Done** |
+| 14 | Pan Video | Live/test preview, ETA, PhotoLab recipe handoff | **Done** |
+| 15 | Diagnostics | Problem report, logs/system info, RAW failure guidance | **Done** |
+| 16 | Perf/memory | Cache clearing, bounded workers, optional 16-bit decode/export path | **Done** |
+| 17 | Packaging | Portable build, bundled resources, update link | **Done** |
+| 18 | Quality | Golden-image, Recipe, catalog, mask, import, and RAW regression tests | **Done** |
+| 19 | Calibration | Argyll-backed display profiling, camera chart profiling, ICC validation/install workflow | **Done** |
 
 ## Extra (this session)
 
@@ -38,3 +39,14 @@ Tracked suggestions so nothing is lost. Status is updated as items ship.
 - app_paths.plugin_dir / docs_dir work under PyInstaller _MEIPASS
 
 When implementing the next item, mark its status here and update USER/DEVELOPER manuals.
+
+## Future candidates
+
+- Optional GPU acceleration with a CPU reference path.
+- Higher-fidelity camera/input profiles and a wide-gamut linear working pipeline.
+- Pluggable modern denoise/demosaic backends with clear offline licensing.
+- Background GPS indexing and optional filmstrip GPS badges for very large folders.
+- Embedded/offline map options with explicit privacy and tile-cache controls.
+- Panorama projection, seam, exposure-compensation, and manual control-point tools.
+- Versioned plugin API and automated packaged-application smoke tests.
+- Accessibility pass for scalable type, keyboard traversal, screen readers, and color-safe overlays.

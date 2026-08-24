@@ -32,6 +32,7 @@ _DEFAULTS: Dict[str, Dict[str, str]] = {
         "ffmpeg": "",
         "export_default_dir": "",
         "scripts_dir": "",
+        "argyllcms_dir": "",
     },
     "performance": {
         "max_raw_workers": "2",

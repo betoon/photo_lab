@@ -5,7 +5,9 @@ numpy>=1.24
 Pillow>=10.0
 rawpy>=0.19
 pydub>=0.25
+ExifRead>=3.0
 
 # Optional
 # lensfunpy>=1.0   # Lensfun geometry correction
 # pygame>=2.5      # audio_editor.py playback
+# send2trash>=1.8  # Recycle-bin integration for Library trash

@@ -14,6 +14,7 @@ Notes
 * docs/ and plugin/ are bundled via datas so Help and presets work offline.
 * ffmpeg is NOT bundled (license / size). Install system-wide or place
   ffmpeg.exe next to PhotoLab.exe for Panorama-to-Video.
+* ArgyllCMS is NOT bundled. Color Calibration Studio locates an external install.
 * One-file builds work but start slower; one-folder is recommended.
 """
 
@@ -59,6 +60,7 @@ hiddenimports = [
     "pano_video",
     "audio_editor",
     "qt_utils",
+    "color_calibration",
 ]
 
 a = Analysis(

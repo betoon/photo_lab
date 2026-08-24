@@ -896,6 +896,8 @@ class PhotoLab(QMainWindow):
             "QMenu::item:selected { background:#2a6ad4; color:#fff; }"
             "QMenu::separator { height:1px; background:#444; margin:4px 8px; }"
         )
+        tools_menu.addAction("Color Calibration Studio…", self.open_color_calibration_studio)
+        tools_menu.addSeparator()
         tools_menu.addAction("Merge HDR…", self.merge_hdr_selected)
         tools_menu.addAction("Focus Stack…", self.focus_stack_selected)
         tools_menu.addAction("Panorama…", self.panorama_selected)
@@ -4089,6 +4091,12 @@ class PhotoLab(QMainWindow):
             self.statusBar().showMessage("Audio Editor opened")
         except Exception as e:
             QMessageBox.warning(self, "Audio Editor", str(e))
+
+    def open_color_calibration_studio(self):
+        """Open measured display/camera profiling backed by ArgyllCMS."""
+        from color_calibration import ColorCalibrationDialog
+        dlg = ColorCalibrationDialog(self)
+        dlg.exec()
 
 
 
