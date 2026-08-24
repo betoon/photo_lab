@@ -220,11 +220,16 @@ class SliderRow(QWidget):
         self.scale = 10 ** decimals
         self._on_change = on_change
         layout = QGridLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setContentsMargins(0, 2, 4, 2)
         layout.setColumnStretch(0, 1)
         layout.setSpacing(4)
         name_label = QLabel(label)
         name_label.setStyleSheet("color: #ccc; font-size: 12px;")
+        # Do not let a long correction name enlarge the whole scroll-page
+        # beyond its viewport and carry the spin buttons off-screen.
+        name_label.setMinimumWidth(0)
+        name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        name_label.setToolTip(str(label))
         layout.addWidget(name_label, 0, 0)
         self.spin = ArrowDoubleSpinBox()
         self.spin.setRange(lo, hi)
@@ -235,9 +240,10 @@ class SliderRow(QWidget):
         # paint the text beneath the step arrows.  Keep enough room for the
         # editable value and the arrow-button gutter while still allowing a
         # layout to make the field wider when space is available.
-        # 128 px leaves a generous value editor plus the 23 px arrow gutter,
-        # while remaining inside narrow local-adjustment and HSL panels.
-        self.spin.setFixedWidth(128)
+        # Keep the complete editor plus its 23 px arrow gutter inside the
+        # narrowest correction-panel viewport (about 346 px on Windows).
+        # 100 px still fits signed/decimal values and a 5500 K temperature.
+        self.spin.setFixedWidth(100)
         self.spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.spin.setAlignment(Qt.AlignmentFlag.AlignRight)
         # Windows can arrange styled spin buttons side-by-side and otherwise
