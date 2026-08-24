@@ -406,6 +406,7 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
     meta = {"is_raw": False, "wb_multipliers": None, "wb_baked": False,
             "decode_bps": decode_bps}
     img_bgr = None
+    raw_failure = None
     if is_raw(path):
         try:
             import rawpy
@@ -480,6 +481,7 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                     except Exception:
                         pass
         except Exception as e:
+            raw_failure = e
             err = str(e)
             print(f"rawpy failed for {path}: {e}")
             # Retry only for libraw ordering / transient errors — not for true unsupported files
@@ -503,13 +505,14 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                             except Exception:
                                 pass
                 except Exception as e2:
+                    raw_failure = e2
                     print(f"rawpy retry failed for {path}: {e2}")
     if img_bgr is None:
         if is_raw(path):
             # Don't fall back to cv2.imread() for RAW files — OpenCV's TIFF
             # reader can't parse the sensor IFD in NEF/CR2/etc. and will
             # just spew misleading TIFF warnings/errors before failing anyway.
-            raise RuntimeError(f"Could not decode RAW file: {path}")
+            raise RuntimeError(format_raw_error(path, raw_failure))
         flags = cv2.IMREAD_UNCHANGED if decode_bps == 16 else cv2.IMREAD_COLOR
         img_bgr = _silent_imread(path, flags)
         if img_bgr is None:

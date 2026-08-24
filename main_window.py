@@ -355,6 +355,7 @@ class PhotoLab(QMainWindow):
         self._preview_renderer.start()
 
         self._load_worker = None
+        self._pending_load_path = None
         self.sliders: dict[str, SliderRow] = {}
         self._history_push_pending = False
         self._local_mode = False
@@ -2778,10 +2779,14 @@ class PhotoLab(QMainWindow):
         self.current_path = path
         self.statusBar().showMessage(f"Loading {os.path.basename(path)}…")
         if self._load_worker is not None and self._load_worker.isRunning():
-            try:
-                self._load_worker.terminate()
-            except Exception:
-                pass
+            # Never terminate LibRaw mid-decode. Keep only the latest selection
+            # queued and start it as soon as the active decode exits cleanly.
+            self._pending_load_path = path
+            self.statusBar().showMessage(f"Queued {os.path.basename(path)}…")
+            return
+        self._start_image_load(path)
+
+    def _start_image_load(self, path: str):
         try:
             from config import get_config
             working_bps = 16 if get_config().get_bool("performance", "use_16bit_pipeline", False) else 8
@@ -2790,7 +2795,20 @@ class PhotoLab(QMainWindow):
         self._load_worker = LoadImageWorker(path, output_bps=working_bps)
         self._load_worker.loaded.connect(self._on_image_loaded)
         self._load_worker.failed.connect(self._on_image_failed)
+        self._load_worker.finished.connect(self._on_load_worker_finished)
         self._load_worker.start()
+
+    def _on_load_worker_finished(self):
+        worker = self.sender()
+        if worker is self._load_worker:
+            self._load_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        pending = self._pending_load_path
+        self._pending_load_path = None
+        if pending and pending == self.current_path:
+            self.statusBar().showMessage(f"Loading {os.path.basename(pending)}…")
+            self._start_image_load(pending)
 
     def _on_image_loaded(self, path, img, meta):
         if path != self.current_path:
@@ -2830,6 +2848,7 @@ class PhotoLab(QMainWindow):
     def _on_image_failed(self, path, err):
         if path == self.current_path:
             self.statusBar().showMessage(f"Failed: {err}")
+            QMessageBox.warning(self, "Could not open RAW image", err)
 
     # ------------------------------------------------------------------
     def sync_sliders_to_recipe(self):
