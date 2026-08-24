@@ -90,7 +90,8 @@ def order_paths_by_capture_time(paths: List[str]) -> List[str]:
     return [p for _dt, _n, p in keyed]
 
 
-def match_exposure_wb(images: List[np.ndarray], ref_idx: int = 0) -> List[np.ndarray]:
+def match_exposure_wb(images: List[np.ndarray], ref_idx: int = 0,
+                      strength: float = 1.0) -> List[np.ndarray]:
     """Simple per-channel gain match toward the reference frame (mean RGB).
 
     Helps OpenCV stitch when brackets or auto-exposure drifted between frames.
@@ -98,20 +99,61 @@ def match_exposure_wb(images: List[np.ndarray], ref_idx: int = 0) -> List[np.nda
     if not images or ref_idx < 0 or ref_idx >= len(images):
         return images
     ref = images[ref_idx].astype(np.float32)
-    ref_mean = ref.reshape(-1, ref.shape[-1]).mean(axis=0) + 1e-3
+    ref_mean = np.median(ref.reshape(-1, ref.shape[-1]), axis=0) + 1e-3
+    amount = float(np.clip(strength, 0.0, 1.0))
     out = []
     for i, img in enumerate(images):
         if i == ref_idx:
             out.append(img)
             continue
         x = img.astype(np.float32)
-        mean = x.reshape(-1, x.shape[-1]).mean(axis=0) + 1e-3
+        mean = np.median(x.reshape(-1, x.shape[-1]), axis=0) + 1e-3
         gains = ref_mean / mean
         # Soften extreme gains
         gains = np.clip(gains, 0.5, 2.0)
+        gains = 1.0 + (gains - 1.0) * amount
         y = np.clip(x * gains, 0, 255).astype(np.uint8)
         out.append(y)
     return out
+
+
+def analyze_panorama_sequence(paths: List[str], max_dim: int = 900) -> dict:
+    """Estimate adjacent-frame overlap and homography confidence with ORB."""
+    if len(paths) < 2:
+        raise ValueError("Need at least 2 panorama frames")
+    images = [load_pano_frame(path, max_dim=max_dim) for path in paths]
+    orb = cv2.ORB_create(nfeatures=1800)
+    pairs = []
+    for index in range(len(images) - 1):
+        left = cv2.cvtColor(images[index], cv2.COLOR_BGR2GRAY)
+        right = cv2.cvtColor(images[index + 1], cv2.COLOR_BGR2GRAY)
+        kp1, des1 = orb.detectAndCompute(left, None)
+        kp2, des2 = orb.detectAndCompute(right, None)
+        good, inliers = [], 0
+        if des1 is not None and des2 is not None:
+            # Mutual nearest-neighbour matching is dependable on panorama strips,
+            # including repeated detail where a strict ratio test rejects too much.
+            matches = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True).match(des1, des2)
+            matches = sorted(matches, key=lambda match: match.distance)
+            if matches:
+                cutoff = max(28.0, min(64.0, float(np.median([m.distance for m in matches]))))
+                good = [match for match in matches[:300] if match.distance <= cutoff]
+            if len(good) >= 4:
+                src = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+                dst = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+                _matrix, mask = cv2.findHomography(src, dst, cv2.RANSAC, 4.0)
+                inliers = int(mask.sum()) if mask is not None else 0
+        ratio = float(inliers / max(len(good), 1))
+        score = float(np.clip((inliers / 35.0) * ratio, 0.0, 1.0))
+        pairs.append({
+            "left_index": index, "right_index": index + 1,
+            "features_left": len(kp1), "features_right": len(kp2),
+            "matches": len(good), "inliers": inliers,
+            "inlier_ratio": ratio, "score": score,
+            "quality": "good" if score >= 0.55 else "fair" if score >= 0.25 else "weak",
+        })
+    return {"frames": len(paths), "pairs": pairs,
+            "weak_pairs": sum(pair["quality"] == "weak" for pair in pairs)}
 
 
 def stitch_panorama(
@@ -121,6 +163,11 @@ def stitch_panorama(
     try_use_gpu: bool = False,
     match_exposure: bool = True,
     order_by_time: bool = False,
+    exposure_reference: int = 0,
+    exposure_strength: float = 1.0,
+    confidence_threshold: float = 1.0,
+    wave_correction: bool = True,
+    crop_borders: bool = True,
     progress_cb=None,
 ) -> Tuple[np.ndarray, dict]:
     """
@@ -149,10 +196,17 @@ def stitch_panorama(
 
     if match_exposure and len(images) >= 2:
         prog("Matching exposure / WB…", 0.32)
-        images = match_exposure_wb(images, ref_idx=0)
+        images = match_exposure_wb(
+            images, ref_idx=int(np.clip(exposure_reference, 0, len(images) - 1)),
+            strength=exposure_strength,
+        )
 
     prog("Stitching (OpenCV)…", 0.4)
     stitcher = _make_stitcher(mode)
+    if hasattr(stitcher, "setPanoConfidenceThresh"):
+        stitcher.setPanoConfidenceThresh(float(confidence_threshold))
+    if hasattr(stitcher, "setWaveCorrection"):
+        stitcher.setWaveCorrection(bool(wave_correction and mode != "scans"))
     # try_use_gpu is ignored on most CPU builds; kept for future
     try:
         status, pano = stitcher.stitch(images)
@@ -170,6 +224,11 @@ def stitch_panorama(
         "paths": list(ordered),
         "match_exposure": bool(match_exposure),
         "order_by_time": bool(order_by_time),
+        "exposure_reference": int(exposure_reference),
+        "exposure_strength": float(exposure_strength),
+        "confidence_threshold": float(confidence_threshold),
+        "wave_correction": bool(wave_correction),
+        "crop_borders": bool(crop_borders),
         "projection_note": (
             "OpenCV Stitcher_PANORAMA uses a spherical-like projection for wide "
             "horizons; SCANS is closer to a planar/cylindrical flat-copy. "
@@ -192,7 +251,8 @@ def stitch_panorama(
 
     # Crop mostly-black borders from the warped canvas
     prog("Cropping borders…", 0.9)
-    pano = _crop_black_borders(pano)
+    if crop_borders:
+        pano = _crop_black_borders(pano)
     report["result_size"] = [int(pano.shape[1]), int(pano.shape[0])]
     prog("Done", 1.0)
     return pano, report

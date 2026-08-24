@@ -449,7 +449,9 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 ### Stack / Pano (#12)
 
 - `focus_stack(..., min_align_score=)` excludes weak alignments; report has scores/excluded/used_indices
-- `panorama.match_exposure_wb`, `order_paths_by_capture_time`
+- `panorama.match_exposure_wb(..., ref_idx=, strength=)` uses robust channel medians and a softened correction
+- `analyze_panorama_sequence` uses ORB mutual matching plus RANSAC homography inliers to score adjacent overlap
+- `order_paths_by_capture_time`; the UI and `PanoramaWorker` now forward ordering, matching, reference, strength, confidence, wave-correction, and crop controls to the engine
 - UI report dialogs + `_match_style_from_source`
 
 

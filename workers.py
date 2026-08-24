@@ -528,12 +528,22 @@ class PanoramaWorker(QThread):
     failed = pyqtSignal(str)
     progress = pyqtSignal(str)
 
-    def __init__(self, paths, out_path, mode="panoramas", max_dim=0):
+    def __init__(self, paths, out_path, mode="panoramas", max_dim=0,
+                 match_exposure=True, order_by_time=False, exposure_reference=0,
+                 exposure_strength=1.0, confidence_threshold=1.0,
+                 wave_correction=True, crop_borders=True):
         super().__init__()
         self.paths = list(paths)
         self.out_path = out_path
         self.mode = mode
         self.max_dim = max_dim
+        self.match_exposure = bool(match_exposure)
+        self.order_by_time = bool(order_by_time)
+        self.exposure_reference = int(exposure_reference)
+        self.exposure_strength = float(exposure_strength)
+        self.confidence_threshold = float(confidence_threshold)
+        self.wave_correction = bool(wave_correction)
+        self.crop_borders = bool(crop_borders)
 
     def run(self):
         try:
@@ -547,6 +557,13 @@ class PanoramaWorker(QThread):
                 self.paths,
                 mode=self.mode,
                 max_dim=self.max_dim or 0,
+                match_exposure=self.match_exposure,
+                order_by_time=self.order_by_time,
+                exposure_reference=self.exposure_reference,
+                exposure_strength=self.exposure_strength,
+                confidence_threshold=self.confidence_threshold,
+                wave_correction=self.wave_correction,
+                crop_borders=self.crop_borders,
                 progress_cb=cb,
             )
             ext = self.out_path.lower().rsplit(".", 1)[-1]

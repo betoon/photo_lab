@@ -50,3 +50,9 @@ When implementing the next item, mark its status here and update USER/DEVELOPER 
 - Panorama projection, seam, exposure-compensation, and manual control-point tools.
 - Versioned plugin API and automated packaged-application smoke tests.
 - Accessibility pass for scalable type, keyboard traversal, screen readers, and color-safe overlays.
+
+### Panorama quality phase
+
+Exposure/WB reference and strength, capture-time ordering, adjacent overlap diagnostics,
+stitch-confidence tuning, horizon wave correction, and optional border cropping are complete.
+Dedicated seam painting, custom projection parameters, and manual control points remain future work.

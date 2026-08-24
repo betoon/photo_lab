@@ -5486,6 +5486,70 @@ class PhotoLab(QMainWindow):
         size_combo.addItem("Long edge 1200 px (preview)", 1200)
         form.addRow("Working size", size_combo)
 
+        analysis = QTextEdit()
+        analysis.setReadOnly(True)
+        analysis.setMaximumHeight(115)
+        analysis.setPlaceholderText("Inspect adjacent-frame overlap before stitching.")
+        form.addRow("Overlap report", analysis)
+        analyze_btn = QPushButton("Analyze Overlap")
+        form.addRow(analyze_btn)
+
+        order_cb = QCheckBox("Order frames by capture time")
+        order_cb.setChecked(False)
+        form.addRow(order_cb)
+
+        match_cb = QCheckBox("Match exposure and white balance")
+        match_cb.setChecked(True)
+        form.addRow(match_cb)
+        reference_combo = QComboBox()
+        for index, path in enumerate(paths):
+            reference_combo.addItem(f"{index + 1}. {os.path.basename(path)}", index)
+        form.addRow("Color reference", reference_combo)
+        exposure_strength = QSpinBox()
+        exposure_strength.setRange(0, 100)
+        exposure_strength.setValue(75)
+        exposure_strength.setSuffix(" %")
+        exposure_strength.setToolTip("Blend source color/exposure toward the reference; 75% avoids abrupt corrections.")
+        form.addRow("Match strength", exposure_strength)
+
+        confidence_spin = QDoubleSpinBox()
+        confidence_spin.setRange(0.3, 2.0)
+        confidence_spin.setSingleStep(0.1)
+        confidence_spin.setValue(1.0)
+        confidence_spin.setToolTip("Lower values accept weaker matches; use cautiously for difficult brackets.")
+        form.addRow("Match confidence", confidence_spin)
+        wave_cb = QCheckBox("Straighten wavy horizon")
+        wave_cb.setChecked(True)
+        form.addRow(wave_cb)
+        crop_cb = QCheckBox("Crop empty warped borders")
+        crop_cb.setChecked(True)
+        form.addRow(crop_cb)
+
+        def analyze_overlap():
+            try:
+                from panorama import analyze_panorama_sequence, order_paths_by_capture_time
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                inspected = order_paths_by_capture_time(paths) if order_cb.isChecked() else list(paths)
+                report = analyze_panorama_sequence(inspected, max_dim=800)
+                lines = []
+                for pair in report["pairs"]:
+                    lines.append(
+                        f"{pair['left_index'] + 1} → {pair['right_index'] + 1}: "
+                        f"{pair['quality'].upper()}  {pair['inliers']} reliable matches  "
+                        f"score {pair['score']:.0%}"
+                    )
+                if report["weak_pairs"]:
+                    lines.append(f"\n⚠ {report['weak_pairs']} weak transition(s): add overlap, remove blur, or check frame order.")
+                else:
+                    lines.append("\nAll adjacent transitions appear usable.")
+                analysis.setPlainText("\n".join(lines))
+            except Exception as exc:
+                analysis.setPlainText(f"Could not analyze overlap: {exc}")
+            finally:
+                QApplication.restoreOverrideCursor()
+
+        analyze_btn.clicked.connect(analyze_overlap)
+
         tip = QLabel(
             "OpenCV automatic stitch — good for clean rows with solid overlap.\n"
             "Not ideal for strong parallax, moving subjects, or huge exposure gaps.\n"
@@ -5520,6 +5584,13 @@ class PhotoLab(QMainWindow):
             out_path,
             mode=mode_combo.currentData() or "panoramas",
             max_dim=int(size_combo.currentData() or 0),
+            match_exposure=match_cb.isChecked(),
+            order_by_time=order_cb.isChecked(),
+            exposure_reference=int(reference_combo.currentData() or 0),
+            exposure_strength=float(exposure_strength.value()) / 100.0,
+            confidence_threshold=float(confidence_spin.value()),
+            wave_correction=wave_cb.isChecked(),
+            crop_borders=crop_cb.isChecked(),
         )
         self._pano_worker.progress.connect(
             lambda m: self.statusBar().showMessage(f"Panorama: {m}")

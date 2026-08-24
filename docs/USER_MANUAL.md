@@ -531,9 +531,13 @@ PhotoLab is an open, Python-based editor. It aims for a DxO-like workflow withou
 - After completion: **report** with per-frame confidence and **Match style of source frame**
 
 ### Panorama
-- Modes: spherical-like (panoramas) / planar scans / auto  
-- **Match exposure / WB** before stitch  
-- **Order by capture time** helper  
+- Modes: spherical-like panorama / planar scans / auto
+- **Analyze Overlap** inspects every adjacent transition and reports reliable feature matches plus a good/fair/weak confidence score before stitching
+- **Match exposure and white balance** uses a selectable reference frame and adjustable strength before stitching
+- **Order frames by capture time** can repair filename ordering from cameras that use separate folders or prefixes
+- **Match confidence** permits careful recovery of difficult sets; lower values accept weaker geometry and should be used cautiously
+- **Straighten wavy horizon** enables OpenCV wave correction for panoramas, while scan mode stays planar
+- **Crop empty warped borders** can be disabled when you want to retain the full warped canvas for later geometry work
 - Report notes projection behavior; optional match style from first source frame  
 
 
