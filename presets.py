@@ -21,6 +21,7 @@ PRESET_MODULE_FIELDS = {
         "exposure", "smart_light", "contrast", "highlights", "shadows", "whites", "blacks",
         "clarity", "gamma", "curve_shadows", "curve_darks", "curve_mids", "curve_lights",
         "curve_highlights", "curve_points", "curve_r_points", "curve_g_points", "curve_b_points",
+        "zone_enabled", "zone_placement", "zone_expansion", "zone_filter", "zone_snap", "zone_overlay",
         "zebra_threshold", "zebra_exposure", "zebra_feather",
     ),
     "Color": (
