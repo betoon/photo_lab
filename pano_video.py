@@ -1081,6 +1081,23 @@ class PanoramaToVideoApp:
         entry.pack(side="left")
         return scale, entry
 
+    def _section_frame(self, text):
+        """PhotoLab-style settings group with a subtle gray outline."""
+        return tk.LabelFrame(
+            self.scrollable_frame,
+            text=text,
+            bg="#1a1a1a",
+            fg="#8faed0",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#3a3a3a",
+            highlightcolor="#46586d",
+            padx=2,
+            pady=2,
+        )
+
     def _build_widgets(self):
         self.scrollable_frame.grid_columnconfigure(0, weight=1, uniform="settingscol")
         self.scrollable_frame.grid_columnconfigure(1, weight=1, uniform="settingscol")
@@ -1091,12 +1108,12 @@ class PanoramaToVideoApp:
         header.pack(fill="x", side="top")
         tk.Frame(header_wrap, bg="#2a5080", height=2).pack(fill="x", side="top")
 
-        f = tk.LabelFrame(self.scrollable_frame, text="Select Panorama Image", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        f = self._section_frame("Select Panorama Image")
         f.grid(row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=5)
         ttk.Entry(f, textvariable=self.image_path, width=85).pack(side="left", padx=8, pady=6, fill="x", expand=True)
         ttk.Button(f, text="Browse...", command=self.browse_image).pack(side="left", padx=5)
 
-        out = tk.LabelFrame(self.scrollable_frame, text="Output Folder", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        out = self._section_frame("Output Folder")
         out.grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=5)
         r = tk.Frame(out, bg="#1a1a1a")
         r.pack(fill="x", padx=8, pady=(6, 0))
@@ -1118,7 +1135,7 @@ class PanoramaToVideoApp:
         ttk.Button(focus_bar, text="Clear Focus Points", command=self.clear_focus_points).pack(side="left", padx=14)
 
         # ---- Left column: Video Settings / Intro Zoom Out / Audio Track & Fades ----
-        s = tk.LabelFrame(self.scrollable_frame, text="Video Settings", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        s = self._section_frame("Video Settings")
         s.grid(row=5, column=0, sticky="new", padx=8, pady=(5, 1))
 
         for label, var in [("Duration (seconds):", self.duration_var), ("Frame rate (fps):", self.fps_var)]:
@@ -1144,7 +1161,7 @@ class PanoramaToVideoApp:
             tk.Label(r, text=label, width=22, bg="#1a1a1a", fg="#ccc").pack(side="left")
             ttk.Combobox(r, textvariable=var, values=vals, state="readonly", width=12).pack(side="left")
 
-        intro = tk.LabelFrame(self.scrollable_frame, text="Intro Zoom Out", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        intro = self._section_frame("Intro Zoom Out")
         intro.grid(row=6, column=0, sticky="new", padx=8, pady=(1, 1))
         tk.Checkbutton(intro, text="Enable deep-point zoom out (starts at D, then widens)", variable=self.intro_zoom_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#ddd").pack(anchor="w", padx=8, pady=1)
 
@@ -1159,7 +1176,7 @@ class PanoramaToVideoApp:
             ttk.Entry(r, textvariable=svar, width=8).pack(side="left")
         ttk.Button(intro, text="Show Deep Start Frame", command=self.show_deep_start_frame).pack(anchor="w", padx=8, pady=(2, 4))
 
-        vfade = tk.LabelFrame(self.scrollable_frame, text="Video Fade In/Out", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        vfade = self._section_frame("Video Fade In/Out")
         vfade.grid(row=7, column=0, sticky="new", padx=8, pady=(1, 5))
         tk.Checkbutton(vfade, text="Fade in from black at start", variable=self.video_fade_in_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#ddd").pack(anchor="w", padx=8, pady=1)
         r = tk.Frame(vfade, bg="#1a1a1a")
@@ -1175,7 +1192,7 @@ class PanoramaToVideoApp:
         ttk.Scale(r, from_=0.0, to=5.0, variable=self.video_fade_out_sec_var, command=self._on_video_fade_out_slide, length=200).pack(side="left", padx=8)
         ttk.Entry(r, textvariable=self.video_fade_out_string_var, width=8).pack(side="left")
 
-        audio = tk.LabelFrame(self.scrollable_frame, text="Audio Track & Fades", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        audio = self._section_frame("Audio Track & Fades")
         audio.grid(row=8, column=0, sticky="new", padx=8, pady=5)
         tk.Checkbutton(audio, text="Audio fade in at start", variable=self.fade_in_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#ddd").pack(anchor="w", padx=8, pady=1)
         r = tk.Frame(audio, bg="#1a1a1a")
@@ -1204,7 +1221,7 @@ class PanoramaToVideoApp:
         ttk.Label(r, textvariable=self.audio_path, background="#1a1a1a").pack(side="left", padx=10)
 
         # ---- Right column: Camera Motion / Film Look / Video Quality Calibration ----
-        kb = tk.LabelFrame(self.scrollable_frame, text="Camera Motion (Ken Burns)", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        kb = self._section_frame("Camera Motion (Ken Burns)")
         kb.grid(row=5, column=1, sticky="new", padx=8, pady=5)
         tk.Checkbutton(kb, text="Enable Ken Burns effect", variable=self.ken_burns_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#ddd").pack(anchor="w", padx=8, pady=2)
 
@@ -1235,7 +1252,7 @@ class PanoramaToVideoApp:
 
         tk.Checkbutton(kb, text="Reverse pan direction", variable=self.reverse_pan_var, bg="#1a1a1a", fg="#ddd", selectcolor="#2a2a2a", activebackground="#1a1a1a", activeforeground="#ddd").pack(anchor="w", padx=8, pady=2)
 
-        film = tk.LabelFrame(self.scrollable_frame, text="Film Look & Aging", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        film = self._section_frame("Film Look & Aging")
         film.grid(row=6, column=1, sticky="new", padx=8, pady=5)
 
         r = tk.Frame(film, bg="#1a1a1a")
@@ -1277,7 +1294,7 @@ class PanoramaToVideoApp:
             film, "Vignette:", self.vignette_var, self.vignette_string_var,
             0.0, 1.0, self._on_vignette_slide)
 
-        video = tk.LabelFrame(self.scrollable_frame, text="Video Quality Calibration", bg="#1a1a1a", fg="#8af", font=("Segoe UI", 10, "bold"), relief="flat", borderwidth=1)
+        video = self._section_frame("Video Quality Calibration")
         video.grid(row=7, column=1, sticky="new", padx=8, pady=5)
 
         self._make_slider_row(
