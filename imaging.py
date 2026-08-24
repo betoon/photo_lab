@@ -1219,6 +1219,59 @@ def apply_gradients(img, gradients):
 
 
 
+def build_brush_mask(img, spec):
+    """Rasterize one brush spec, including feather and luminance/color ranges."""
+    h, w = img.shape[:2]
+    strokes = spec.get("strokes") or []
+    mask = np.zeros((h, w), dtype=np.float32)
+    hardness = float(np.clip(spec.get("hardness", 0.7), 0.0, 1.0))
+    edge_refine = float(np.clip(spec.get("edge_refine", 0.0), 0.0, 1.0))
+    reference_colors = []
+    for s in strokes:
+        cx = float(s.get("x", 0.5)) * (w - 1)
+        cy = float(s.get("y", 0.5)) * (h - 1)
+        rad = max(float(s.get("r", 0.05)) * max(w, h), 1.0)
+        x0, x1 = max(int(cx-rad-2), 0), min(int(cx+rad+2), w-1)
+        y0, y1 = max(int(cy-rad-2), 0), min(int(cy+rad+2), h-1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        yy, xx = np.mgrid[y0:y1+1, x0:x1+1].astype(np.float32)
+        d = np.sqrt((xx-cx)**2 + (yy-cy)**2) / rad
+        fall = np.clip(1.0-(d-hardness)/max(1.0-hardness, 0.05), 0, 1)
+        fall = fall*fall*(3-fall*2)
+        fall[d > 1.0] = 0
+        sample = img[int(np.clip(round(cy), 0, h-1)), int(np.clip(round(cx), 0, w-1))]
+        reference_colors.append(sample)
+        if edge_refine > 1e-4:
+            patch = img[y0:y1+1, x0:x1+1]
+            distance = np.linalg.norm(patch-sample, axis=2) / np.sqrt(3.0)
+            similarity = np.exp(-distance / max(0.025, 0.35*(1.0-edge_refine)+0.025))
+            fall *= (1.0-edge_refine) + edge_refine*similarity
+        mask[y0:y1+1, x0:x1+1] = np.maximum(mask[y0:y1+1, x0:x1+1], fall)
+    feather = float(np.clip(spec.get("feather", 0.0), 0.0, 100.0))
+    if feather > 0 and mask.any():
+        sigma = max(0.1, feather/100.0 * max(h, w) * 0.015)
+        mask = cv2.GaussianBlur(mask, (0, 0), sigma)
+        if mask.max() > 1e-6:
+            mask /= mask.max()
+    lum = cv2.cvtColor(np.clip(img, 0, 1).astype(np.float32), cv2.COLOR_BGR2GRAY)
+    lo = float(np.clip(spec.get("luminance_min", 0.0), 0.0, 1.0))
+    hi = float(np.clip(spec.get("luminance_max", 1.0), 0.0, 1.0))
+    range_feather = max(0.005, float(spec.get("range_feather", 0.05)))
+    if lo > 0 or hi < 1:
+        low_gate = np.clip((lum-lo)/range_feather, 0, 1)
+        high_gate = np.clip((hi-lum)/range_feather, 0, 1)
+        mask *= low_gate*high_gate
+    if spec.get("color_range") and reference_colors:
+        target = np.asarray(spec.get("color_target", np.mean(reference_colors, axis=0)), np.float32)
+        tolerance = max(0.01, float(spec.get("color_tolerance", 0.2)))
+        distance = np.linalg.norm(img-target, axis=2) / np.sqrt(3.0)
+        mask *= np.clip(1.0-distance/tolerance, 0, 1)
+    if spec.get("invert") or spec.get("inverted"):
+        mask = 1.0-mask
+    return np.clip(mask, 0, 1).astype(np.float32)
+
+
 def apply_brush_masks(img, masks):
     """Apply painted brush local adjustments.
 
@@ -1232,34 +1285,16 @@ def apply_brush_masks(img, masks):
         return img
     h, w = img.shape[:2]
     out = img.copy()
-    for m in masks:
-        strokes = m.get("strokes") or []
-        if not strokes:
-            continue
-        hardness = float(m.get("hardness", 0.7))
-        mask = np.zeros((h, w), dtype=np.float32)
-        for s in strokes:
-            cx = float(s.get("x", 0.5)) * (w - 1)
-            cy = float(s.get("y", 0.5)) * (h - 1)
-            rad = max(float(s.get("r", 0.05)) * max(w, h), 1.0)
-            x0 = max(int(cx - rad - 2), 0)
-            x1 = min(int(cx + rad + 2), w - 1)
-            y0 = max(int(cy - rad - 2), 0)
-            y1 = min(int(cy + rad + 2), h - 1)
-            if x1 <= x0 or y1 <= y0:
-                continue
-            yy, xx = np.mgrid[y0:y1 + 1, x0:x1 + 1].astype(np.float32)
-            d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / rad
-            # soft brush: inner hard core then falloff
-            core = max(0.0, min(1.0, hardness))
-            fall = np.clip(1.0 - (d - core) / max(1.0 - core, 0.05), 0, 1)
-            fall = fall * fall * (3 - 2 * fall)
-            fall[d > 1.0] = 0
-            mask[y0:y1 + 1, x0:x1 + 1] = np.maximum(mask[y0:y1 + 1, x0:x1 + 1], fall)
+    raster_masks = {}
+    for index, m in enumerate(masks):
+        mask = build_brush_mask(img, m)
+        raster_masks[str(m.get("id", index))] = mask
+        refs = m.get("intersect_with") or []
+        for ref in refs:
+            if str(ref) in raster_masks:
+                mask = np.minimum(mask, raster_masks[str(ref)])
         if mask.max() < 1e-6:
             continue
-        if m.get("invert") or m.get("inverted"):
-            mask = 1.0 - mask
         mask3 = mask[..., None]
         local = out.copy()
         exp = float(m.get("exposure", 0.0))
@@ -1527,6 +1562,9 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
     grads = getattr(r, "gradients", None) or []
     if grads:
         img = apply_gradients(img, grads)
+    brushes = getattr(r, "brush_masks", None) or []
+    if brushes:
+        img = apply_brush_masks(img, brushes)
 
     # Soft proof (preview only feel — still applied in pipeline for consistency)
     if r.soft_proof:

@@ -584,6 +584,8 @@ class PhotoLab(QMainWindow):
         add_action(view_m, "Compare Off", lambda: self.set_compare_mode(ImageCanvas.MODE_NORMAL))
         add_action(view_m, "Split Compare", lambda: self.set_compare_mode(ImageCanvas.MODE_SPLIT), "C")
         add_action(view_m, "Side-by-Side Compare", lambda: self.set_compare_mode(ImageCanvas.MODE_SIDE_BY_SIDE), "B")
+        add_action(view_m, "Compare with Snapshot…", self.compare_snapshot)
+        add_action(view_m, "Soft-Proof Comparison", self.compare_soft_proof)
         view_m.addSeparator()
         add_action(view_m, "Previous Image", self.prev_image, "Left")
         add_action(view_m, "Next Image", self.next_image, "Right")
@@ -2008,7 +2010,18 @@ class PhotoLab(QMainWindow):
         self.brush_invert_btn.setToolTip("Apply brush adjustments outside the painted area instead.")
         self.brush_invert_btn.clicked.connect(self._on_brush_invert)
         inv_row.addWidget(self.brush_invert_btn)
+        self.brush_color_range_cb = QCheckBox("Color-range mask (sample painted subject)")
+        self.brush_color_range_cb.toggled.connect(
+            lambda checked: self._on_brush_flag("color_range", checked)
+        )
+        inv_row.addWidget(self.brush_color_range_cb)
         v.addLayout(inv_row)
+        intersect_row = QHBoxLayout()
+        self.brush_intersect_btn = QPushButton("Intersect with previous mask")
+        self.brush_intersect_btn.setToolTip("Reuse the preceding mask as a boundary for this mask.")
+        self.brush_intersect_btn.clicked.connect(self._on_brush_intersect_previous)
+        intersect_row.addWidget(self.brush_intersect_btn)
+        v.addLayout(intersect_row)
         size_row = QHBoxLayout()
         size_row.addWidget(QLabel("Size"))
         self.brush_size_slider = SliderRow("", 1.0, 30.0, 5.0, 0.5,
@@ -2026,6 +2039,11 @@ class PhotoLab(QMainWindow):
         bsl = QVBoxLayout(self.brush_sliders_box)
         bsl.setContentsMargins(0, 0, 0, 0)
         for key, label, lo, hi, step, dec in (
+            ("feather", "Mask feather", 0.0, 100.0, 1, 0),
+            ("edge_refine", "Edge-aware refine", 0.0, 100.0, 1, 0),
+            ("luminance_min", "Luminance minimum", 0.0, 100.0, 1, 0),
+            ("luminance_max", "Luminance maximum", 0.0, 100.0, 1, 0),
+            ("color_tolerance", "Color tolerance", 1.0, 100.0, 1, 0),
             ("exposure", "Exposure", -2.0, 2.0, 0.05, 2),
             ("contrast", "Contrast", -100.0, 100.0, 1, 0),
             ("saturation", "Saturation", -100.0, 100.0, 1, 0),
@@ -2652,6 +2670,49 @@ class PhotoLab(QMainWindow):
                 self.render_preview()
                 self.statusBar().showMessage(f"Restored snapshot: {name}")
                 break
+
+    def compare_snapshot(self):
+        if self.current_path is None or self.original_bgr is None:
+            return
+        snapshots = self._snapshots.get(self.current_path) or []
+        if not snapshots:
+            QMessageBox.information(self, "Snapshots", "Save a snapshot first.")
+            return
+        names = [s["name"] for s in snapshots]
+        name, ok = QInputDialog.getItem(self, "Compare Snapshot", "Snapshot:", names, 0, False)
+        if not ok:
+            return
+        selected = next(s for s in snapshots if s["name"] == name)
+        src = self._preview_source_cache.get((self.current_path, id(self.original_bgr), 1600))
+        if src is None:
+            h, w = self.original_bgr.shape[:2]
+            scale = min(1.0, 1600/max(h, w))
+            src = cv2.resize(self.original_bgr, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA) if scale < 1 else self.original_bgr
+        meta = self.meta_cache.get(self.current_path, {})
+        comparison = apply_recipe(src, Recipe.from_dict(selected["recipe"]),
+                                  wb_multipliers=meta.get("wb_multipliers"), meta=meta)
+        self.preview.set_comparison_image(cv_to_qpixmap(comparison))
+        self.set_compare_mode(ImageCanvas.MODE_SIDE_BY_SIDE)
+        self.statusBar().showMessage(f"Comparing current edit with snapshot: {name}")
+
+    def compare_soft_proof(self):
+        if self.current_path is None or self.original_bgr is None:
+            return
+        current = self.recipes[self.current_path]
+        unproofed = Recipe.from_dict(current.to_dict())
+        unproofed.soft_proof = False
+        src = self._preview_source_cache.get((self.current_path, id(self.original_bgr), 1600))
+        if src is None:
+            src = self.original_bgr
+        meta = self.meta_cache.get(self.current_path, {})
+        result = apply_recipe(src, unproofed, wb_multipliers=meta.get("wb_multipliers"), meta=meta)
+        self.preview.set_comparison_image(cv_to_qpixmap(result))
+        if not current.soft_proof:
+            current.soft_proof = True
+            self.soft_proof_cb.setChecked(True)
+            self.render_preview()
+        self.set_compare_mode(ImageCanvas.MODE_SIDE_BY_SIDE)
+        self.statusBar().showMessage("Soft proof comparison: unproofed (left), proofed (right)")
 
     def open_folder(self):
         """Open a single folder in Develop (filmstrip). Does not touch the Library catalog."""
@@ -3423,9 +3484,8 @@ class PhotoLab(QMainWindow):
         if e.key() in (_Qt.Key.Key_Backslash, _Qt.Key.Key_QuoteLeft) and not e.isAutoRepeat():
             if not getattr(self, "_temp_before", False):
                 self._temp_before = True
-                self._temp_before_mode = getattr(self.preview, "compare_mode", 0)
-                self.set_compare_mode(ImageCanvas.MODE_SPLIT)
-                self.statusBar().showMessage("Before (release key to restore)")
+                self.preview.set_hold_original(True)
+                self.statusBar().showMessage("Original (release key to restore)")
             e.accept()
             return
         super().keyPressEvent(e)
@@ -3435,8 +3495,7 @@ class PhotoLab(QMainWindow):
         if e.key() in (_Qt.Key.Key_Backslash, _Qt.Key.Key_QuoteLeft) and not e.isAutoRepeat():
             if getattr(self, "_temp_before", False):
                 self._temp_before = False
-                mode = getattr(self, "_temp_before_mode", ImageCanvas.MODE_NORMAL)
-                self.set_compare_mode(mode)
+                self.preview.set_hold_original(False)
                 self.statusBar().showMessage("Compare restored")
             e.accept()
             return
@@ -4833,8 +4892,15 @@ class PhotoLab(QMainWindow):
         m = masks[self.selected_brush_index]
         for key, row in self.brush_sliders.items():
             row.blockSignals(True)
-            row.set_value(float(m.get(key, 0.0)))
+            defaults = {"luminance_max": 1.0, "color_tolerance": 0.2}
+            value = float(m.get(key, defaults.get(key, 0.0)))
+            if key in ("edge_refine", "luminance_min", "luminance_max", "color_tolerance"):
+                value *= 100.0
+            row.set_value(value)
             row.blockSignals(False)
+        self.brush_color_range_cb.blockSignals(True)
+        self.brush_color_range_cb.setChecked(bool(m.get("color_range", False)))
+        self.brush_color_range_cb.blockSignals(False)
 
     def _on_brush_adj(self, key, val):
         if self.current_path is None or getattr(self, "selected_brush_index", -1) < 0:
@@ -4842,10 +4908,40 @@ class PhotoLab(QMainWindow):
         masks = self.recipes[self.current_path].brush_masks
         if not masks or self.selected_brush_index >= len(masks):
             return
-        masks[self.selected_brush_index][key] = float(val)
+        stored = float(val)
+        if key in ("edge_refine", "luminance_min", "luminance_max", "color_tolerance"):
+            stored /= 100.0
+        masks[self.selected_brush_index][key] = stored
         self.preview.set_brush_masks(masks, self.selected_brush_index)
         self._update_brush_list()
         self.render_timer.start()
+
+    def _on_brush_flag(self, key, value):
+        if self.current_path is None or getattr(self, "selected_brush_index", -1) < 0:
+            return
+        masks = self.recipes[self.current_path].brush_masks or []
+        if self.selected_brush_index < len(masks):
+            masks[self.selected_brush_index][key] = bool(value)
+            self.preview.set_brush_masks(masks, self.selected_brush_index)
+            self.render_timer.start()
+
+    def _on_brush_intersect_previous(self):
+        idx = getattr(self, "selected_brush_index", -1)
+        if self.current_path is None or idx <= 0:
+            self.statusBar().showMessage("Select the second or later brush mask to intersect it.")
+            return
+        masks = self.recipes[self.current_path].brush_masks or []
+        current, previous = masks[idx], masks[idx-1]
+        previous.setdefault("id", f"mask-{idx-1}")
+        refs = list(current.get("intersect_with") or [])
+        ref = previous["id"]
+        if ref in refs:
+            refs.remove(ref)
+        else:
+            refs.append(ref)
+        current["intersect_with"] = refs
+        self._update_brush_list()
+        self.render_preview()
 
     def _on_brush_size(self, val):
         # val is 1..30 percent of image

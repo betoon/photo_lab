@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
+import uuid
 import cv2
-from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QWheelEvent, QMouseEvent, QPainterPath
+from PyQt6.QtCore import Qt, QRect, QPoint, QPointF, pyqtSignal
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QWheelEvent, QMouseEvent, QPainterPath, QRadialGradient
 from PyQt6.QtWidgets import QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy
 
 
@@ -402,6 +403,7 @@ class ImageCanvas(QWidget):
         self.setMinimumSize(200, 200)
         self._pixmap = None
         self._original_pixmap = None
+        self._comparison_pixmap = None
         self._scale = 1.0
         self._offset = QPoint(0, 0)
         self._fit_mode = True
@@ -412,6 +414,7 @@ class ImageCanvas(QWidget):
         self._pan_start = QPoint()
         self._space_down = False
         self.compare_mode = self.MODE_NORMAL
+        self.hold_original = False
         self._split_ratio = 0.5
         
         # Control Point state
@@ -478,6 +481,16 @@ class ImageCanvas(QWidget):
 
     def set_compare_mode(self, mode):
         self.compare_mode = mode
+        if mode == self.MODE_NORMAL:
+            self._comparison_pixmap = None
+        self.update()
+
+    def set_comparison_image(self, pixmap):
+        self._comparison_pixmap = pixmap
+        self.update()
+
+    def set_hold_original(self, enabled):
+        self.hold_original = bool(enabled)
         self.update()
 
     def set_control_points(self, points, selected_index=-1):
@@ -730,10 +743,15 @@ class ImageCanvas(QWidget):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Open a folder to load photos")
             painter.end()
             return
-        if self.compare_mode == self.MODE_SIDE_BY_SIDE and self._original_pixmap is not None:
+        before_pixmap = self._comparison_pixmap if self._comparison_pixmap is not None else self._original_pixmap
+        if self.hold_original and self._original_pixmap is not None:
+            self._draw_pixmap(painter, self._original_pixmap)
+            painter.setPen(QColor("#ddd"))
+            painter.drawText(10, 20, "Original")
+        elif self.compare_mode == self.MODE_SIDE_BY_SIDE and before_pixmap is not None:
             half = self.width() // 2
             painter.setClipRect(0, 0, half - 1, self.height())
-            self._draw_pixmap(painter, self._original_pixmap, x_off=-half // 2)
+            self._draw_pixmap(painter, before_pixmap, x_off=-half // 2)
             painter.setClipRect(half + 1, 0, half, self.height())
             self._draw_pixmap(painter, self._pixmap, x_off=half // 2)
             painter.setClipping(False)
@@ -742,10 +760,10 @@ class ImageCanvas(QWidget):
             painter.setPen(QColor("#aaa"))
             painter.drawText(10, 20, "Before")
             painter.drawText(half + 10, 20, "After")
-        elif self.compare_mode == self.MODE_SPLIT and self._original_pixmap is not None:
+        elif self.compare_mode == self.MODE_SPLIT and before_pixmap is not None:
             sx = int(self.width() * self._split_ratio)
             painter.setClipRect(0, 0, sx, self.height())
-            self._draw_pixmap(painter, self._original_pixmap)
+            self._draw_pixmap(painter, before_pixmap)
             painter.setClipRect(sx, 0, self.width() - sx, self.height())
             self._draw_pixmap(painter, self._pixmap)
             if getattr(self, "show_mask_only", False) and self.brush_masks:
@@ -782,6 +800,10 @@ class ImageCanvas(QWidget):
             painter.drawLine(sx, 0, sx, self.height())
         else:
             self._draw_pixmap(painter, self._pixmap)
+            if self.show_mask_only and self.brush_masks:
+                rect = self.image_rect()
+                if not rect.isEmpty():
+                    painter.fillRect(rect, QColor(0, 0, 0, 235))
 
         # Exposure assists work in every compare mode
         self._draw_exposure_overlays(painter)
@@ -924,11 +946,16 @@ class ImageCanvas(QWidget):
                 # existing masks
                 for mi, m in enumerate(self.brush_masks):
                     col = QColor(255, 60, 60, 90 if mi == self.selected_brush else 55)
-                    painter.setBrush(QBrush(col))
+                    hardness = float(m.get("hardness", 0.7))
                     for s in m.get("strokes") or []:
                         cx = ix0 + float(s.get("x", 0.5)) * sw
                         cy = iy0 + float(s.get("y", 0.5)) * sh
                         r = max(float(s.get("r", 0.05)) * max(sw, sh), 2)
+                        gradient = QRadialGradient(QPointF(cx, cy), r)
+                        gradient.setColorAt(0.0, col)
+                        gradient.setColorAt(max(0.0, min(0.98, hardness)), col)
+                        gradient.setColorAt(1.0, QColor(col.red(), col.green(), col.blue(), 0))
+                        painter.setBrush(QBrush(gradient))
                         painter.drawEllipse(QPointF(cx, cy), r, r)
                 # current stroke
                 if self._brush_current_strokes:
@@ -1314,8 +1341,13 @@ class ImageCanvas(QWidget):
                 return
             if self._brush_current_strokes:
                 mask = {
+                    "id": uuid.uuid4().hex,
                     "strokes": list(self._brush_current_strokes),
                     "hardness": self.brush_hardness,
+                    "feather": 0.0, "edge_refine": 0.0,
+                    "luminance_min": 0.0, "luminance_max": 1.0,
+                    "color_range": False, "color_tolerance": 0.2,
+                    "intersect_with": [],
                     "exposure": 0.0, "contrast": 0.0, "saturation": 0.0,
                     "clarity": 0.0, "temperature": 0.0,
                 }
