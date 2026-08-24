@@ -330,6 +330,8 @@ rawpy output rendered with camera white balance already has the camera multiplie
 
 `FocusStackWorker` runs this off the UI thread. PhotoLab opens the output path in Develop with a fresh recipe (stacking is **not** part of `apply_recipe`).
 
+`open_focus_stacker_pro` writes selected filmstrip or Library paths to a temporary JSON handoff and launches the bundled source entry point with `--microscope --image-list ... --delete-image-list`. The Qt-free `focus_stacker.launch.parse_launch_args` preserves sequence order, removes duplicates, and deletes the handoff after reading it. Keeping this parser outside `app.py` prevents PyQt6/PySide6 DLL conflicts in the combined test process. The advanced window loads the files after it becomes visible and selects the Microscope 2D tab. Launching without selected files remains supported.
+
 ## Panorama (OpenCV Stitcher v1)
 
 `panorama.stitch_panorama` loads frames, runs `cv2.Stitcher`, crops empty borders, returns BGR uint8 + report.

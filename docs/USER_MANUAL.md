@@ -435,6 +435,12 @@ From **Library**, multi-select brackets and use the **Focus Stack…** toolbar b
 
 Tips: use a tripod, manual exposure/WB, and modest focus steps. Large viewpoint changes may need ORB Homography; expect soft scores on very hard frames.
 
+### Focus Stacker Pro and microscope stacks
+
+Select a focus sequence in the PhotoLab filmstrip or Library, then choose **Tools → Open Focus Stacker Pro…**. PhotoLab passes the selected files in their current order, opens the advanced application, and selects its **Microscope 2D** workspace automatically. The handoff does not copy or modify the source files.
+
+If no sequence is selected, Focus Stacker Pro still opens normally and you can add images or a folder there. Its microscope workflow includes illumination normalization, hot-pixel cleanup, flat/dark calibration, multiscale focus analysis, color-selective stacking, calibration scale bars, parameter comparison, retouching, and scientific export controls.
+
 ---
 
 ## Library

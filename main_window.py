@@ -919,6 +919,7 @@ class PhotoLab(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction("Merge HDR…", self.merge_hdr_selected)
         tools_menu.addAction("Focus Stack…", self.focus_stack_selected)
+        tools_menu.addAction("Open Focus Stacker Pro…", self.open_focus_stacker_pro)
         tools_menu.addAction("Panorama…", self.panorama_selected)
         tools_menu.addSeparator()
         tools_menu.addAction("Pan Video…", self.create_pan_video)
@@ -5700,9 +5701,10 @@ class PhotoLab(QMainWindow):
 
 
     def open_focus_stacker_pro(self):
-        """Launch the full Focus Stacker Pro GUI (microscope, retouch, 16-bit, etc.)."""
+        """Launch Focus Stacker Pro and hand off selected PhotoLab images."""
         import sys
         import subprocess
+        import tempfile
         base = os.path.dirname(os.path.abspath(__file__))
         candidates = [
             os.path.join(base, "run_focus_stacker_pro.py"),
@@ -5720,7 +5722,25 @@ class PhotoLab(QMainWindow):
                 "Install PySide6 in that environment: pip install PySide6",
             )
             return
-        cmd = [sys.executable, script]
+        paths = self._selected_filmstrip_paths()
+        if len(paths) < 2:
+            try:
+                library_paths = self._lib_selected_paths()
+                if len(library_paths) >= 2:
+                    paths = library_paths
+            except Exception:
+                pass
+        handoff_path = None
+        cmd = [sys.executable, script, "--microscope"]
+        if paths:
+            try:
+                handle, handoff_path = tempfile.mkstemp(prefix="photolab_focus_stack_", suffix=".json")
+                with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                    json.dump(list(paths), stream)
+                cmd.extend(["--image-list", handoff_path, "--delete-image-list"])
+            except Exception as exc:
+                self.log(f"Could not prepare Focus Stacker image handoff: {exc}", level="ERR")
+                handoff_path = None
         self.log(f"Launching Focus Stacker Pro: {' '.join(cmd)}")
         try:
             kwargs = {}
@@ -5731,8 +5751,17 @@ class PhotoLab(QMainWindow):
             # cwd so relative imports work for focus_stacker_pro/run.py
             kwargs["cwd"] = os.path.dirname(script) if script.endswith("run.py") else base
             subprocess.Popen(cmd, **kwargs)
-            self.statusBar().showMessage("Focus Stacker Pro opened")
+            count = len(paths) if handoff_path else 0
+            self.statusBar().showMessage(
+                f"Focus Stacker Pro opened with {count} selected image(s)" if count
+                else "Focus Stacker Pro opened"
+            )
         except Exception as e:
+            if handoff_path:
+                try:
+                    os.remove(handoff_path)
+                except OSError:
+                    pass
             QMessageBox.warning(self, "Focus Stacker Pro", f"Could not launch:\n{e}")
 
     def focus_stack_selected(self):

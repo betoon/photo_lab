@@ -23,6 +23,7 @@ Tracked suggestions so nothing is lost. Status is updated as items ship.
 | 17 | Packaging | Portable build, bundled resources, update link | **Done** |
 | 18 | Quality | Golden-image, Recipe, catalog, mask, import, and RAW regression tests | **Done** |
 | 19 | Calibration | Argyll-backed display profiling, camera chart profiling, ICC validation/install workflow | **Done** |
+| 20 | Focus handoff | Pass selected PhotoLab sequences directly into Focus Stacker Pro and open Microscope 2D | **Done** |
 
 ## Extra (this session)
 

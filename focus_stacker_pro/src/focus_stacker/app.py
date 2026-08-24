@@ -31,6 +31,7 @@ from .engine import DiskBackedStack, PauseGate, configure_acceleration, finish_a
 from .exporting import export_auxiliary, write_advanced
 from . import __version__
 from .models import Project
+from .launch import parse_launch_args
 
 LOG = logging.getLogger("focus_stacker")
 
@@ -643,6 +644,16 @@ class MainWindow(QMainWindow):
         self.refresh_sequence_controls()
         if self.list.count() and self.list.currentRow() < 0: self.list.setCurrentRow(0)
         self.validate_sequence()
+
+    def load_initial_images(self, paths, microscope=False):
+        """Load an image handoff after the window is visible."""
+        valid = [str(Path(path).resolve()) for path in paths
+                 if Path(path).is_file() and Path(path).suffix.lower() in IMAGE_EXTENSIONS]
+        if valid:
+            self._add(valid)
+            self.statusBar().showMessage(f"Loaded {len(valid)} image(s) from PhotoLab")
+        if microscope:
+            self.tabs.setCurrentIndex(1)  # Microscope 2D follows General Stacking.
     def _sequence_item(self, path):
         item = QListWidgetItem(Path(path).name); item.setToolTip(path)
         try:
@@ -809,7 +820,8 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-def main() -> int:
+def main(argv=None) -> int:
+    args = parse_launch_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     app = QApplication.instance() or QApplication([]); app.setApplicationName("Focus Stacker Pro")
     app.setStyleSheet("""
@@ -919,7 +931,10 @@ def main() -> int:
         QScrollBar::handle:vertical:hover { background: #0891b2; }
         QToolTip { background: #f8fafc; color: #0f172a; border: 1px solid #38bdf8; padding: 5px; }
     """)
-    window = MainWindow(); window.show(); return app.exec()
+    window = MainWindow(); window.show()
+    if args.images or args.microscope:
+        QTimer.singleShot(0, lambda: window.load_initial_images(args.images, args.microscope))
+    return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())
