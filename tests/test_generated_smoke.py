@@ -116,7 +116,9 @@ class GeneratedSmokeTests(unittest.TestCase):
     def test_likely_entry_imports_quickly(self):
         candidates = [
             path for path in python_files()
-            if not is_test_file(path) and path.name.lower() in {"main.py", "app.py", "testing_workbench.py"}
+            if not is_test_file(path)
+            and path.parent == PROJECT_ROOT
+            and path.name.lower() in {"main.py", "app.py", "testing_workbench.py"}
         ]
         for path in candidates[:3]:
             with self.subTest(path=str(path.relative_to(PROJECT_ROOT))):

@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import json
 import os
+import logging
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field, fields
 from typing import Optional, Tuple
 
 import numpy as np
 import cv2
+
+log = logging.getLogger(__name__)
 
 # Suppress OpenCV's noisy TIFF tag warnings (NEF/CR2 false probes)
 try:
@@ -30,6 +34,37 @@ except Exception:
 # "Out of order call of libraw function". Serialize all RAW decodes through
 # this lock so only one thread touches rawpy at a time.
 _rawpy_lock = threading.Lock()
+
+# Pillow's large-image setting is process-global, so guard and restore it.
+_pillow_open_lock = threading.RLock()
+
+
+@contextmanager
+def _pillow_large_image_context():
+    try:
+        from PIL import Image
+    except Exception:
+        yield
+        return
+    with _pillow_open_lock:
+        previous = getattr(Image, "MAX_IMAGE_PIXELS", None)
+        try:
+            Image.MAX_IMAGE_PIXELS = None
+            yield
+        finally:
+            Image.MAX_IMAGE_PIXELS = previous
+
+
+@contextmanager
+def safe_pil_open(path: str, *args, **kwargs):
+    """Open a trusted local image while restoring Pillow's safety limit."""
+    from PIL import Image
+    with _pillow_large_image_context():
+        image = Image.open(path, *args, **kwargs)
+        try:
+            yield image
+        finally:
+            image.close()
 
 IMAGE_EXTS = (
     # RGB
@@ -111,6 +146,15 @@ class Recipe:
     curve_mids: float = 0.0
     curve_lights: float = 0.0
     curve_highlights: float = 0.0
+    curve_points: list = field(default_factory=list)
+    curve_r_points: list = field(default_factory=list)
+    curve_g_points: list = field(default_factory=list)
+    curve_b_points: list = field(default_factory=list)
+    split_shadow_hue: float = 0.0
+    split_shadow_sat: float = 0.0
+    split_highlight_hue: float = 0.0
+    split_highlight_sat: float = 0.0
+    split_balance: float = 0.0
 
     denoise_luminance: float = 0.0
     denoise_chroma: float = 0.0
@@ -223,9 +267,8 @@ def safe_imread(path: str):
 def extract_exif(path: str) -> dict:
     meta = {}
     try:
-        from PIL import Image
         from PIL.ExifTags import TAGS
-        with Image.open(path) as img:
+        with safe_pil_open(path) as img:
             exif = img._getexif()
             if exif:
                 for tag, value in exif.items():
@@ -598,6 +641,78 @@ def apply_tone_curve(img, shadows, darks, mids, lights, highlights):
     l_idx = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
     lab[..., 0] = lut[l_idx] * 100.0
     return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
+def _points_to_lut(points, size=256):
+    if not points:
+        return np.linspace(0, 1, size, dtype=np.float32)
+    pts = []
+    for point in points:
+        try:
+            x, y = float(point[0]), float(point[1])
+            pts.append((np.clip(x, 0, 1), np.clip(y, 0, 1)))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if not pts:
+        return np.linspace(0, 1, size, dtype=np.float32)
+    pts.sort(key=lambda item: item[0])
+    if pts[0][0] > 0:
+        pts.insert(0, (0.0, pts[0][1]))
+    if pts[-1][0] < 1:
+        pts.append((1.0, pts[-1][1]))
+    unique = {}
+    for x, y in pts:
+        unique[float(x)] = float(y)
+    xs = np.array(sorted(unique), dtype=np.float32)
+    ys = np.array([unique[float(x)] for x in xs], dtype=np.float32)
+    return np.interp(np.linspace(0, 1, size), xs, ys).astype(np.float32)
+
+
+def apply_point_curve_luma(img, points):
+    if not points or len(points) < 2:
+        return img
+    lut = _points_to_lut(points)
+    lab = cv2.cvtColor(np.clip(img, 0, 1).astype(np.float32), cv2.COLOR_BGR2LAB)
+    indices = (np.clip(lab[..., 0] / 100.0, 0, 1) * 255).astype(np.int32)
+    lab[..., 0] = lut[indices] * 100.0
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
+def apply_rgb_point_curves(img, r_pts=None, g_pts=None, b_pts=None):
+    if not r_pts and not g_pts and not b_pts:
+        return img
+    out = np.clip(img, 0, 1).astype(np.float32).copy()
+    for channel, points in ((0, b_pts), (1, g_pts), (2, r_pts)):
+        if points and len(points) >= 2:
+            lut = _points_to_lut(points)
+            indices = (out[..., channel] * 255).astype(np.int32)
+            out[..., channel] = lut[indices]
+    return np.clip(out, 0, 1)
+
+
+def apply_split_tone(img, sh_hue, sh_sat, hi_hue, hi_sat, balance=0.0):
+    if abs(sh_sat) < 0.5 and abs(hi_sat) < 0.5:
+        return img
+    out = np.clip(img, 0, 1).astype(np.float32)
+    lum = 0.114 * out[..., 0] + 0.587 * out[..., 1] + 0.299 * out[..., 2]
+    midpoint = np.clip(0.5 - float(balance) / 200.0, 0.15, 0.85)
+    hi_weight = np.clip((lum - (midpoint - 0.18)) / 0.36, 0, 1)
+    hi_weight = hi_weight * hi_weight * (3 - 2 * hi_weight)
+    sh_weight = 1.0 - hi_weight
+
+    def tint_color(hue, saturation):
+        hsv = np.array([[[float(hue) % 360.0, np.clip(float(saturation) / 100.0, 0, 1), 1.0]]], dtype=np.float32)
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+
+    if abs(sh_sat) >= 0.5:
+        color = tint_color(sh_hue, sh_sat)
+        weight = (sh_weight * (float(sh_sat) / 100.0) * 0.55)[..., None]
+        out = out * (1 - weight) + (out * color) * weight + color * (weight * 0.35)
+    if abs(hi_sat) >= 0.5:
+        color = tint_color(hi_hue, hi_sat)
+        weight = (hi_weight * (float(hi_sat) / 100.0) * 0.55)[..., None]
+        out = out * (1 - weight) + (out * color) * weight + color * (weight * 0.25)
+    return np.clip(out, 0, 1)
 
 
 def apply_denoise(img_bgr, luminance, chroma, strength=0.0, detail_preserve=50.0, method="auto"):
@@ -1327,6 +1442,13 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         img = img + (img - blur) * (r.clarity / 100.0)
 
     img = apply_tone_curve(img, r.curve_shadows, r.curve_darks, r.curve_mids, r.curve_lights, r.curve_highlights)
+    img = apply_point_curve_luma(img, getattr(r, "curve_points", None) or [])
+    img = apply_rgb_point_curves(
+        img,
+        getattr(r, "curve_r_points", None) or [],
+        getattr(r, "curve_g_points", None) or [],
+        getattr(r, "curve_b_points", None) or [],
+    )
     img = np.clip(img, 0, 1)
     if abs(r.gamma - 1.0) > 1e-4:
         img = img ** (1.0 / r.gamma)
@@ -1338,6 +1460,14 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
     sat_o = r.hsl_sat if r.hsl_sat is not None else (0,) * 8
     lum_o = r.hsl_lum if r.hsl_lum is not None else (0,) * 8
     img = apply_hsl_selective(img, hue_o, sat_o, lum_o)
+    img = apply_split_tone(
+        img,
+        getattr(r, "split_shadow_hue", 0.0),
+        getattr(r, "split_shadow_sat", 0.0),
+        getattr(r, "split_highlight_hue", 0.0),
+        getattr(r, "split_highlight_sat", 0.0),
+        getattr(r, "split_balance", 0.0),
+    )
 
     # Local control points
     if r.local_points:
@@ -1405,8 +1535,9 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
     img = apply_ir_processing(img, r)
     img = apply_astro_processing(img, r)
 
-    # Black and white + Ansel Adams zone system
-    if getattr(r, "black_and_white", False) or getattr(r, "zone_enabled", False):
+    # Zone mapping is opt-in. Plain B&W above must remain a conventional
+    # grayscale conversion unless the user explicitly enables zones.
+    if getattr(r, "zone_enabled", False):
         img = apply_zone_system(
             img,
             enabled=True,
