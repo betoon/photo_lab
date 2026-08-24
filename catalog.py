@@ -17,12 +17,29 @@ from imaging import IMAGE_EXTS, is_raw, extract_exif
 
 # Default DB location
 def default_db_path() -> str:
+    try:
+        from config import get_config
+        override = get_config().path("catalog_db")
+        if override:
+            parent = os.path.dirname(override) or "."
+            os.makedirs(parent, exist_ok=True)
+            return override
+    except Exception:
+        pass
     root = os.path.join(os.path.expanduser("~"), ".photolab")
     os.makedirs(root, exist_ok=True)
     return os.path.join(root, "catalog.db")
 
 
 def default_thumb_dir() -> str:
+    try:
+        from config import get_config
+        override = get_config().path("thumb_cache")
+        if override:
+            os.makedirs(override, exist_ok=True)
+            return override
+    except Exception:
+        pass
     d = os.path.join(os.path.expanduser("~"), ".photolab", "cache", "thumbs")
     os.makedirs(d, exist_ok=True)
     return d

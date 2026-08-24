@@ -1,0 +1,33 @@
+; PhotoLab configuration template
+; Copy to ~/.photolab/photolab.ini (created automatically on first Preferences save)
+; or place photolab.ini next to main.py for machine-wide defaults.
+; Empty path values = use built-in / auto-discovered locations.
+; Never commit real api_key or serial values to git.
+
+[paths]
+plugin_dir =
+docs_dir =
+lensfun_dir =
+catalog_db =
+thumb_cache =
+ffmpeg =
+export_default_dir =
+scripts_dir =
+
+[performance]
+max_raw_workers = 2
+proxy_max_dimension = 1600
+use_16bit_pipeline = false
+
+[ui]
+remember_last_folder = true
+last_folder =
+check_for_updates_url = https://github.com/betoon/photo_lab/releases
+
+[licensing]
+serial =
+customer_email =
+
+[integrations]
+api_key =
+api_endpoint =

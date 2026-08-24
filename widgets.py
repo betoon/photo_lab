@@ -291,6 +291,7 @@ class _ToneCurveCanvas(QWidget):
     def set_values(self, shadows, darks, mids, lights, highlights):
         self.values = [float(shadows), float(darks), float(mids), float(lights), float(highlights)]
         self.update()
+        self.repaint()
 
     def set_point_curve(self, key: str, points: list):
         if key not in self.point_curves:
@@ -904,6 +905,32 @@ class ImageCanvas(QWidget):
                             max(1, int(step * sy) + 1),
                             QColor(255, 40, 40, 160),
                         )
+            painter.restore()
+
+        if getattr(self, "show_zebras", False):
+            from PyQt6.QtGui import QImage
+            qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+            w, h = qimg.width(), qimg.height()
+            step = max(1, max(w, h) // 400)
+            threshold = int(255 * float(getattr(self, "_zebra_threshold", 0.95)))
+            painter.save()
+            painter.setClipRect(rect)
+            sx = rect.width() / max(w, 1)
+            sy = rect.height() / max(h, 1)
+            for y in range(0, h, step):
+                for x in range(0, w, step):
+                    c = qimg.pixelColor(x, y)
+                    luminance = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
+                    if luminance < threshold:
+                        continue
+                    color = QColor(0, 0, 0, 180) if ((x + y) // max(4, step * 2)) % 2 == 0 else QColor(255, 220, 0, 200)
+                    painter.fillRect(
+                        int(rect.left() + x * sx),
+                        int(rect.top() + y * sy),
+                        max(1, int(step * sx) + 1),
+                        max(1, int(step * sy) + 1),
+                        color,
+                    )
             painter.restore()
 
         if getattr(self, "show_peaking", False):

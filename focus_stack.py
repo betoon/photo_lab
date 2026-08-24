@@ -279,6 +279,7 @@ def focus_stack(
     pyramid_levels: int = 5,
     crop_common: bool = True,
     min_align_score: float = 0.0,
+    normalize_exposure: bool = False,
     progress_cb=None,
 ) -> Tuple[np.ndarray, Optional[np.ndarray], dict]:
     """
@@ -330,6 +331,17 @@ def focus_stack(
         else:
             sized.append(f)
     frames = sized
+
+    if normalize_exposure and len(frames) > 1:
+        ref = frames[ref_idx].astype(np.float32)
+        ref_mean = float(np.mean(cv2.cvtColor(frames[ref_idx], cv2.COLOR_BGR2GRAY))) + 1e-6
+        for i in range(len(frames)):
+            if i == ref_idx:
+                continue
+            m = float(np.mean(cv2.cvtColor(frames[i], cv2.COLOR_BGR2GRAY))) + 1e-6
+            scale = ref_mean / m
+            frames[i] = np.clip(frames[i].astype(np.float32) * scale, 0, 255).astype(np.uint8)
+        report["normalize_exposure"] = True
 
     ref_gray = _to_gray32(frames[ref_idx])
     aligned = [None] * n

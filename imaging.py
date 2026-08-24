@@ -143,13 +143,22 @@ class Recipe:
     vignette: float = 0.0
     film_grain: float = 0.0
     black_and_white: bool = False
+    # Infrared specialty
+    ir_channel_swap: str = "none"  # none | rb | br
+    ir_false_color: float = 0.0     # 0..100 blend toward classic false-color IR
+    ir_mono: bool = False           # mono IR (weighted toward red/NIR)
+    # Astro specialty
+    astro_stretch: float = 0.0      # 0..100 asinh / histogram stretch
+    astro_bg_remove: float = 0.0    # 0..100 gradient / sky background subtraction
+    astro_star_emphasis: float = 0.0  # 0..100 mild star edge boost
+
     # Ansel Adams zone system (B&W)
-    zone_enabled: bool = False          # apply zone mapping when B&W (or force gray)
-    zone_placement: float = 5.0         # which zone mid-gray lands on (0..10)
-    zone_expansion: float = 0.0         # −100 compress … +100 expand tonal scale
-    zone_filter: str = "none"           # none|yellow|orange|red|green|blue (B&W contrast filters)
-    zone_snap: float = 0.0              # 0..100 pull tones toward zone centers
-    zone_overlay: bool = False          # false-color zone map in preview
+    zone_enabled: bool = False
+    zone_placement: float = 5.0
+    zone_expansion: float = 0.0
+    zone_filter: str = "none"
+    zone_snap: float = 0.0
+    zone_overlay: bool = False
     rotate_90: int = 0  # 0,1,2,3 quarter turns
     hdr_look: float = 0.0  # 0..100 single-image HDR-style tone mapping
 
@@ -255,13 +264,112 @@ def extract_exif(path: str) -> dict:
                         meta.setdefault("datetime", str(value))
                     elif decoded == "DateTime":
                         meta.setdefault("datetime", str(value))
+                    elif decoded == "GPSInfo":
+                        try:
+                            lat, lon = _parse_gps_info(value)
+                            if lat is not None and lon is not None:
+                                meta["gps_latitude"] = lat
+                                meta["gps_longitude"] = lon
+                                meta["gps"] = (lat, lon)
+                        except Exception:
+                            pass
     except Exception:
         pass
     return meta
 
 
-def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]:
-    meta = {"is_raw": False, "wb_multipliers": None}
+def _gps_ratio_to_float(rat):
+    try:
+        if hasattr(rat, "numerator"):
+            return float(rat.numerator) / float(rat.denominator or 1)
+        if isinstance(rat, (tuple, list)) and len(rat) >= 2:
+            return float(rat[0]) / float(rat[1] or 1)
+        return float(rat)
+    except Exception:
+        return 0.0
+
+
+def _parse_gps_info(gps_info):
+    """Parse PIL GPSInfo dict → (lat, lon) decimal degrees or (None, None)."""
+    if not gps_info or not isinstance(gps_info, dict):
+        return None, None
+    try:
+        from PIL.ExifTags import GPSTAGS
+        tagged = {GPSTAGS.get(k, k): v for k, v in gps_info.items()}
+    except Exception:
+        tagged = gps_info
+
+    def _to_deg(values, ref):
+        if not values or len(values) < 3:
+            return None
+        d = _gps_ratio_to_float(values[0])
+        m = _gps_ratio_to_float(values[1])
+        s = _gps_ratio_to_float(values[2])
+        dec = d + m / 60.0 + s / 3600.0
+        if str(ref) in ("S", "W"):
+            dec = -dec
+        return dec
+
+    lat = _to_deg(tagged.get("GPSLatitude"), tagged.get("GPSLatitudeRef") or "N")
+    lon = _to_deg(tagged.get("GPSLongitude"), tagged.get("GPSLongitudeRef") or "E")
+    return lat, lon
+
+
+def extract_gps(path: str):
+    """Return (lat, lon) or None for an image path."""
+    meta = extract_exif(path)
+    if meta.get("gps"):
+        return meta["gps"]
+    if meta.get("gps_latitude") is not None and meta.get("gps_longitude") is not None:
+        return float(meta["gps_latitude"]), float(meta["gps_longitude"])
+    return None
+
+
+def format_raw_error(path: str, err: Optional[BaseException] = None) -> str:
+    """Human-readable RAW decode failure with actionable hints."""
+    name = os.path.basename(path or "") or path
+    ext = os.path.splitext(name)[1].lower()
+    msg = str(err) if err else "unknown error"
+    low = msg.lower()
+    hints = []
+    if "partial" in low or "truncated" in low or "unexpected end" in low:
+        hints.append("File may be incomplete (partial download / interrupted transfer).")
+    if "unsupported" in low or "not supported" in low or "compression" in low:
+        hints.append("Unsupported compression or camera variant for this LibRaw/rawpy build.")
+    if "out of order" in low:
+        hints.append("Transient LibRaw lock/order issue — try opening the file again.")
+    if "permission" in low or "access" in low:
+        hints.append("Check file permissions or that the file is not locked by another app.")
+    if not hints:
+        if ext in (".nef", ".nrw"):
+            hints.append("Nikon NEF tip: very new bodies may need a newer rawpy/LibRaw.")
+        elif ext in (".cr2", ".cr3"):
+            hints.append("Canon tip: CR3 often needs a recent LibRaw; try updating rawpy.")
+        elif ext in (".arw", ".srf"):
+            hints.append("Sony tip: ensure rawpy is current for newer ARW versions.")
+        elif ext in (".raf",):
+            hints.append("Fuji X-Trans tip: some RAF packs need half_size or updated demosaic.")
+        elif ext in (".dng",):
+            hints.append("DNG tip: non-standard vendor DNGs can fail; try Adobe DNG Converter.")
+        else:
+            hints.append("See Help / USER_MANUAL for RAW support notes.")
+    tip = " ".join(hints)
+    return (
+        f"Could not decode RAW “{name}”.\n"
+        f"Details: {msg}\n"
+        f"{tip}"
+    )
+
+# Global preference: RAW decode bit depth (8 or 16).
+_RAW_OUTPUT_BPS = 8
+
+def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] = None) -> Tuple[np.ndarray, dict]:
+    """Decode into the pipeline's uint8 BGR working format.
+
+    ``output_bps`` is accepted for export-worker compatibility. The current
+    processing pipeline remains 8-bit/display-referred internally.
+    """
+    meta = {"is_raw": False, "wb_multipliers": None, "wb_baked": False}
     img_bgr = None
     if is_raw(path):
         try:
@@ -291,6 +399,7 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                         )
                     img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                     meta["is_raw"] = True
+                    meta["wb_baked"] = bool(use_camera_wb)
                     try:
                         meta["wb_multipliers"] = list(raw.camera_whitebalance)
                     except Exception:
@@ -350,6 +459,7 @@ def load_image(path: str, use_camera_wb: bool = True) -> Tuple[np.ndarray, dict]
                             )
                             img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                             meta["is_raw"] = True
+                            meta["wb_baked"] = True
                             try:
                                 meta["wb_multipliers"] = list(raw.camera_whitebalance)
                             except Exception:
@@ -1179,6 +1289,88 @@ def try_lensfun_correct(img, meta, strength=1.0):
         return img, f"Lensfun error: {e}"
 
 
+
+def apply_ir_processing(img, r):
+    """Infrared specialty looks on float BGR [0,1]. Additive; no-ops when defaults."""
+    import numpy as np
+    swap = str(getattr(r, "ir_channel_swap", "none") or "none").lower()
+    false_amt = float(getattr(r, "ir_false_color", 0.0) or 0.0) / 100.0
+    mono = bool(getattr(r, "ir_mono", False))
+    if swap == "none" and false_amt < 1e-6 and not mono:
+        return img
+    out = np.clip(img, 0, 1).astype(np.float32).copy()
+    b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    if swap in ("rb", "r-b", "r_b"):
+        # Classic IR channel swap: R <-> B
+        out[..., 0], out[..., 2] = rch.copy(), b.copy()
+        b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    elif swap in ("br", "b-r", "b_r"):
+        out[..., 0], out[..., 2] = rch.copy(), b.copy()
+        # same physical swap; kept as alias
+        b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    if false_amt > 1e-6:
+        # Push toward wood-effect-ish false color (cyan sky / warm foliage tendencies)
+        # Operate in a mild channel remix
+        b2 = np.clip(0.15 * rch + 0.25 * g + 0.60 * b, 0, 1)
+        g2 = np.clip(0.25 * rch + 0.55 * g + 0.20 * b, 0, 1)
+        r2 = np.clip(0.70 * rch + 0.25 * g + 0.05 * b, 0, 1)
+        out[..., 0] = b * (1 - false_amt) + b2 * false_amt
+        out[..., 1] = g * (1 - false_amt) + g2 * false_amt
+        out[..., 2] = rch * (1 - false_amt) + r2 * false_amt
+        b, g, rch = out[..., 0], out[..., 1], out[..., 2]
+    if mono:
+        # NIR-weighted mono (favor red channel as stand-in for IR-rich signal)
+        lum = np.clip(0.15 * b + 0.25 * g + 0.60 * rch, 0, 1)
+        out[..., 0] = out[..., 1] = out[..., 2] = lum
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
+def apply_astro_processing(img, r):
+    """Astro stretch + background gradient removal on float BGR [0,1]."""
+    import numpy as np
+    import cv2
+    stretch = float(getattr(r, "astro_stretch", 0.0) or 0.0)
+    bg = float(getattr(r, "astro_bg_remove", 0.0) or 0.0)
+    stars = float(getattr(r, "astro_star_emphasis", 0.0) or 0.0)
+    if stretch < 0.5 and bg < 0.5 and stars < 0.5:
+        return img
+    out = np.clip(img, 0, 1).astype(np.float32).copy()
+    h, w = out.shape[:2]
+    if bg > 0.5:
+        # Large Gaussian as sky model; subtract scaled residual
+        k = max(31, int(min(h, w) * 0.25) | 1)
+        k = min(k, 251)
+        try:
+            sky = cv2.GaussianBlur(out, (k, k), sigmaX=k * 0.25)
+        except Exception:
+            sky = cv2.blur(out, (k, k))
+        strength = (bg / 100.0) * 0.85
+        out = np.clip(out - sky * strength + np.median(sky) * strength * 0.35, 0, 1)
+    if stretch > 0.5:
+        # Per-channel asinh stretch anchored near black point
+        amt = stretch / 100.0
+        # Estimate black from dark percentile
+        flat = out.reshape(-1, 3)
+        lo = np.percentile(flat, 1.0, axis=0).astype(np.float32)
+        work = np.clip(out - lo, 0, 1)
+        # soft scale: higher stretch → more aggressive midtone lift
+        scale = 1.0 + amt * 12.0
+        stretched = np.arcsinh(work * scale) / np.arcsinh(scale)
+        # blend so 0 stretch = original
+        out = out * (1.0 - amt) + stretched * amt
+        out = np.clip(out, 0, 1)
+    if stars > 0.5:
+        # Mild unsharp on luminance to emphasize point sources
+        amt = stars / 100.0 * 0.6
+        try:
+            blur = cv2.GaussianBlur(out, (0, 0), sigmaX=1.2)
+            detail = out - blur
+            out = np.clip(out + detail * amt, 0, 1)
+        except Exception:
+            pass
+    return out.astype(np.float32)
+
+
 def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
     rot = int(getattr(r, "rotate_90", 0)) % 4
     if rot:
@@ -1194,7 +1386,12 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
     )
 
     img = img_bgr.astype(np.float32) / 255.0
-    img = apply_white_balance(img, r.temperature, r.tint, as_shot=r.wb_as_shot, multipliers=wb_multipliers)
+    wb_already_baked = bool(meta and meta.get("wb_baked"))
+    if not (r.wb_as_shot and wb_already_baked):
+        img = apply_white_balance(
+            img, r.temperature, r.tint,
+            as_shot=r.wb_as_shot, multipliers=wb_multipliers,
+        )
 
     if abs(r.exposure) > 1e-4:
         img *= (2.0 ** r.exposure)
@@ -1321,6 +1518,34 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
         amt = r.film_grain / 100.0
         noise = np.random.randn(*img.shape[:2]).astype(np.float32) * (amt * 0.08)
         img = np.clip(img + noise[..., None], 0, 1)
+
+
+
+    # Specialty: Infrared + Astro (non-destructive recipe flags)
+    img = apply_ir_processing(img, r)
+    img = apply_astro_processing(img, r)
+
+    # Black and white + Ansel Adams zone system
+    if getattr(r, "black_and_white", False) or getattr(r, "zone_enabled", False):
+        img = apply_zone_system(
+            img,
+            enabled=True,
+            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
+            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
+            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
+            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
+            overlay=bool(getattr(r, "zone_overlay", False)),
+        )
+    elif getattr(r, "zone_overlay", False):
+        img = apply_zone_system(
+            img,
+            enabled=False,
+            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
+            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
+            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
+            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
+            overlay=True,
+        )
 
     return (np.clip(img, 0, 1) * 255.0).astype(np.uint8)
 
@@ -1573,3 +1798,207 @@ def apply_watermark(img_bgr, text, opacity=0.45, scale=0.035, margin=0.02):
     cv2.putText(overlay, text, (x, y), font, font_scale, (20, 20, 20), thickness, cv2.LINE_AA)
     cv2.addWeighted(overlay, float(opacity), out, 1.0 - float(opacity), 0, out)
     return out
+
+
+# Spectral B&W contrast filters (RGB weights) for zone system
+_ZONE_FILTERS = {
+    "none": (0.299, 0.587, 0.114),
+    "yellow": (0.15, 0.55, 0.30),
+    "orange": (0.10, 0.45, 0.45),
+    "red": (0.05, 0.25, 0.70),
+    "green": (0.20, 0.70, 0.10),
+    "blue": (0.55, 0.25, 0.20),
+}
+
+def apply_zone_system(
+    img,
+    enabled: bool = True,
+    placement: float = 5.0,
+    expansion: float = 0.0,
+    filter_name: str = "none",
+    snap: float = 0.0,
+    overlay: bool = False,
+    force_bw: bool = True,
+):
+    """Ansel Adams–inspired zone mapping on float BGR [0,1].
+
+    placement: which zone (0..10) middle-gray (~18% / zone V) is mapped to.
+    expansion: −100 compresses dynamic range, +100 expands (N− / N+ feel).
+    filter_name: spectral B&W contrast filter.
+    snap: 0..100 pull luminance toward discrete zone centers.
+    overlay: paint false-color zones (preview aid).
+    """
+    if not enabled and not overlay:
+        return img
+    img = np.clip(img, 0, 1).astype(np.float32)
+    filt = _ZONE_FILTERS.get((filter_name or "none").lower(), _ZONE_FILTERS["none"])
+    # OpenCV BGR order
+    b, g, rch = img[..., 0], img[..., 1], img[..., 2]
+    # filt is RGB weights
+    lum = np.clip(filt[2] * b + filt[1] * g + filt[0] * rch, 0.0, 1.0)
+
+    # Map: log-ish zone scale. Zone V ≈ 0.18 reflectance → ~0.5 display gamma-ish.
+    # Work in linear-ish zone index 0..10
+    # Convert luminance to zone via log2 relative to mid-gray 0.18
+    mid_ref = 0.18
+    # Avoid log0
+    safe = np.maximum(lum, 1e-5)
+    # Stops relative to mid-gray; zone V = 5
+    stops = np.log2(safe / mid_ref)
+    zone = 5.0 + stops  # approximately
+
+    place = float(np.clip(placement if placement is not None else 5.0, 0.0, 10.0))
+    # Shift so mid-gray lands on placement
+    zone = zone + (place - 5.0)
+
+    # Expansion around placement (N+/N−)
+    exp = float(expansion or 0.0) / 100.0
+    scale = 1.0 + exp * 0.85
+    zone = place + (zone - place) * scale
+    zone = np.clip(zone, 0.0, 10.0)
+
+    snap_amt = float(np.clip(snap or 0.0, 0.0, 100.0)) / 100.0
+    if snap_amt > 0.01:
+        centers = np.round(zone)
+        zone = zone * (1.0 - snap_amt) + centers * snap_amt
+
+    # Zone → display luminance (approx Adams print scale)
+    # Zone 0→0, V→0.18 linear-ish, X→1 with soft shoulder
+    out_lin = mid_ref * (2.0 ** (zone - 5.0))
+    out_lin = np.clip(out_lin, 0.0, 1.0)
+    # Mild display gamma for screen
+    out = np.power(out_lin, 1.0 / 2.2)
+
+    if overlay:
+        idx = np.clip(np.round(zone).astype(np.int32), 0, 10)
+        colors = _ZONE_COLORS[idx]
+        if force_bw:
+            base = np.stack([out, out, out], axis=-1)
+            img = base * 0.35 + colors * 0.65
+        else:
+            img = img * 0.35 + colors * 0.65
+        return np.clip(img, 0, 1)
+
+    if force_bw:
+        img = np.stack([out, out, out], axis=-1)
+    return np.clip(img, 0, 1)
+
+def deghost_stack(images: List[np.ndarray], strength: float = 50.0) -> List[np.ndarray]:
+    """Reduce motion ghosts before fusion.
+
+    strength 0..100: blend each frame toward a robust reference (median of stack).
+    Higher strength replaces moving regions more aggressively with the median.
+    """
+    if not images or len(images) < 2 or float(strength) < 1.0:
+        return images
+    t = max(0.0, min(1.0, float(strength) / 100.0))
+    stack = np.stack([im.astype(np.float32) for im in images], axis=0)
+    median = np.median(stack, axis=0)
+    # Per-pixel motion amount vs median
+    out = []
+    for im in images:
+        x = im.astype(np.float32)
+        diff = np.mean(np.abs(x - median), axis=2)  # H,W
+        # Soft motion mask
+        dmax = float(diff.max()) + 1e-3
+        motion = np.clip(diff / (0.15 * 255.0 + 0.25 * dmax), 0, 1)
+        motion = cv2.GaussianBlur(motion, (0, 0), sigmaX=2.0)
+        w = (motion * t)[..., None]
+        y = x * (1.0 - w) + median * w
+        out.append(np.clip(y, 0, 255).astype(np.uint8))
+    return out
+
+def merge_hdr_debevec(
+    paths,
+    align=True,
+    max_dim=0,
+    deghost=0.0,
+    tonemap: str = "reinhard",
+    gamma: float = 1.0,
+):
+    """True HDR via Debevec calibration + tonemap. Returns uint8 BGR.
+
+    Requires varying exposures (EXIF shutter preferred). Falls back to equal
+    spaced times if metadata is missing.
+    """
+    if not paths or len(paths) < 2:
+        raise ValueError("HDR merge needs at least 2 images")
+    images, metas = _load_hdr_stack(paths, max_dim=max_dim)
+    if align:
+        images = _align_hdr_stack(images)
+    if deghost and float(deghost) > 0:
+        images = deghost_stack(images, strength=float(deghost))
+
+    times = []
+    for i, meta in enumerate(metas):
+        s = _exposure_seconds_from_meta(meta)
+        if s is None or s <= 0:
+            # synthetic 1-stop steps centered on middle
+            s = 2.0 ** (i - (len(paths) - 1) / 2.0) * (1.0 / 60.0)
+        times.append(float(s))
+    times = np.array(times, dtype=np.float32)
+
+    calibrate = cv2.createCalibrateDebevec()
+    response = calibrate.process(images, times)
+    merge = cv2.createMergeDebevec()
+    hdr = merge.process(images, times, response)
+
+    tonemap = (tonemap or "reinhard").lower()
+    if tonemap == "drago":
+        mapper = cv2.createTonemapDrago(gamma=float(gamma) if gamma else 1.0, saturation=1.0)
+    elif tonemap == "mantiuk":
+        mapper = cv2.createTonemapMantiuk(gamma=float(gamma) if gamma else 1.0, scale=0.7)
+    else:
+        mapper = cv2.createTonemapReinhard(
+            gamma=float(gamma) if gamma else 1.0, intensity=0.0, light_adapt=0.1, color_adapt=0.0
+        )
+    ldr = mapper.process(hdr)
+    return np.clip(ldr * 255.0, 0, 255).astype(np.uint8)
+
+def generate_subject_mask(img_bgr, max_side: int = 640):
+    """Offline subject mask via OpenCV GrabCut (no neural net).
+
+    img_bgr: float 0..1 or uint8 BGR.
+    Returns float32 mask 0..1 at the input resolution.
+    """
+    if img_bgr is None:
+        return None
+    src = img_bgr
+    if src.dtype != np.uint8:
+        src_u8 = np.clip(src * 255.0 if src.max() <= 1.5 else src, 0, 255).astype(np.uint8)
+    else:
+        src_u8 = src
+    h, w = src_u8.shape[:2]
+    scale = 1.0
+    work = src_u8
+    if max(h, w) > max_side:
+        scale = max_side / max(h, w)
+        work = cv2.resize(src_u8, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+    wh, ww = work.shape[:2]
+    # Center rectangle as probable foreground
+    margin = 0.12
+    rect = (
+        int(ww * margin),
+        int(wh * margin),
+        max(1, int(ww * (1 - 2 * margin))),
+        max(1, int(wh * (1 - 2 * margin))),
+    )
+    mask = np.zeros((wh, ww), np.uint8)
+    bgd = np.zeros((1, 65), np.float64)
+    fgd = np.zeros((1, 65), np.float64)
+    try:
+        cv2.grabCut(work, mask, rect, bgd, fgd, 3, cv2.GC_INIT_WITH_RECT)
+        binary = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 1.0, 0.0).astype(np.float32)
+    except Exception:
+        # Fallback: center-weighted luminance threshold
+        gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+        yy, xx = np.mgrid[0:wh, 0:ww].astype(np.float32)
+        cy, cx = (wh - 1) / 2.0, (ww - 1) / 2.0
+        dist = np.sqrt(((xx - cx) / max(cx, 1)) ** 2 + ((yy - cy) / max(cy, 1)) ** 2)
+        binary = np.clip(1.0 - dist * 0.85, 0, 1) * (0.4 + 0.6 * gray)
+        binary = (binary > 0.35).astype(np.float32)
+    # Feather edges
+    binary = cv2.GaussianBlur(binary, (0, 0), sigmaX=max(ww, wh) * 0.01)
+    if scale < 0.999:
+        binary = cv2.resize(binary, (w, h), interpolation=cv2.INTER_LINEAR)
+    return np.clip(binary, 0, 1).astype(np.float32)

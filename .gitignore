@@ -43,3 +43,7 @@ lensfun/tools/
 lensfun/CMakeLists.txt
 lensfun/ChangeLog
 *.zip
+
+# User config (may contain secrets)
+photolab.ini
+!photolab.ini.example

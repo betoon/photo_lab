@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import copy
 import xml.etree.ElementTree as ET
 from typing import Optional, Tuple, List
 
@@ -66,7 +67,7 @@ def _parse_xmp_text(text: str) -> dict:
 
 def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     """Load a Lightroom/ACR .xmp develop preset into a Recipe."""
-    r = base if base is not None else Recipe()
+    r = copy.deepcopy(base) if base is not None else Recipe()
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         text = f.read()
 
@@ -145,11 +146,12 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     # every bundled plugin. Skip implausible values instead of clamping
     # them, leaving Recipe.temperature at its neutral default.
     temp = _f(g("Temperature"))
-    if temp is not None and temp >= 2000.0:
+    has_absolute_temp = temp is not None and 2000.0 <= temp <= 50000.0
+    if has_absolute_temp:
         r.temperature = min(12000.0, temp)
         r.wb_as_shot = False
     tint = _f(g("Tint"))
-    if tint is not None:
+    if tint is not None and has_absolute_temp:
         r.tint = max(-150.0, min(150.0, tint))
         r.wb_as_shot = False
 
