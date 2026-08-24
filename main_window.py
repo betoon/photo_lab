@@ -5479,6 +5479,30 @@ class PhotoLab(QMainWindow):
         mode_combo.addItem("Auto", "auto")
         form.addRow("Mode", mode_combo)
 
+        projection_combo = QComboBox()
+        projection_combo.addItem("Automatic / unchanged", "original")
+        projection_combo.addItem("Cylindrical — reduce wide-edge stretch", "cylindrical")
+        projection_combo.addItem("Rectilinear — straighten architectural lines", "rectilinear")
+        projection_combo.addItem("Mercator — emphasize vertical scale", "mercator")
+        projection_combo.setToolTip("Optional finishing projection applied after OpenCV completes the stitch.")
+        form.addRow("Output projection", projection_combo)
+        projection_strength = QSpinBox()
+        projection_strength.setRange(0, 100)
+        projection_strength.setValue(70)
+        projection_strength.setSuffix(" %")
+        form.addRow("Projection strength", projection_strength)
+        projection_fov = QSpinBox()
+        projection_fov.setRange(45, 170)
+        projection_fov.setValue(120)
+        projection_fov.setSuffix("°")
+        projection_fov.setToolTip("Approximate horizontal field of view used by the projection adjustment.")
+        form.addRow("Field of view", projection_fov)
+        projection_border = QComboBox()
+        projection_border.addItem("Reflect edge pixels", "reflect")
+        projection_border.addItem("Extend edge pixels", "replicate")
+        projection_border.addItem("Black / transparent-workflow edge", "black")
+        form.addRow("Projection edges", projection_border)
+
         size_combo = QComboBox()
         size_combo.addItem("Full resolution", 0)
         size_combo.addItem("Long edge 3000 px", 3000)
@@ -5591,6 +5615,10 @@ class PhotoLab(QMainWindow):
             confidence_threshold=float(confidence_spin.value()),
             wave_correction=wave_cb.isChecked(),
             crop_borders=crop_cb.isChecked(),
+            output_projection=projection_combo.currentData() or "original",
+            projection_strength=float(projection_strength.value()) / 100.0,
+            projection_fov=float(projection_fov.value()),
+            projection_border=projection_border.currentData() or "reflect",
         )
         self._pano_worker.progress.connect(
             lambda m: self.statusBar().showMessage(f"Panorama: {m}")

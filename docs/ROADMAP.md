@@ -55,4 +55,5 @@ When implementing the next item, mark its status here and update USER/DEVELOPER 
 
 Exposure/WB reference and strength, capture-time ordering, adjacent overlap diagnostics,
 stitch-confidence tuning, horizon wave correction, and optional border cropping are complete.
-Dedicated seam painting, custom projection parameters, and manual control points remain future work.
+Output projection choice, strength, field of view, and edge handling are now complete.
+Dedicated seam painting and manual control points remain future work.

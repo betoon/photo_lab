@@ -538,6 +538,9 @@ PhotoLab is an open, Python-based editor. It aims for a DxO-like workflow withou
 - **Match confidence** permits careful recovery of difficult sets; lower values accept weaker geometry and should be used cautiously
 - **Straighten wavy horizon** enables OpenCV wave correction for panoramas, while scan mode stays planar
 - **Crop empty warped borders** can be disabled when you want to retain the full warped canvas for later geometry work
+- **Output projection** optionally finishes the stitched result as cylindrical, rectilinear, or Mercator; Automatic/unchanged preserves the standard OpenCV result exactly
+- **Projection strength** blends continuously from the automatic result, while **Field of view** controls the geometric intensity
+- **Projection edges** can reflect or extend nearby pixels, or retain black edges for a later crop/compositing workflow
 - Report notes projection behavior; optional match style from first source frame  
 
 

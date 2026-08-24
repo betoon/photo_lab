@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 import panorama
-from panorama import analyze_panorama_sequence, match_exposure_wb, stitch_panorama
+from panorama import analyze_panorama_sequence, match_exposure_wb, reproject_panorama, stitch_panorama
 
 
 def _overlap_paths(tmp_path):
@@ -62,3 +62,39 @@ def test_stitch_options_are_forwarded(monkeypatch, tmp_path):
     assert fake.confidence == 0.7
     assert fake.wave is False
     assert report["crop_borders"] is False
+
+
+def test_original_projection_is_exact_noop():
+    image = np.arange(60 * 120 * 3, dtype=np.uint8).reshape(60, 120, 3)
+    assert np.array_equal(reproject_panorama(image, "original"), image)
+    assert np.array_equal(reproject_panorama(image, "cylindrical", strength=0), image)
+
+
+def test_supported_projections_preserve_canvas_and_dtype():
+    yy, xx = np.mgrid[:80, :180]
+    image = np.dstack((xx, yy * 2, (xx + yy) % 255)).astype(np.uint8)
+    for name in ("cylindrical", "rectilinear", "mercator"):
+        result = reproject_panorama(image, name, strength=0.7, field_of_view=110)
+        assert result.shape == image.shape
+        assert result.dtype == image.dtype
+        assert np.isfinite(result).all()
+
+
+def test_projection_settings_appear_in_stitch_report(monkeypatch, tmp_path):
+    paths = _overlap_paths(tmp_path)[:2]
+
+    class FakeStitcher:
+        def setPanoConfidenceThresh(self, _value): pass
+        def setWaveCorrection(self, _value): pass
+        def stitch(self, images): return 0, np.hstack(images)
+
+    monkeypatch.setattr(panorama, "_make_stitcher", lambda _mode: FakeStitcher())
+    result, report = stitch_panorama(
+        paths, match_exposure=False, crop_borders=False,
+        output_projection="cylindrical", projection_strength=0.5,
+        projection_fov=100, projection_border="replicate",
+    )
+    assert result.shape[:2] == (140, 280)
+    assert report["output_projection"] == "cylindrical"
+    assert report["projection_strength"] == 0.5
+    assert report["projection_fov"] == 100

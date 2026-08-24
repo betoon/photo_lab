@@ -156,6 +156,54 @@ def analyze_panorama_sequence(paths: List[str], max_dim: int = 900) -> dict:
             "weak_pairs": sum(pair["quality"] == "weak" for pair in pairs)}
 
 
+def reproject_panorama(image: np.ndarray, projection: str = "original",
+                       strength: float = 1.0, field_of_view: float = 120.0,
+                       border_mode: str = "reflect") -> np.ndarray:
+    """Apply a conservative post-stitch projection adjustment.
+
+    This does not replace OpenCV's camera warper. It gives photographers a
+    continuous finishing control for edge stretch and vertical mapping while
+    preserving the stitched canvas and an exact no-op default.
+    """
+    name = (projection or "original").lower()
+    amount = float(np.clip(strength, 0.0, 1.0))
+    if image is None or name in ("original", "automatic", "none") or amount <= 0:
+        return image.copy() if image is not None else image
+    h, w = image.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    u = (xx / max(w - 1, 1)) * 2.0 - 1.0
+    v = (yy / max(h - 1, 1)) * 2.0 - 1.0
+    half_fov = np.deg2rad(float(np.clip(field_of_view, 45.0, 170.0))) * 0.5
+    tan_half = max(float(np.tan(half_fov)), 1e-4)
+    src_u, src_v = u.copy(), v.copy()
+    if name == "cylindrical":
+        src_u = np.tan(u * half_fov) / tan_half
+        src_v = v * np.sqrt(1.0 + (src_u * tan_half) ** 2)
+    elif name == "rectilinear":
+        src_u = np.arctan(u * tan_half) / half_fov
+        src_v = v / np.sqrt(1.0 + (u * tan_half) ** 2)
+    elif name == "mercator":
+        latitude = np.deg2rad(np.clip(v * 80.0, -80.0, 80.0))
+        mercator = np.log(np.tan(np.pi / 4.0 + latitude / 2.0))
+        max_mercator = np.log(np.tan(np.pi / 4.0 + np.deg2rad(80.0) / 2.0))
+        src_v = mercator / max_mercator
+    else:
+        raise ValueError(f"Unknown panorama projection: {projection}")
+    src_u = u * (1.0 - amount) + src_u * amount
+    src_v = v * (1.0 - amount) + src_v * amount
+    map_x = ((src_u + 1.0) * 0.5 * max(w - 1, 1)).astype(np.float32)
+    map_y = ((src_v + 1.0) * 0.5 * max(h - 1, 1)).astype(np.float32)
+    borders = {
+        "black": cv2.BORDER_CONSTANT,
+        "replicate": cv2.BORDER_REPLICATE,
+        "reflect": cv2.BORDER_REFLECT_101,
+    }
+    return cv2.remap(
+        image, map_x, map_y, cv2.INTER_LANCZOS4,
+        borderMode=borders.get((border_mode or "reflect").lower(), cv2.BORDER_REFLECT_101),
+    )
+
+
 def stitch_panorama(
     paths: List[str],
     mode: str = "panoramas",
@@ -168,6 +216,10 @@ def stitch_panorama(
     confidence_threshold: float = 1.0,
     wave_correction: bool = True,
     crop_borders: bool = True,
+    output_projection: str = "original",
+    projection_strength: float = 1.0,
+    projection_fov: float = 120.0,
+    projection_border: str = "reflect",
     progress_cb=None,
 ) -> Tuple[np.ndarray, dict]:
     """
@@ -229,6 +281,10 @@ def stitch_panorama(
         "confidence_threshold": float(confidence_threshold),
         "wave_correction": bool(wave_correction),
         "crop_borders": bool(crop_borders),
+        "output_projection": str(output_projection),
+        "projection_strength": float(projection_strength),
+        "projection_fov": float(projection_fov),
+        "projection_border": str(projection_border),
         "projection_note": (
             "OpenCV Stitcher_PANORAMA uses a spherical-like projection for wide "
             "horizons; SCANS is closer to a planar/cylindrical flat-copy. "
@@ -248,6 +304,13 @@ def stitch_panorama(
 
     if pano is None or pano.size == 0:
         raise RuntimeError("Stitch returned an empty image")
+
+    if (output_projection or "original").lower() not in ("original", "automatic", "none"):
+        prog(f"Applying {output_projection} projection…", 0.86)
+        pano = reproject_panorama(
+            pano, output_projection, projection_strength,
+            projection_fov, projection_border,
+        )
 
     # Crop mostly-black borders from the warped canvas
     prog("Cropping borders…", 0.9)

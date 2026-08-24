@@ -451,7 +451,9 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 - `focus_stack(..., min_align_score=)` excludes weak alignments; report has scores/excluded/used_indices
 - `panorama.match_exposure_wb(..., ref_idx=, strength=)` uses robust channel medians and a softened correction
 - `analyze_panorama_sequence` uses ORB mutual matching plus RANSAC homography inliers to score adjacent overlap
+- `reproject_panorama` provides a shape-preserving, strength-blended finishing remap for cylindrical, rectilinear, and Mercator output; `original` and zero strength are exact no-ops
 - `order_paths_by_capture_time`; the UI and `PanoramaWorker` now forward ordering, matching, reference, strength, confidence, wave-correction, and crop controls to the engine
+- Projection name, strength, approximate horizontal FOV, and border mode pass through `PanoramaWorker` and are recorded in the stitch report
 - UI report dialogs + `_match_style_from_source`
 
 
