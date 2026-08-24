@@ -312,6 +312,39 @@ def extract_exif(path: str) -> dict:
                             pass
     except Exception:
         pass
+    # Pillow cannot open many RAW containers (including some Nikon NEF
+    # variants).  ExifRead reads the metadata IFD without decoding the image,
+    # so use it as a best-effort fallback for GPS and the common camera fields.
+    if "gps" not in meta:
+        try:
+            import exifread
+            with open(path, "rb") as stream:
+                tags = exifread.process_file(stream, details=False)
+
+            def _tag(name):
+                value = tags.get(name)
+                return value.values if hasattr(value, "values") else value
+
+            lat = _tag("GPS GPSLatitude")
+            lon = _tag("GPS GPSLongitude")
+            if lat and lon:
+                lat_ref = str(tags.get("GPS GPSLatitudeRef", "N"))
+                lon_ref = str(tags.get("GPS GPSLongitudeRef", "E"))
+                lat, lon = _gps_values_to_degrees(lat, lat_ref), _gps_values_to_degrees(lon, lon_ref)
+                if lat is not None and lon is not None:
+                    meta["gps_latitude"] = lat
+                    meta["gps_longitude"] = lon
+                    meta["gps"] = (lat, lon)
+            for target, source in (
+                ("camera", "Image Model"), ("lens", "EXIF LensModel"),
+                ("datetime_original", "EXIF DateTimeOriginal"),
+            ):
+                if not meta.get(target) and tags.get(source):
+                    meta[target] = str(tags[source])
+            if meta.get("datetime_original"):
+                meta.setdefault("datetime", meta["datetime_original"])
+        except Exception:
+            pass
     return meta
 
 
@@ -319,11 +352,25 @@ def _gps_ratio_to_float(rat):
     try:
         if hasattr(rat, "numerator"):
             return float(rat.numerator) / float(rat.denominator or 1)
+        if hasattr(rat, "num"):
+            return float(rat.num) / float(rat.den or 1)
         if isinstance(rat, (tuple, list)) and len(rat) >= 2:
             return float(rat[0]) / float(rat[1] or 1)
         return float(rat)
     except Exception:
         return 0.0
+
+
+def _gps_values_to_degrees(values, ref):
+    """Convert three EXIF degrees/minutes/seconds ratios to decimal degrees."""
+    if not values or len(values) < 3:
+        return None
+    result = (_gps_ratio_to_float(values[0])
+              + _gps_ratio_to_float(values[1]) / 60.0
+              + _gps_ratio_to_float(values[2]) / 3600.0)
+    if str(ref).strip().upper() in ("S", "W"):
+        result = -result
+    return result
 
 
 def _parse_gps_info(gps_info):
@@ -336,19 +383,8 @@ def _parse_gps_info(gps_info):
     except Exception:
         tagged = gps_info
 
-    def _to_deg(values, ref):
-        if not values or len(values) < 3:
-            return None
-        d = _gps_ratio_to_float(values[0])
-        m = _gps_ratio_to_float(values[1])
-        s = _gps_ratio_to_float(values[2])
-        dec = d + m / 60.0 + s / 3600.0
-        if str(ref) in ("S", "W"):
-            dec = -dec
-        return dec
-
-    lat = _to_deg(tagged.get("GPSLatitude"), tagged.get("GPSLatitudeRef") or "N")
-    lon = _to_deg(tagged.get("GPSLongitude"), tagged.get("GPSLongitudeRef") or "E")
+    lat = _gps_values_to_degrees(tagged.get("GPSLatitude"), tagged.get("GPSLatitudeRef") or "N")
+    lon = _gps_values_to_degrees(tagged.get("GPSLongitude"), tagged.get("GPSLongitudeRef") or "E")
     return lat, lon
 
 

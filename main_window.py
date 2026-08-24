@@ -1181,6 +1181,20 @@ class PhotoLab(QMainWindow):
         self.metadata_label.setWordWrap(True)
         self.metadata_label.setStyleSheet("color:#aaa; font-size:11px;")
         mb_layout.addWidget(self.metadata_label)
+        gps_row = QHBoxLayout()
+        self.gps_status_label = QLabel()
+        self.gps_status_label.setTextFormat(Qt.TextFormat.RichText)
+        gps_row.addWidget(self.gps_status_label, 1)
+        self.gps_map_btn = QPushButton("Map this photo")
+        self.gps_map_btn.setToolTip("Show this photo's location on the map")
+        self.gps_map_btn.clicked.connect(self._map_current_photo)
+        gps_row.addWidget(self.gps_map_btn)
+        mb_layout.addLayout(gps_row)
+        self.gps_folder_btn = QPushButton("Select GPS photos && show map")
+        self.gps_folder_btn.setToolTip("Find geotagged photos in the filmstrip, select them, and open the map")
+        self.gps_folder_btn.clicked.connect(self.select_gps_photos_and_map)
+        mb_layout.addWidget(self.gps_folder_btn)
+        self._set_gps_status(None)
         ll.addWidget(meta_box)
 
         left.setMinimumWidth(220)
@@ -4245,6 +4259,47 @@ class PhotoLab(QMainWindow):
         dlg = MapDialog(paths, parent=self, on_open_path=self.load_image)
         dlg.exec()
 
+    def _map_current_photo(self):
+        """Open the map list for only the currently displayed geotagged photo."""
+        if not self.current_path:
+            return
+        from imaging import extract_gps
+        if not extract_gps(self.current_path):
+            QMessageBox.information(self, "Map", "This photo does not contain GPS coordinates.")
+            return
+        from map_view import MapDialog
+        MapDialog([self.current_path], parent=self, on_open_path=self.load_image).exec()
+
+    def select_gps_photos_and_map(self):
+        """Select geotagged filmstrip items, then display that selection on the map."""
+        if not getattr(self, "image_paths", None):
+            QMessageBox.information(self, "Map", "Open a folder first.")
+            return
+        from imaging import extract_gps
+        progress = QProgressDialog("Checking photos for GPS coordinates…", "Cancel", 0,
+                                   self.filmstrip.count(), self)
+        progress.setWindowTitle("Find GPS photos")
+        progress.setMinimumDuration(300)
+        found = []
+        self.filmstrip.clearSelection()
+        for i in range(self.filmstrip.count()):
+            if progress.wasCanceled():
+                break
+            item = self.filmstrip.item(i)
+            path = item.data(Qt.ItemDataRole.UserRole)
+            if path and extract_gps(path):
+                item.setSelected(True)
+                found.append(path)
+            progress.setValue(i + 1)
+            QApplication.processEvents()
+        progress.close()
+        if not found:
+            QMessageBox.information(self, "Map", "No photos with GPS coordinates were found.")
+            return
+        self.statusBar().showMessage(f"Selected {len(found)} GPS-tagged photo(s)")
+        from map_view import MapDialog
+        MapDialog(found, parent=self, on_open_path=self.load_image).exec()
+
     def start_slideshow(self):
         paths = []
         try:
@@ -5955,6 +6010,7 @@ class PhotoLab(QMainWindow):
             self.open_folder_path(path)
 
     def _update_metadata_display(self, meta: dict):
+        self._set_gps_status((meta or {}).get("gps"))
         if not meta:
             self.metadata_label.setText("No metadata available")
             return
@@ -5988,6 +6044,23 @@ class PhotoLab(QMainWindow):
             self.metadata_label.setText("No metadata available")
         else:
             self.metadata_label.setText("<br>".join(lines))
+
+    def _set_gps_status(self, gps):
+        """Update the metadata panel's red/green GPS availability indicator."""
+        available = bool(gps and len(gps) >= 2)
+        if available:
+            lat, lon = float(gps[0]), float(gps[1])
+            self.gps_status_label.setText(
+                f'<span style="color:#43c96b; font-size:16px;">●</span> '
+                f'<b>GPS available</b><br><span style="color:#999;">{lat:.5f}, {lon:.5f}</span>'
+            )
+            self.gps_status_label.setToolTip("This photo contains valid GPS coordinates")
+        else:
+            self.gps_status_label.setText(
+                '<span style="color:#e05252; font-size:16px;">●</span> <b>GPS not available</b>'
+            )
+            self.gps_status_label.setToolTip("No GPS coordinates were found in this photo")
+        self.gps_map_btn.setEnabled(available)
 
     def closeEvent(self, event):
         renderer = getattr(self, "_preview_renderer", None)
