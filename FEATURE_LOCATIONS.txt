@@ -1,0 +1,17 @@
+PhotoLab — where to find new features
+=====================================
+
+INFRARED & ASTRO
+  Develop mode → right panel → Effects tab
+  Scroll past Black & White
+  Sections: "Infrared" and "Astro" (expanded by default in this build)
+
+ZEBRA STRIPES (overexposure)
+  Toolbar button: "Zebras"
+  OR View → Zebra Stripes (overexposure)
+  OR keyboard: Z
+
+CLIPPING (solid red/blue)
+  View → Clipping Warning  OR  keyboard: J
+
+Commit baseline: 4b7b8ee + visibility polish (IR/Astro expanded, Zebras on toolbar)
