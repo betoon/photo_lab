@@ -31,7 +31,7 @@ from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark)
 from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
-from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
+from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
 from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
 from catalog import Catalog
 import sys
@@ -347,6 +347,12 @@ class PhotoLab(QMainWindow):
         self.render_timer.setSingleShot(True)
         self.render_timer.setInterval(45)
         self.render_timer.timeout.connect(self.render_preview)
+        self._preview_generation = 0
+        self._preview_source_cache = {}
+        self._preview_renderer = PreviewRenderWorker()
+        self._preview_renderer.rendered.connect(self._on_preview_rendered)
+        self._preview_renderer.failed.connect(self._on_preview_render_failed)
+        self._preview_renderer.start()
 
         self._load_worker = None
         self.sliders: dict[str, SliderRow] = {}
@@ -3249,16 +3255,25 @@ class PhotoLab(QMainWindow):
             return
         recipe = self.recipes[self.current_path]
         meta = self.meta_cache.get(self.current_path, {})
-        multipliers = meta.get("wb_multipliers")
         h, w = self.original_bgr.shape[:2]
         max_dim = 1600
-        if max(h, w) > max_dim:
+        cache_key = (self.current_path, id(self.original_bgr), max_dim)
+        preview_src = self._preview_source_cache.get(cache_key)
+        if preview_src is None and max(h, w) > max_dim:
             scale = max_dim / max(h, w)
             preview_src = cv2.resize(self.original_bgr, (int(w * scale), int(h * scale)),
                                      interpolation=cv2.INTER_AREA)
-        else:
+        elif preview_src is None:
             preview_src = self.original_bgr
-        result = apply_recipe(preview_src, recipe, wb_multipliers=multipliers, meta=self.meta_cache.get(self.current_path))
+        self._preview_source_cache = {cache_key: preview_src}
+        self._preview_generation += 1
+        self._preview_renderer.submit(
+            self._preview_generation, self.current_path, preview_src, recipe, meta
+        )
+
+    def _on_preview_rendered(self, generation, path, result, preview_src):
+        if generation != self._preview_generation or path != self.current_path:
+            return
         self.histogram.set_image(result)
         pix = cv_to_qpixmap(result)
         orig_pix = cv_to_qpixmap(preview_src)
@@ -3271,6 +3286,10 @@ class PhotoLab(QMainWindow):
         if getattr(self, "_pending_history_label", None):
             self._push_history(self._pending_history_label)
             self._pending_history_label = None
+
+    def _on_preview_render_failed(self, generation, path, message):
+        if generation == self._preview_generation and path == self.current_path:
+            self.statusBar().showMessage(f"Preview render failed: {message}")
 
     def set_compare_mode(self, mode):
         self.act_edit.setChecked(mode == ImageCanvas.MODE_NORMAL)
@@ -5732,6 +5751,10 @@ class PhotoLab(QMainWindow):
             self.metadata_label.setText("<br>".join(lines))
 
     def closeEvent(self, event):
+        renderer = getattr(self, "_preview_renderer", None)
+        if renderer is not None:
+            renderer.stop()
+            renderer.wait(2000)
         try:
             self.catalog.close()
         except Exception:

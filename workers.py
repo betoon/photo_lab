@@ -12,6 +12,7 @@ from imaging import apply_recipe, load_image, is_raw, _silent_imread, extract_em
 from qt_utils import cv_to_qpixmap
 
 import threading
+import copy
 
 _HEAVY_SEM = threading.Semaphore(2)
 _HEAVY_LIMIT = 2
@@ -27,6 +28,51 @@ def set_max_concurrent_workers(n: int) -> None:
 
 def get_max_concurrent_workers() -> int:
     return int(_HEAVY_LIMIT)
+
+
+class PreviewRenderWorker(QThread):
+    """Single latest-wins preview queue; stale slider renders are discarded."""
+    rendered = pyqtSignal(int, str, object, object)  # generation, path, result, source
+    failed = pyqtSignal(int, str, str)
+
+    def __init__(self):
+        super().__init__()
+        self._condition = threading.Condition()
+        self._pending = None
+        self._stopping = False
+
+    def submit(self, generation, path, source, recipe, meta):
+        with self._condition:
+            self._pending = (
+                generation, path, source, copy.deepcopy(recipe), copy.deepcopy(meta or {})
+            )
+            self._condition.notify()
+
+    def stop(self):
+        with self._condition:
+            self._stopping = True
+            self._condition.notify()
+
+    def run(self):
+        while True:
+            with self._condition:
+                while self._pending is None and not self._stopping:
+                    self._condition.wait()
+                if self._stopping:
+                    return
+                job = self._pending
+                self._pending = None
+            generation, path, source, recipe, meta = job
+            try:
+                result = apply_recipe(
+                    source, recipe, wb_multipliers=meta.get("wb_multipliers"), meta=meta
+                )
+                with self._condition:
+                    stale = self._pending is not None and self._pending[0] > generation
+                if not stale:
+                    self.rendered.emit(generation, path, result, source)
+            except Exception as exc:
+                self.failed.emit(generation, path, str(exc))
 
 
 class ThumbnailWorker(QThread):

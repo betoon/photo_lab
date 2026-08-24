@@ -443,7 +443,37 @@ def ken_burns_zoom_scale(ken_style, zoom_amount, t):
     if ken_style == "Zoom Out":
         return 1.0 + zoom_amount * (1.0 - t)
     return 1.0 + zoom_amount * t
-def _render_crop_frame(img, img_w, img_h, aspect_ratio, zoom_scale, pan_t, out_w, out_h, motion_blur=0.0, is_preview=False, start_focus=None, start_focus_weight=0.0, end_focus=None, focus_t=None):
+
+
+def evaluate_motion_keyframes(keyframes, t, default_zoom=1.0):
+    """Interpolate normalized camera keyframes; returns focus, zoom, rotation."""
+    frames = sorted((dict(k) for k in (keyframes or [])), key=lambda k: float(k.get("time", 0.0)))
+    if not frames:
+        return None, float(default_zoom), 0.0
+    t = float(np.clip(t, 0.0, 1.0))
+    if t <= float(frames[0].get("time", 0.0)):
+        k = frames[0]
+        return (float(k.get("x", 0.5)), float(k.get("y", 0.5))), float(k.get("zoom", default_zoom)), float(k.get("rotation", 0.0))
+    if t >= float(frames[-1].get("time", 1.0)):
+        k = frames[-1]
+        return (float(k.get("x", 0.5)), float(k.get("y", 0.5))), float(k.get("zoom", default_zoom)), float(k.get("rotation", 0.0))
+    for left, right in zip(frames, frames[1:]):
+        t0, t1 = float(left.get("time", 0.0)), float(right.get("time", 1.0))
+        if t <= t1:
+            span = max(1e-6, t1 - t0)
+            u = np.clip((t - t0) / span, 0.0, 1.0)
+            hold = np.clip(float(left.get("hold", 0.0)), 0.0, 0.95)
+            u = 0.0 if u <= hold else (u - hold) / (1.0 - hold)
+            speed = max(0.1, float(left.get("speed", 1.0)))
+            u = float(np.clip(u, 0.0, 1.0)) ** (1.0 / speed)
+            easing = EASING_CURVES.get(str(left.get("easing", "Smoothstep")), EASING_CURVES["Smoothstep"])
+            u = float(np.clip(easing(u), 0.0, 1.0))
+            lerp = lambda key, default: float(left.get(key, default)) * (1.0 - u) + float(right.get(key, default)) * u
+            return (lerp("x", 0.5), lerp("y", 0.5)), lerp("zoom", default_zoom), lerp("rotation", 0.0)
+    return None, float(default_zoom), 0.0
+
+
+def _render_crop_frame(img, img_w, img_h, aspect_ratio, zoom_scale, pan_t, out_w, out_h, motion_blur=0.0, is_preview=False, start_focus=None, start_focus_weight=0.0, end_focus=None, focus_t=None, focus_override=None, rotation=0.0):
     crop_h = img_h / zoom_scale
     crop_w = crop_h * aspect_ratio
     if crop_w > img_w:
@@ -460,7 +490,9 @@ def _render_crop_frame(img, img_w, img_h, aspect_ratio, zoom_scale, pan_t, out_w
         fy = (focus_y * img_h) - (crop_h / 2.0)
         return max(0.0, min(fx, max_x)), max(0.0, min(fy, max_y))
 
-    if start_focus is not None and end_focus is not None:
+    if focus_override is not None:
+        crop_x, crop_y = _crop_for_focus(focus_override)
+    elif start_focus is not None and end_focus is not None:
         # Intro zooms use their own focus transition; ordinary pan motion still uses pan_t.
         focus_progress = pan_t if focus_t is None else float(np.clip(focus_t, 0.0, 1.0))
         focus_x = start_focus[0] * (1.0 - focus_progress) + end_focus[0] * focus_progress
@@ -486,6 +518,10 @@ def _render_crop_frame(img, img_w, img_h, aspect_ratio, zoom_scale, pan_t, out_w
     # Use spatial area downsampling for structural sharpness during scaling shifts
     interp = cv2.INTER_AREA if (is_preview or out_w < (x1 - x0)) else cv2.INTER_LANCZOS4
     frame = cv2.resize(crop, (out_w, out_h), interpolation=interp)
+
+    if abs(float(rotation or 0.0)) > 1e-4:
+        matrix = cv2.getRotationMatrix2D((out_w / 2.0, out_h / 2.0), float(rotation), 1.0)
+        frame = cv2.warpAffine(frame, matrix, (out_w, out_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
 
     if motion_blur > 0:
         kernel = np.array([[0, 0, 0], [1, 5, 1], [0, 0, 0]], dtype=np.float32) / 7.0
@@ -537,6 +573,7 @@ class RenderSettings:
     start_focus: tuple = None
     end_focus: tuple = None
     intro_focus: tuple = None
+    motion_keyframes: list = dataclasses.field(default_factory=list)
     film_grain: float = 0.0
     film_dust: float = 0.0
     film_scratches: float = 0.0
@@ -615,6 +652,7 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
     start_focus        = settings.start_focus
     end_focus          = settings.end_focus
     intro_focus        = settings.intro_focus
+    motion_keyframes   = settings.motion_keyframes
     film_grain         = settings.film_grain
     film_dust          = settings.film_dust
     film_scratches     = settings.film_scratches
@@ -723,10 +761,17 @@ def build_pan_video(image_path, output_path, settings: RenderSettings,
         else:
             zoom_scale = 1.0
 
+        key_focus, key_zoom, key_rotation = evaluate_motion_keyframes(
+            motion_keyframes, global_t, default_zoom=zoom_scale
+        )
+        if motion_keyframes:
+            zoom_scale = max(1.0, key_zoom)
+
         pan_t = (1.0 - global_t) if reverse_pan else global_t
         frame = _render_crop_frame(
             img, img_w, img_h, aspect_ratio, zoom_scale, pan_t, out_w, out_height,
-            motion_blur, is_preview=False, start_focus=start_focus, start_focus_weight=1.0 - global_t, end_focus=end_focus
+            motion_blur, is_preview=False, start_focus=start_focus, start_focus_weight=1.0 - global_t,
+            end_focus=end_focus, focus_override=key_focus, rotation=key_rotation
         )
 
         frame = _look(frame, frame_counter)
@@ -915,6 +960,15 @@ class PanoramaToVideoApp:
         self.end_focus = None
         self.intro_focus = None
         self.focus_mode_var = tk.StringVar(value="Start")
+        self.motion_keyframes = []
+        self.keyframe_time_var = tk.DoubleVar(value=0.5)
+        self.keyframe_zoom_var = tk.DoubleVar(value=1.2)
+        self.keyframe_rotation_var = tk.DoubleVar(value=0.0)
+        self.keyframe_hold_var = tk.DoubleVar(value=0.0)
+        self.keyframe_speed_var = tk.DoubleVar(value=1.0)
+        self.keyframe_easing_var = tk.StringVar(value="Smoothstep")
+        self.show_safe_guides_var = tk.BooleanVar(value=True)
+        self.show_framing_guides_var = tk.BooleanVar(value=True)
         self.motion_preset_var = tk.StringVar(value="Gentle Documentary")
 
         self._build_widgets()
@@ -1129,10 +1183,28 @@ class PanoramaToVideoApp:
 
         focus_bar = tk.Frame(self.scrollable_frame, bg="#1a1a1a")
         focus_bar.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 4))
-        ttk.Radiobutton(focus_bar, text="Click Sets Start", variable=self.focus_mode_var, value="Start").pack(side="left", padx=14)
-        ttk.Radiobutton(focus_bar, text="Click Sets End", variable=self.focus_mode_var, value="End").pack(side="left", padx=14)
-        ttk.Radiobutton(focus_bar, text="Deep Click Sets Intro Start", variable=self.focus_mode_var, value="Intro").pack(side="left", padx=14)
-        ttk.Button(focus_bar, text="Clear Focus Points", command=self.clear_focus_points).pack(side="left", padx=14)
+        focus_top = tk.Frame(focus_bar, bg="#1a1a1a")
+        focus_top.pack(fill="x")
+        ttk.Radiobutton(focus_top, text="Click Sets Start", variable=self.focus_mode_var, value="Start").pack(side="left", padx=10)
+        ttk.Radiobutton(focus_top, text="Click Sets End", variable=self.focus_mode_var, value="End").pack(side="left", padx=10)
+        ttk.Radiobutton(focus_top, text="Deep Intro", variable=self.focus_mode_var, value="Intro").pack(side="left", padx=10)
+        ttk.Radiobutton(focus_top, text="Add Keyframe", variable=self.focus_mode_var, value="Keyframe").pack(side="left", padx=10)
+        ttk.Button(focus_top, text="Clear Points", command=self.clear_focus_points).pack(side="left", padx=10)
+        ttk.Checkbutton(focus_top, text="Safe guides", variable=self.show_safe_guides_var, command=self._refresh_still_preview).pack(side="left", padx=8)
+        ttk.Checkbutton(focus_top, text="Framing guides", variable=self.show_framing_guides_var, command=self._refresh_still_preview).pack(side="left", padx=8)
+
+        key_editor = tk.Frame(focus_bar, bg="#1a1a1a")
+        key_editor.pack(fill="x", pady=(3, 0))
+        for label, var, width in (("Time 0–1", self.keyframe_time_var, 6), ("Zoom", self.keyframe_zoom_var, 6),
+                                  ("Rotation", self.keyframe_rotation_var, 6), ("Hold", self.keyframe_hold_var, 6),
+                                  ("Speed", self.keyframe_speed_var, 6)):
+            tk.Label(key_editor, text=label, bg="#1a1a1a", fg="#aaa").pack(side="left", padx=(8, 2))
+            ttk.Entry(key_editor, textvariable=var, width=width).pack(side="left")
+        ttk.Combobox(key_editor, textvariable=self.keyframe_easing_var,
+                     values=list(EASING_CURVES.keys()), state="readonly", width=12).pack(side="left", padx=8)
+        self.keyframe_list = ttk.Combobox(key_editor, state="readonly", width=30)
+        self.keyframe_list.pack(side="left", padx=4)
+        ttk.Button(key_editor, text="Remove", command=self.remove_selected_keyframe).pack(side="left", padx=4)
 
         # ---- Left column: Video Settings / Intro Zoom Out / Audio Track & Fades ----
         s = self._section_frame("Video Settings")
@@ -1154,7 +1226,7 @@ class PanoramaToVideoApp:
         self.height_entry.pack(side="left", padx=10)
         tk.Label(r, text="px", bg="#1a1a1a").pack(side="left")
 
-        for label, var, vals in [("Aspect ratio:", self.aspect_var, ["16:9","9:16","4:3","21:9","1:1"]),
+        for label, var, vals in [("Aspect ratio:", self.aspect_var, ["16:9","9:16","4:3","21:9","1:1","4:5"]),
                                  ("FFmpeg Encoder:", self.codec_var, ["libx264","libx265"])]:
             r = tk.Frame(s, bg="#1a1a1a")
             r.pack(fill="x", padx=8, pady=2)
@@ -1330,8 +1402,6 @@ class PanoramaToVideoApp:
 
 
     def _draw_focus_overlay(self, img):
-        if not (self.start_focus or self.end_focus or self.intro_focus):
-            return img
         out = img.copy()
         draw = ImageDraw.Draw(out)
         w, h = out.size
@@ -1341,6 +1411,15 @@ class PanoramaToVideoApp:
 
         if self.start_focus and self.end_focus:
             draw.line([_pt(self.start_focus), _pt(self.end_focus)], fill="#facc15", width=max(2, w // 220))
+        if self.motion_keyframes:
+            points = [_pt((k["x"], k["y"])) for k in sorted(self.motion_keyframes, key=lambda item: item["time"])]
+            if len(points) > 1:
+                draw.line(points, fill="#c084fc", width=max(2, w // 220))
+            for index, point in enumerate(points, 1):
+                x, y = point
+                radius = max(5, min(w, h) // 34)
+                draw.ellipse((x-radius, y-radius, x+radius, y+radius), outline="#c084fc", width=2)
+                draw.text((x+radius+2, y-radius), f"K{index}", fill="#c084fc")
         for focus, color, label in (
             (self.start_focus, "#22c55e", "S"),
             (self.end_focus, "#ef4444", "E"),
@@ -1352,6 +1431,23 @@ class PanoramaToVideoApp:
             r = max(6, min(w, h) // 28)
             draw.ellipse((x - r, y - r, x + r, y + r), outline=color, width=max(2, r // 3))
             draw.text((x + r + 2, y - r), label, fill=color)
+        if self.show_framing_guides_var.get():
+            try:
+                aw, ah = (float(part) for part in self.aspect_var.get().split(":"))
+                ratio = aw / ah
+                guide_w, guide_h = w, w / ratio
+                if guide_h > h:
+                    guide_h, guide_w = h, h * ratio
+                x0, y0 = (w-guide_w)/2, (h-guide_h)/2
+                draw.rectangle((x0, y0, x0+guide_w, y0+guide_h), outline="#94a3b8", width=max(1, w//360))
+            except Exception:
+                x0, y0, guide_w, guide_h = 0, 0, w, h
+        else:
+            x0, y0, guide_w, guide_h = 0, 0, w, h
+        if self.show_safe_guides_var.get():
+            for inset, color in ((0.05, "#64748b"), (0.10, "#475569")):
+                dx, dy = guide_w*inset, guide_h*inset
+                draw.rectangle((x0+dx, y0+dy, x0+guide_w-dx, y0+guide_h-dy), outline=color, width=1)
         return out
 
     def _refresh_still_preview(self):
@@ -1371,10 +1467,23 @@ class PanoramaToVideoApp:
         except Exception:
             pass
 
+    def _draw_crop_safe_guides(self, image):
+        if not self.show_safe_guides_var.get():
+            return image
+        out = image.copy()
+        draw = ImageDraw.Draw(out)
+        w, h = out.size
+        for inset, color in ((0.05, "#64748b"), (0.10, "#475569")):
+            dx, dy = int(w * inset), int(h * inset)
+            draw.rectangle((dx, dy, w-dx-1, h-dy-1), outline=color, width=1)
+        return out
+
     def clear_focus_points(self):
         self.start_focus = None
         self.end_focus = None
         self.intro_focus = None
+        self.motion_keyframes = []
+        self._sync_keyframe_list()
         self._refresh_still_preview()
         self.status_label.config(text="Focus points cleared.")
 
@@ -1396,7 +1505,20 @@ class PanoramaToVideoApp:
         y = (event.y - offset_y) / max(1, display_h)
         x = float(np.clip(x, 0.0, 1.0))
         y = float(np.clip(y, 0.0, 1.0))
-        if self.focus_mode_var.get() == "End":
+        if self.focus_mode_var.get() == "Keyframe":
+            self.motion_keyframes.append({
+                "time": float(np.clip(self.keyframe_time_var.get(), 0.0, 1.0)),
+                "x": x, "y": y,
+                "zoom": max(1.0, float(self.keyframe_zoom_var.get())),
+                "rotation": float(np.clip(self.keyframe_rotation_var.get(), -45.0, 45.0)),
+                "hold": float(np.clip(self.keyframe_hold_var.get(), 0.0, 0.95)),
+                "speed": max(0.1, float(self.keyframe_speed_var.get())),
+                "easing": self.keyframe_easing_var.get(),
+            })
+            self.motion_keyframes.sort(key=lambda item: item["time"])
+            self._sync_keyframe_list()
+            self.status_label.config(text=f"Motion keyframe added at {self.keyframe_time_var.get():.0%}")
+        elif self.focus_mode_var.get() == "End":
             self.end_focus = (x, y)
             self.status_label.config(text=f"End focus set: {x:.0%} across, {y:.0%} down")
         elif self.focus_mode_var.get() == "Intro":
@@ -1406,6 +1528,25 @@ class PanoramaToVideoApp:
         else:
             self.start_focus = (x, y)
             self.status_label.config(text=f"Start focus set: {x:.0%} across, {y:.0%} down")
+        self._refresh_still_preview()
+
+    def _sync_keyframe_list(self):
+        values = [
+            f"K{i+1}  {k['time']:.0%}  zoom {k['zoom']:.2f}x  rot {k['rotation']:.1f}°"
+            for i, k in enumerate(self.motion_keyframes)
+        ]
+        if hasattr(self, "keyframe_list"):
+            self.keyframe_list.configure(values=values)
+            self.keyframe_list.set(values[0] if values else "")
+
+    def remove_selected_keyframe(self):
+        if not self.motion_keyframes:
+            return
+        index = self.keyframe_list.current()
+        if index < 0:
+            index = len(self.motion_keyframes) - 1
+        self.motion_keyframes.pop(index)
+        self._sync_keyframe_list()
         self._refresh_still_preview()
 
     def show_deep_start_frame(self):
@@ -1653,17 +1794,21 @@ class PanoramaToVideoApp:
                 main_i = i - intro_preview_frames
                 t = easing_func(main_i / (main_preview_frames - 1) if main_preview_frames > 1 else 1.0)
                 zoom_scale = ken_burns_zoom_scale(self.ken_style_var.get(), self.zoom_var_float.get(), t) if self.ken_burns_var.get() else 1.0
+                key_focus, key_zoom, key_rotation = evaluate_motion_keyframes(self.motion_keyframes, t, zoom_scale)
+                if self.motion_keyframes:
+                    zoom_scale = max(1.0, key_zoom)
                 pan_t = (1.0 - t) if self.reverse_pan_var.get() else t
                 frame = _render_crop_frame(
                     self.preview_img_cache, img_w, img_h, aspect_ratio,
                     zoom_scale, pan_t, preview_w, preview_h,
                     self.motion_blur_var.get(), is_preview=True,
-                    start_focus=self.start_focus, start_focus_weight=1.0 - t, end_focus=self.end_focus
+                    start_focus=self.start_focus, start_focus_weight=1.0 - t, end_focus=self.end_focus,
+                    focus_override=key_focus, rotation=key_rotation
                 )
             frame = self._apply_look_and_vignette(frame, self.preview_frame_idx)
             
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img_pil = Image.fromarray(rgb_frame)
+            img_pil = self._draw_crop_safe_guides(Image.fromarray(rgb_frame))
             self.current_preview_tk = ImageTk.PhotoImage(img_pil)
             
             self.preview_display_size = img_pil.size
@@ -1714,13 +1859,18 @@ class PanoramaToVideoApp:
             else:
                 zoom_scale = 1.0
 
+            key_focus, key_zoom, key_rotation = evaluate_motion_keyframes(self.motion_keyframes, t, zoom_scale)
+            if self.motion_keyframes:
+                zoom_scale = max(1.0, key_zoom)
+
             pan_t = (1.0 - t) if self.reverse_pan_var.get() else t
 
             frame = _render_crop_frame(
                 img, img_w, img_h, aspect_ratio,
                 zoom_scale, pan_t, out_w, out_height,
                 self.motion_blur_var.get(), is_preview=False,
-                start_focus=self.start_focus, start_focus_weight=1.0 - t, end_focus=self.end_focus
+                start_focus=self.start_focus, start_focus_weight=1.0 - t, end_focus=self.end_focus,
+                focus_override=key_focus, rotation=key_rotation
             )
 
             frame_idx_for_look = self.preview_frame_idx if self.preview_running else 0
@@ -1791,6 +1941,9 @@ class PanoramaToVideoApp:
             "start_focus": list(self.start_focus) if self.start_focus else None,
             "end_focus": list(self.end_focus) if self.end_focus else None,
             "intro_focus": list(self.intro_focus) if self.intro_focus else None,
+            "motion_keyframes": [dict(k) for k in self.motion_keyframes],
+            "show_safe_guides": bool(self.show_safe_guides_var.get()),
+            "show_framing_guides": bool(self.show_framing_guides_var.get()),
         }
         if include_paths:
             d["image_path"] = self.image_path.get()
@@ -1891,6 +2044,10 @@ class PanoramaToVideoApp:
                 self.intro_focus = tuple(d["intro_focus"])
             else:
                 self.intro_focus = None
+            self.motion_keyframes = [dict(k) for k in d.get("motion_keyframes", [])]
+            self.show_safe_guides_var.set(bool(d.get("show_safe_guides", True)))
+            self.show_framing_guides_var.set(bool(d.get("show_framing_guides", True)))
+            self._sync_keyframe_list()
             self._refresh_still_preview()
 
             self._on_resolution_change()
@@ -2050,6 +2207,7 @@ class PanoramaToVideoApp:
                 start_focus        = self.start_focus,
                 end_focus          = self.end_focus,
                 intro_focus        = self.intro_focus,
+                motion_keyframes   = [dict(k) for k in self.motion_keyframes],
                 film_grain         = self.film_grain_var.get(),
                 film_dust          = self.film_dust_var.get(),
                 film_scratches     = self.film_scratches_var.get(),
