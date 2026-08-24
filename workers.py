@@ -4,11 +4,13 @@ image pipeline (thumbnail generation, full-resolution export, RAW decode)."""
 from __future__ import annotations
 
 import os
+import shutil
+import hashlib
 import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap
 
-from imaging import apply_recipe, load_image, is_raw, _silent_imread, extract_embedded_preview
+from imaging import apply_recipe, load_image, is_raw, IMAGE_EXTS, _silent_imread, extract_embedded_preview
 from qt_utils import cv_to_qpixmap
 
 import threading
@@ -16,6 +18,98 @@ import copy
 
 _HEAVY_SEM = threading.Semaphore(2)
 _HEAVY_LIMIT = 2
+
+
+class SdImportWorker(QThread):
+    """Copy camera media safely; never deletes or modifies the source card."""
+    progress = pyqtSignal(int, int, str)
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, source, destination, preserve_folders=False, video_exts=()):
+        super().__init__()
+        self.source = os.path.abspath(source)
+        self.destination = os.path.abspath(destination)
+        self.preserve_folders = bool(preserve_folders)
+        self.extensions = {e.lower() for e in tuple(IMAGE_EXTS) + tuple(video_exts)}
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    @staticmethod
+    def _same_file(source, destination, source_size):
+        if os.path.getsize(destination) != source_size:
+            return False
+        def digest(path):
+            value = hashlib.sha256()
+            with open(path, "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    value.update(chunk)
+            return value.digest()
+        return digest(source) == digest(destination)
+
+    @classmethod
+    def _unique_destination(cls, path, source_path, source_size):
+        if not os.path.exists(path):
+            return path, False
+        if cls._same_file(source_path, path, source_size):
+            return path, True
+        stem, ext = os.path.splitext(path)
+        number = 1
+        while True:
+            candidate = f"{stem}_{number}{ext}"
+            if not os.path.exists(candidate):
+                return candidate, False
+            if cls._same_file(source_path, candidate, source_size):
+                return candidate, True
+            number += 1
+
+    def run(self):
+        try:
+            files = []
+            for root, _dirs, names in os.walk(self.source):
+                for name in names:
+                    if os.path.splitext(name)[1].lower() in self.extensions:
+                        files.append(os.path.join(root, name))
+            files.sort(key=str.lower)
+            copied = skipped = renamed = 0
+            errors = []
+            os.makedirs(self.destination, exist_ok=True)
+            for index, source_path in enumerate(files, 1):
+                if self._cancel:
+                    break
+                relative = os.path.relpath(source_path, self.source)
+                target = os.path.join(self.destination, relative if self.preserve_folders else os.path.basename(source_path))
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                source_size = os.path.getsize(source_path)
+                chosen, exists = self._unique_destination(target, source_path, source_size)
+                if exists:
+                    skipped += 1
+                    self.progress.emit(index, len(files), os.path.basename(source_path))
+                    continue
+                if os.path.normcase(chosen) != os.path.normcase(target):
+                    renamed += 1
+                temporary = chosen + ".photolab-part"
+                try:
+                    shutil.copy2(source_path, temporary)
+                    if os.path.getsize(temporary) != source_size:
+                        raise IOError("copied size does not match source")
+                    os.replace(temporary, chosen)
+                    copied += 1
+                except Exception as exc:
+                    errors.append(f"{os.path.basename(source_path)}: {exc}")
+                    try:
+                        if os.path.exists(temporary):
+                            os.remove(temporary)
+                    except Exception:
+                        pass
+                self.progress.emit(index, len(files), os.path.basename(source_path))
+            self.completed.emit({"found": len(files), "copied": copied, "skipped": skipped,
+                                 "renamed": renamed, "errors": errors, "cancelled": self._cancel,
+                                 "destination": self.destination})
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 def set_max_concurrent_workers(n: int) -> None:

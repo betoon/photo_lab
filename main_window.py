@@ -31,7 +31,7 @@ from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark)
 from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
-from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
+from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, SdImportWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
 from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
 from catalog import Catalog
 import sys
@@ -526,6 +526,7 @@ class PhotoLab(QMainWindow):
         file_m = mb.addMenu("&File")
         add_action(file_m, "Open Folder for Editing…", self.open_folder, "Ctrl+O")
         add_action(file_m, "Scan Folder into Library…", self.scan_library_folder, "Ctrl+Shift+O")
+        add_action(file_m, "Import from SD Card…", self.import_from_sd)
         self.recent_menu = file_m.addMenu("Recent Folders")
         self._rebuild_recent_menu()
         file_m.addSeparator()
@@ -2721,6 +2722,119 @@ class PhotoLab(QMainWindow):
         if folder:
             self.show_develop_mode()
             self.open_folder_path(folder)
+
+    def import_from_sd(self):
+        """Copy camera media from a card/device folder without deleting originals."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Import from SD Card")
+        dlg.setMinimumWidth(620)
+        form = QFormLayout(dlg)
+        settings = QSettings("PhotoLab", "PhotoLab")
+        source_edit = QLineEdit(str(settings.value("sd_import_source", "")))
+        destination_edit = QLineEdit(str(settings.value("sd_import_destination", "")))
+
+        def path_row(edit, title):
+            holder = QWidget()
+            row = QHBoxLayout(holder)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(edit, 1)
+            button = QPushButton("Browse…")
+            button.clicked.connect(lambda: self._choose_import_folder(edit, title))
+            row.addWidget(button)
+            return holder
+
+        form.addRow("Source card/folder", path_row(source_edit, "Choose SD card or camera folder"))
+        form.addRow("Destination", path_row(destination_edit, "Choose import destination"))
+        preserve = QCheckBox("Preserve folders from the card (for example DCIM/100NIKON)")
+        preserve.setChecked(bool(settings.value("sd_import_preserve", False, type=bool)))
+        form.addRow("", preserve)
+        note = QLabel(
+            "PhotoLab copies supported photos and videos. It never deletes files from the card. "
+            "Exact duplicates are skipped; filename collisions are safely renamed."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#999; font-size:11px;")
+        form.addRow(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        source = os.path.abspath(source_edit.text().strip())
+        destination = os.path.abspath(destination_edit.text().strip())
+        if not os.path.isdir(source):
+            QMessageBox.warning(self, "Import from SD Card", "Choose an existing source card or folder.")
+            return
+        if not destination:
+            QMessageBox.warning(self, "Import from SD Card", "Choose a destination folder.")
+            return
+        try:
+            if os.path.commonpath([source, destination]) == source:
+                QMessageBox.warning(self, "Import from SD Card", "The destination cannot be inside the source card.")
+                return
+        except ValueError:
+            pass  # Different Windows drives are expected.
+        settings.setValue("sd_import_source", source)
+        settings.setValue("sd_import_destination", destination)
+        settings.setValue("sd_import_preserve", preserve.isChecked())
+
+        progress = QProgressDialog("Scanning card…", "Cancel", 0, 0, self)
+        progress.setWindowTitle("Import from SD Card")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        worker = SdImportWorker(source, destination, preserve.isChecked(), VIDEO_EXTENSIONS)
+        self._sd_import_worker = worker
+        self._sd_import_progress = progress
+        progress.canceled.connect(worker.cancel)
+        worker.progress.connect(self._on_sd_import_progress)
+        worker.completed.connect(self._on_sd_import_completed)
+        worker.failed.connect(self._on_sd_import_failed)
+        worker.start()
+
+    def _choose_import_folder(self, edit, title):
+        folder = QFileDialog.getExistingDirectory(self, title, edit.text().strip())
+        if folder:
+            edit.setText(folder)
+
+    def _on_sd_import_progress(self, current, total, name):
+        progress = getattr(self, "_sd_import_progress", None)
+        if progress is not None:
+            progress.setRange(0, max(1, total))
+            progress.setValue(current)
+            progress.setLabelText(f"Copying {name}\n{current} of {total}")
+
+    def _on_sd_import_completed(self, summary):
+        progress = getattr(self, "_sd_import_progress", None)
+        if progress is not None:
+            progress.close()
+        errors = summary.get("errors") or []
+        message = (
+            f"Found: {summary['found']}\nCopied and verified: {summary['copied']}\n"
+            f"Duplicates skipped: {summary['skipped']}\nRenamed collisions: {summary['renamed']}"
+        )
+        if summary.get("cancelled"):
+            message += "\n\nImport was cancelled; completed copies were kept."
+        if errors:
+            message += f"\n\nErrors: {len(errors)}\n" + "\n".join(errors[:5])
+        result = QMessageBox.question(
+            self, "SD Import Complete", message + "\n\nOpen the destination for editing?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        destination = summary["destination"]
+        self._sd_import_worker = None
+        self._sd_import_progress = None
+        if result == QMessageBox.StandardButton.Yes:
+            self.open_folder_path(destination)
+
+    def _on_sd_import_failed(self, error):
+        progress = getattr(self, "_sd_import_progress", None)
+        if progress is not None:
+            progress.close()
+        self._sd_import_worker = None
+        self._sd_import_progress = None
+        QMessageBox.warning(self, "SD Import Failed", error)
 
     def open_folder_path(self, folder: str):
         """Load images from one folder into the Develop filmstrip only."""
