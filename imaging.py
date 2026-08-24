@@ -1355,6 +1355,64 @@ def build_brush_mask(img, spec):
     return np.clip(mask, 0, 1).astype(np.float32)
 
 
+def apply_local_preset_look(img, preset):
+    """Apply the tone/color subset of a Recipe dict to float BGR image data.
+
+    Spatial/global operations such as crop, geometry, denoise, sharpening,
+    grain, vignette, HDR, local masks, and output proofing are intentionally
+    excluded because they cannot be meaningfully blended through a local mask.
+    """
+    if not preset:
+        return img
+    p = Recipe.from_dict(preset) if isinstance(preset, dict) else preset
+    out = np.asarray(img, dtype=np.float32).copy()
+    out = apply_creative_white_balance(
+        out, getattr(p, "creative_temperature", 0.0), getattr(p, "creative_tint", 0.0)
+    )
+    if abs(float(getattr(p, "exposure", 0.0))) > 1e-4:
+        out *= 2.0 ** float(p.exposure)
+    if any(abs(float(getattr(p, k, 0.0))) > 1e-4 for k in ("highlights", "shadows", "whites", "blacks")):
+        lum = cv2.cvtColor(np.clip(out, 0, 1), cv2.COLOR_BGR2GRAY)
+        hi_mask = np.clip((lum - 0.55) * 2.2, 0, 1) ** 1.4
+        lo_mask = np.clip((0.45 - lum) * 2.2, 0, 1) ** 1.4
+        white_mask = np.clip((lum - 0.75) * 4.0, 0, 1)
+        black_mask = np.clip((0.25 - lum) * 4.0, 0, 1)
+        out += (p.highlights / 100.0) * 0.45 * hi_mask[..., None]
+        out += (p.shadows / 100.0) * 0.45 * lo_mask[..., None]
+        out += (p.whites / 100.0) * 0.35 * white_mask[..., None]
+        out += (p.blacks / 100.0) * 0.35 * black_mask[..., None]
+    if abs(float(getattr(p, "contrast", 0.0))) > 1e-4:
+        out = (out - 0.5) * (1.0 + p.contrast / 100.0) + 0.5
+    if abs(float(getattr(p, "clarity", 0.0))) > 1e-4:
+        blur = cv2.GaussianBlur(out, (0, 0), sigmaX=3)
+        out += (out - blur) * (p.clarity / 100.0)
+    out = apply_tone_curve(out, p.curve_shadows, p.curve_darks, p.curve_mids, p.curve_lights, p.curve_highlights)
+    out = apply_point_curve_luma(out, getattr(p, "curve_points", None) or [])
+    out = apply_rgb_point_curves(out, getattr(p, "curve_r_points", None) or [],
+                                 getattr(p, "curve_g_points", None) or [],
+                                 getattr(p, "curve_b_points", None) or [])
+    out = np.clip(out, 0, 1)
+    if abs(float(getattr(p, "gamma", 1.0)) - 1.0) > 1e-4:
+        out = out ** (1.0 / max(float(p.gamma), 0.05))
+    out = apply_vibrance_saturation(out, p.vibrance, p.saturation)
+    out = apply_hsl_selective(out, p.hsl_hue or (0,) * 8, p.hsl_sat or (0,) * 8, p.hsl_lum or (0,) * 8)
+    out = apply_split_tone(out, p.split_shadow_hue, p.split_shadow_sat,
+                           p.split_highlight_hue, p.split_highlight_sat, p.split_balance)
+    if abs(float(getattr(p, "clearview", 0.0))) > 1e-4:
+        amount = p.clearview / 100.0
+        lab = cv2.cvtColor(np.clip(out, 0, 1), cv2.COLOR_BGR2LAB)
+        light = lab[..., 0] / 100.0
+        blur = cv2.GaussianBlur(light, (0, 0), sigmaX=max(out.shape[1] / 12, 2))
+        lab[..., 0] = np.clip(light + (light - blur) * amount * 1.2 + (0.5 - blur) * amount * 0.15, 0, 1) * 100.0
+        out = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    if abs(float(getattr(p, "microcontrast", 0.0))) > 1e-4:
+        blur = cv2.GaussianBlur(out, (0, 0), sigmaX=1.2)
+        out += (out - blur) * (p.microcontrast / 100.0)
+    if bool(getattr(p, "black_and_white", False)):
+        out = cv2.cvtColor(cv2.cvtColor(np.clip(out, 0, 1), cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    return np.clip(out, 0, 1)
+
+
 def apply_brush_masks(img, masks):
     """Apply painted brush local adjustments.
 
@@ -1401,6 +1459,11 @@ def apply_brush_masks(img, masks):
             gains[2] *= 1.0 + (temp / 100.0) * 0.15
             gains[0] *= 1.0 - (temp / 100.0) * 0.15
             local = local * gains[None, None, :]
+        preset = m.get("local_preset")
+        strength = float(np.clip(m.get("preset_strength", 1.0), 0.0, 1.0))
+        if preset and strength > 1e-6:
+            styled = apply_local_preset_look(local, preset)
+            local = local * (1.0 - strength) + styled * strength
         out = out * (1.0 - mask3) + np.clip(local, 0, 1) * mask3
     return np.clip(out, 0, 1)
 

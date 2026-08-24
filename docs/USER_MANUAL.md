@@ -310,6 +310,16 @@ Enable **Local Adjustments**, click the image to place a point, then refine:
 5. **Auto subject mask** — offline OpenCV GrabCut (no neural net); creates a new brush entry you can refine.  
 6. Show mask only to preview coverage.
 
+### Apply a preset to a selected area
+
+1. Paint an Adjustment Brush mask and refine it with feather, edge-aware refinement, luminance range, color range, inversion, or intersection.
+2. Select that brush in the mask list.
+3. Under **Preset on selected mask**, choose **Apply preset…** and select a PhotoLab JSON or Lightroom/Camera Raw XMP preset.
+4. Adjust **Strength** from 0–100% while viewing the image and mask overlay.
+5. Use **Clear preset** to remove the look without deleting the mask.
+
+Localized presets apply tone and color operations only. Crop, geometry, denoise, sharpening, grain, vignette, HDR, output proofing, and other whole-image operations are intentionally ignored because they cannot be safely blended inside a painted boundary. The mask, preset, and strength are stored non-destructively in the sidecar.
+
 
 ## HDR
 

@@ -52,6 +52,8 @@ Central **non-destructive** image pipeline. No Qt imports.
 
 **Brush masks:** each entry is `{strokes, hardness, exposure, …, invert?}`. When `invert` is true, the painted region is the *protected* area and adjustments apply outside it.
 
+**Localized presets:** a brush entry may also contain `local_preset` (a serialized `Recipe`), `preset_name`, and `preset_strength`. `apply_local_preset_look` explicitly renders only mask-safe tone/color fields, then `apply_brush_masks` blends that result through the rasterized mask. Never call `apply_recipe` recursively for a local preset: it would repeat geometry, denoise, sharpening, other masks, and output stages. New Recipe fields remain excluded until deliberately audited as spatially blend-safe.
+
 **Thumbnails:** `ThumbnailWorker` and `CatalogThumbWorker` call `extract_embedded_preview` first (embedded JPEG from RAW, else half-size postprocess, else downscaled image).
 
 ---

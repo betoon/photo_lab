@@ -2089,6 +2089,26 @@ class PhotoLab(QMainWindow):
             bsl.addWidget(row)
         self.brush_sliders_box.setEnabled(False)
         v.addWidget(self.brush_sliders_box)
+        preset_box = QGroupBox("Preset on selected mask")
+        preset_layout = QVBoxLayout(preset_box)
+        self.brush_preset_label = QLabel("No local preset")
+        self.brush_preset_label.setWordWrap(True)
+        self.brush_preset_label.setStyleSheet("color:#999; font-size:11px;")
+        preset_layout.addWidget(self.brush_preset_label)
+        preset_buttons = QHBoxLayout()
+        self.brush_preset_apply_btn = QPushButton("Apply preset…")
+        self.brush_preset_apply_btn.clicked.connect(self._apply_preset_to_brush_mask)
+        self.brush_preset_clear_btn = QPushButton("Clear preset")
+        self.brush_preset_clear_btn.clicked.connect(self._clear_brush_mask_preset)
+        preset_buttons.addWidget(self.brush_preset_apply_btn)
+        preset_buttons.addWidget(self.brush_preset_clear_btn)
+        preset_layout.addLayout(preset_buttons)
+        self.brush_preset_strength = SliderRow("Strength", 0.0, 100.0, 100.0, 1.0,
+            self._on_brush_preset_strength, 0)
+        preset_layout.addWidget(self.brush_preset_strength)
+        self.brush_preset_box = preset_box
+        self.brush_preset_box.setEnabled(False)
+        v.addWidget(preset_box)
 
         box, v = collapsible_group("Graduated Filters", layout)
         note = QLabel("Press G or enable Graduated, then drag on the image.")
@@ -5095,7 +5115,8 @@ class PhotoLab(QMainWindow):
         for i, m in enumerate(masks):
             n = len(m.get("strokes") or [])
             inv = " INV" if m.get("invert") or m.get("inverted") else ""
-            self.brush_list.addItem(f"Brush {i+1}{inv}  ({n} dabs, exp {m.get('exposure', 0):+.2f})")
+            preset = f" · {m.get('preset_name')}" if m.get("local_preset") else ""
+            self.brush_list.addItem(f"Brush {i+1}{inv}  ({n} dabs, exp {m.get('exposure', 0):+.2f}){preset}")
         sel = getattr(self, "selected_brush_index", -1)
         if 0 <= sel < len(masks):
             self.brush_list.setCurrentRow(sel)
@@ -5114,7 +5135,11 @@ class PhotoLab(QMainWindow):
         masks = (self.recipes.get(self.current_path).brush_masks if self.current_path else None) or []
         ok = getattr(self, "selected_brush_index", -1) >= 0 and self.selected_brush_index < len(masks)
         self.brush_sliders_box.setEnabled(ok)
+        if hasattr(self, "brush_preset_box"):
+            self.brush_preset_box.setEnabled(ok)
         if not ok:
+            if hasattr(self, "brush_preset_label"):
+                self.brush_preset_label.setText("No local preset")
             return
         m = masks[self.selected_brush_index]
         for key, row in self.brush_sliders.items():
@@ -5128,6 +5153,63 @@ class PhotoLab(QMainWindow):
         self.brush_color_range_cb.blockSignals(True)
         self.brush_color_range_cb.setChecked(bool(m.get("color_range", False)))
         self.brush_color_range_cb.blockSignals(False)
+        if hasattr(self, "brush_preset_label"):
+            self.brush_preset_label.setText(
+                f"Preset: {m.get('preset_name', 'Local look')}" if m.get("local_preset") else "No local preset"
+            )
+            self.brush_preset_strength.blockSignals(True)
+            self.brush_preset_strength.set_value(float(m.get("preset_strength", 1.0)) * 100.0)
+            self.brush_preset_strength.blockSignals(False)
+
+    def _apply_preset_to_brush_mask(self):
+        idx = getattr(self, "selected_brush_index", -1)
+        if self.current_path is None or idx < 0:
+            QMessageBox.information(self, "Local preset", "Paint or select a brush mask first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Apply preset to selected mask", self._preset_start_dir(),
+            "All Presets (*.xmp *.json);;Lightroom XMP (*.xmp);;PhotoLab JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            # A neutral base makes the stored look independent of current global edits.
+            local_recipe = load_preset_file(path, base=Recipe())
+            mask = self.recipes[self.current_path].brush_masks[idx]
+            mask["local_preset"] = local_recipe.to_dict()
+            mask["preset_name"] = os.path.basename(path)
+            mask.setdefault("preset_strength", 1.0)
+            self._update_brush_list()
+            self._sync_brush_sliders()
+            self._push_history(f"Local preset: {os.path.basename(path)}")
+            self.render_preview()
+        except Exception as exc:
+            QMessageBox.warning(self, "Local preset", f"Could not load preset:\n{exc}")
+
+    def _clear_brush_mask_preset(self):
+        idx = getattr(self, "selected_brush_index", -1)
+        if self.current_path is None or idx < 0:
+            return
+        masks = self.recipes[self.current_path].brush_masks or []
+        if idx >= len(masks):
+            return
+        masks[idx].pop("local_preset", None)
+        masks[idx].pop("preset_name", None)
+        masks[idx].pop("preset_strength", None)
+        self._update_brush_list()
+        self._sync_brush_sliders()
+        self._push_history("Clear local preset")
+        self.render_preview()
+
+    def _on_brush_preset_strength(self, value):
+        idx = getattr(self, "selected_brush_index", -1)
+        if self.current_path is None or idx < 0:
+            return
+        masks = self.recipes[self.current_path].brush_masks or []
+        if idx < len(masks) and masks[idx].get("local_preset"):
+            masks[idx]["preset_strength"] = float(value) / 100.0
+            self._schedule_history("Local preset strength")
+            self.render_timer.start()
 
     def _on_brush_adj(self, key, val):
         if self.current_path is None or getattr(self, "selected_brush_index", -1) < 0:
