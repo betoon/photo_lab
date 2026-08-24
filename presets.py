@@ -43,7 +43,8 @@ PRESET_MODULE_FIELDS = {
         "crop", "ca_amount", "lens_auto", "rotate_90",
     ),
     "Effects": ("clearview", "microcontrast", "vignette", "film_grain", "hdr_look"),
-    "Local": ("local_points", "gradients", "brush_masks"),
+    "Local": ("local_points", "gradients", "brush_masks", "mask_library"),
+    "Creative": ("creative_filters",),
 }
 
 # Namespaces seen in LR/ACR XMP

@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import uuid
 import cv2
+import numpy as np
 from PyQt6.QtCore import Qt, QRect, QPoint, QPointF, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QWheelEvent, QMouseEvent, QPainterPath, QRadialGradient
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QMouseEvent, QPainterPath, QRadialGradient
 from PyQt6.QtWidgets import QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy
 
 
@@ -438,6 +439,7 @@ class ImageCanvas(QWidget):
         self._brush_painting = False
         self._brush_current_strokes = []
         self.show_brush_mask = True
+        self._shared_mask_overlay = None
         self.brush_erase = False
         self.show_mask_only = False
         self.show_clipping = False
@@ -521,6 +523,20 @@ class ImageCanvas(QWidget):
     def set_brush_masks(self, masks, selected_index=-1):
         self.brush_masks = list(masks) if masks else []
         self.selected_brush = selected_index
+        self.update()
+
+    def set_shared_mask_overlay(self, mask=None):
+        if mask is None:
+            self._shared_mask_overlay = None
+        else:
+            values = np.clip(np.asarray(mask, dtype=np.float32), 0, 1)
+            rgba = np.zeros((values.shape[0], values.shape[1], 4), dtype=np.uint8)
+            rgba[..., 0] = 255
+            rgba[..., 1] = 55
+            rgba[..., 2] = 55
+            rgba[..., 3] = (values * 150).astype(np.uint8)
+            image = QImage(rgba.data, rgba.shape[1], rgba.shape[0], rgba.strides[0], QImage.Format.Format_RGBA8888)
+            self._shared_mask_overlay = QPixmap.fromImage(image.copy())
         self.update()
 
     def _erase_brush_dabs(self, pos):
@@ -960,6 +976,11 @@ class ImageCanvas(QWidget):
 
 
         # Brush mask overlay (semi-transparent red)
+        if self.compare_mode == self.MODE_NORMAL and self._shared_mask_overlay is not None:
+            rect = self.image_rect()
+            if not rect.isEmpty():
+                painter.drawPixmap(rect, self._shared_mask_overlay)
+
         if (self.compare_mode == self.MODE_NORMAL and self.show_brush_mask
                 and (self.brush_masks or self._brush_current_strokes)):
             rect = self.image_rect()

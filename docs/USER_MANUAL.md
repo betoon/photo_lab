@@ -329,6 +329,28 @@ Enable **Local Adjustments**, click the image to place a point, then refine:
 
 Localized presets apply tone and color operations only. Crop, geometry, denoise, sharpening, grain, vignette, HDR, output proofing, and other whole-image operations are intentionally ignored because they cannot be safely blended inside a painted boundary. The mask, preset, and strength are stored non-destructively in the sidecar.
 
+## Creative filter stack
+
+Open the **Creative** tab to build an ordered, non-destructive finishing stack. Filters run from top to bottom and may be added more than once.
+
+- **Basic Tone & Color** — exposure, contrast, saturation, and clarity.
+- **Four-Way Color Grade** — independent global, shadow, midtone, and highlight color plus tonal luminance controls.
+- **Monochrome Workspace** — RGB channel mixing, virtual colored filters, brightness, contrast, structure, split toning, grain, burned edges, and borders.
+
+Select a filter to change its opacity, enable or disable it, choose a blending mode, invert its assigned mask, duplicate it, delete it, or move it up and down. Available blending modes are Normal, Multiply, Screen, Overlay, Soft Light, Luminosity, and Color.
+
+### Shared Mask Library
+
+Shared masks are named selections that can be assigned to any number of creative filters. Editing one shared mask updates every filter that references it.
+
+- **From Brush** promotes the selected painted mask from the Local tab while leaving its original local correction intact.
+- **Luminance** creates a reusable tonal-range mask.
+- **Full** creates a whole-image mask useful as the starting point for inversion or intersections.
+- Shared masks can be inverted, intersected, duplicated, and deleted.
+- Selecting a shared mask displays its calculated coverage as a red overlay, including luminance restrictions and intersections.
+
+Deleting a shared mask safely removes its references from filters and other mask intersections; it does not delete painted Local masks.
+
 
 ## HDR
 

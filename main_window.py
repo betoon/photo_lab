@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import json
+import uuid
+import copy
 import cv2
 import numpy as np
 
@@ -30,7 +32,8 @@ VIDEO_EXTENSIONS = {
 
 from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
                      load_recipe_sidecar, save_recipe_sidecar, apply_watermark,
-                     detect_architectural_upright, normalize_keystone_points)
+                     detect_architectural_upright, normalize_keystone_points,
+                     build_shared_mask)
 from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
 from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, SdImportWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
@@ -579,6 +582,7 @@ class PhotoLab(QMainWindow):
         add_action(reset_m, "Reset Geometry", lambda: self.reset_module("geometry"))
         add_action(reset_m, "Reset Local", lambda: self.reset_module("local"))
         add_action(reset_m, "Reset Effects", lambda: self.reset_module("effects"))
+        add_action(reset_m, "Reset Creative Filters", lambda: self.reset_module("creative"))
         edit_m.addSeparator()
         add_action(edit_m, "Copy Settings", self.copy_settings, "Ctrl+Shift+C")
         add_action(edit_m, "Paste Settings", self.paste_settings, "Ctrl+Shift+V")
@@ -1277,6 +1281,7 @@ class PhotoLab(QMainWindow):
             ("Geometry", self._build_geometry_tab),
             ("Effects", self._build_effects_tab),
             ("Local", self._build_local_tab),
+            ("Creative", self._build_creative_tab),
         ]
         self._cat_buttons = []
         for i, (name, builder) in enumerate(categories):
@@ -2210,6 +2215,156 @@ class PhotoLab(QMainWindow):
             gsl.addWidget(row)
         self.grad_sliders_box.setEnabled(False)
         v.addWidget(self.grad_sliders_box)
+
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    # ===== CREATIVE FILTER STACK / SHARED MASKS =====
+    def _build_creative_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+
+        box, v = collapsible_group("Creative Filter Stack", layout)
+        hint = QLabel("Filters run from top to bottom. Add the same type more than once, reorder it, blend it, and assign a shared mask.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#888; font-size:11px;")
+        v.addWidget(hint)
+        self.creative_filter_list = QListWidget()
+        self.creative_filter_list.setMaximumHeight(150)
+        self.creative_filter_list.currentRowChanged.connect(self._on_creative_filter_selected)
+        v.addWidget(self.creative_filter_list)
+        add_row = QHBoxLayout()
+        self.creative_add_type = QComboBox()
+        self.creative_add_type.addItem("Basic Tone & Color", "basic")
+        self.creative_add_type.addItem("Four-Way Color Grade", "color_grade")
+        self.creative_add_type.addItem("Monochrome Workspace", "monochrome")
+        add_row.addWidget(self.creative_add_type, 1)
+        add_btn = QPushButton("Add")
+        add_btn.clicked.connect(self._add_creative_filter)
+        add_row.addWidget(add_btn)
+        v.addLayout(add_row)
+        action_row = QHBoxLayout()
+        for label, callback in (
+            ("Up", lambda: self._move_creative_filter(-1)),
+            ("Down", lambda: self._move_creative_filter(1)),
+            ("Duplicate", self._duplicate_creative_filter),
+            ("Delete", self._delete_creative_filter),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            action_row.addWidget(button)
+        v.addLayout(action_row)
+
+        self.creative_filter_editor = QGroupBox("Selected Filter")
+        editor = QVBoxLayout(self.creative_filter_editor)
+        self.creative_enabled_cb = QCheckBox("Enabled")
+        self.creative_enabled_cb.toggled.connect(lambda value: self._set_creative_filter_value("enabled", bool(value)))
+        editor.addWidget(self.creative_enabled_cb)
+        self.creative_opacity = SliderRow("Opacity", 0, 100, 100, 1, self._on_creative_opacity, 0)
+        editor.addWidget(self.creative_opacity)
+        blend_row = QHBoxLayout()
+        blend_row.addWidget(QLabel("Blending mode"))
+        self.creative_blend_combo = QComboBox()
+        self.creative_blend_combo.addItems(["Normal", "Multiply", "Screen", "Overlay", "Soft Light", "Luminosity", "Color"])
+        self.creative_blend_combo.currentTextChanged.connect(lambda value: self._set_creative_filter_value("blend_mode", value.lower()))
+        blend_row.addWidget(self.creative_blend_combo, 1)
+        editor.addLayout(blend_row)
+        mask_row = QHBoxLayout()
+        mask_row.addWidget(QLabel("Shared mask"))
+        self.creative_mask_combo = QComboBox()
+        self.creative_mask_combo.currentIndexChanged.connect(self._on_creative_mask_changed)
+        mask_row.addWidget(self.creative_mask_combo, 1)
+        editor.addLayout(mask_row)
+        self.creative_mask_invert_cb = QCheckBox("Invert mask for this filter")
+        self.creative_mask_invert_cb.toggled.connect(lambda value: self._set_creative_filter_value("mask_invert", bool(value)))
+        editor.addWidget(self.creative_mask_invert_cb)
+        self.creative_setting_rows = {}
+        settings = (
+            ("exposure", "Exposure", -3, 3, 0.05, 2, ("basic",)),
+            ("contrast", "Contrast", -100, 100, 1, 0, ("basic", "color_grade", "monochrome")),
+            ("saturation", "Saturation", -100, 100, 1, 0, ("basic", "color_grade")),
+            ("clarity", "Clarity", -100, 100, 1, 0, ("basic",)),
+            ("global_hue", "Global hue", 0, 360, 1, 0, ("color_grade",)),
+            ("global_sat", "Global color", -100, 100, 1, 0, ("color_grade",)),
+            ("shadow_hue", "Shadow hue", 0, 360, 1, 0, ("color_grade",)),
+            ("shadow_sat", "Shadow color", -100, 100, 1, 0, ("color_grade",)),
+            ("shadow_lum", "Shadow luminance", -100, 100, 1, 0, ("color_grade",)),
+            ("midtone_hue", "Midtone hue", 0, 360, 1, 0, ("color_grade",)),
+            ("midtone_sat", "Midtone color", -100, 100, 1, 0, ("color_grade",)),
+            ("midtone_lum", "Midtone luminance", -100, 100, 1, 0, ("color_grade",)),
+            ("highlight_hue", "Highlight hue", 0, 360, 1, 0, ("color_grade",)),
+            ("highlight_sat", "Highlight color", -100, 100, 1, 0, ("color_grade",)),
+            ("highlight_lum", "Highlight luminance", -100, 100, 1, 0, ("color_grade",)),
+            ("mix_red", "B&W red mix", -100, 200, 1, 0, ("monochrome",)),
+            ("mix_green", "B&W green mix", -100, 200, 1, 0, ("monochrome",)),
+            ("mix_blue", "B&W blue mix", -100, 200, 1, 0, ("monochrome",)),
+            ("brightness", "B&W brightness", -100, 100, 1, 0, ("monochrome",)),
+            ("filter_hue", "Virtual filter hue", 0, 360, 1, 0, ("monochrome",)),
+            ("filter_strength", "Virtual filter strength", -100, 100, 1, 0, ("monochrome",)),
+            ("structure", "Structure", -100, 100, 1, 0, ("monochrome",)),
+            ("structure_radius", "Structure radius", 0.5, 12, 0.5, 1, ("monochrome",)),
+            ("tone_shadow_hue", "Shadow tone hue", 0, 360, 1, 0, ("monochrome",)),
+            ("tone_shadow_sat", "Shadow tone strength", 0, 100, 1, 0, ("monochrome",)),
+            ("tone_highlight_hue", "Highlight tone hue", 0, 360, 1, 0, ("monochrome",)),
+            ("tone_highlight_sat", "Highlight tone strength", 0, 100, 1, 0, ("monochrome",)),
+            ("tone_balance", "Toning balance", -100, 100, 1, 0, ("monochrome",)),
+            ("grain", "B&W grain", 0, 100, 1, 0, ("monochrome",)),
+            ("grain_size", "Grain size", 0.5, 5, 0.25, 2, ("monochrome",)),
+            ("burn_edges", "Burned edges", 0, 100, 1, 0, ("monochrome",)),
+            ("border_strength", "Border darkness", 0, 100, 1, 0, ("monochrome",)),
+            ("border_width", "Border width", 0.2, 15, 0.2, 1, ("monochrome",)),
+        )
+        self.creative_setting_types = {}
+        for key, label, lo, hi, step, decimals, types in settings:
+            row = SliderRow(label, lo, hi, 0, step, lambda value, k=key: self._on_creative_setting(k, value), decimals)
+            self.creative_setting_rows[key] = row
+            self.creative_setting_types[key] = types
+            editor.addWidget(row)
+        self.creative_filter_editor.setEnabled(False)
+        v.addWidget(self.creative_filter_editor)
+
+        box, v = collapsible_group("Shared Mask Library", layout)
+        mask_hint = QLabel("A named mask can drive any number of filters. Changes to the mask update every filter that references it.")
+        mask_hint.setWordWrap(True)
+        mask_hint.setStyleSheet("color:#888; font-size:11px;")
+        v.addWidget(mask_hint)
+        self.shared_mask_list = QListWidget()
+        self.shared_mask_list.setMaximumHeight(130)
+        self.shared_mask_list.currentRowChanged.connect(self._on_shared_mask_selected)
+        v.addWidget(self.shared_mask_list)
+        mask_buttons = QHBoxLayout()
+        for label, callback in (
+            ("From Brush", self._shared_mask_from_brush),
+            ("Luminance", lambda: self._add_shared_mask("luminance")),
+            ("Full", lambda: self._add_shared_mask("full")),
+            ("Duplicate", self._duplicate_shared_mask),
+            ("Delete", self._delete_shared_mask),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            mask_buttons.addWidget(button)
+        v.addLayout(mask_buttons)
+        self.shared_mask_editor = QGroupBox("Selected Shared Mask")
+        mask_editor = QVBoxLayout(self.shared_mask_editor)
+        self.shared_mask_invert_cb = QCheckBox("Invert library mask")
+        self.shared_mask_invert_cb.toggled.connect(self._on_shared_mask_invert)
+        mask_editor.addWidget(self.shared_mask_invert_cb)
+        self.shared_mask_lum_min = SliderRow("Luminance minimum", 0, 100, 0, 1, lambda v: self._on_shared_mask_range("luminance_min", v), 0)
+        self.shared_mask_lum_max = SliderRow("Luminance maximum", 0, 100, 100, 1, lambda v: self._on_shared_mask_range("luminance_max", v), 0)
+        mask_editor.addWidget(self.shared_mask_lum_min)
+        mask_editor.addWidget(self.shared_mask_lum_max)
+        intersect_row = QHBoxLayout()
+        intersect_row.addWidget(QLabel("Intersect with"))
+        self.shared_mask_intersect_combo = QComboBox()
+        self.shared_mask_intersect_combo.currentIndexChanged.connect(self._on_shared_mask_intersection)
+        intersect_row.addWidget(self.shared_mask_intersect_combo, 1)
+        mask_editor.addLayout(intersect_row)
+        self.shared_mask_editor.setEnabled(False)
+        v.addWidget(self.shared_mask_editor)
 
         layout.addStretch(1)
         scroll.setWidget(inner)
@@ -3173,6 +3328,295 @@ class PhotoLab(QMainWindow):
             self.geometry_auto_crop_cb.blockSignals(True)
             self.geometry_auto_crop_cb.setChecked(bool(getattr(r, "geometry_auto_crop", False)))
             self.geometry_auto_crop_cb.blockSignals(False)
+        if hasattr(self, "creative_filter_list"):
+            self._sync_creative_ui()
+
+    def _creative_filter_defaults(self, kind):
+        names = {"basic": "Basic Tone & Color", "color_grade": "Four-Way Color Grade", "monochrome": "Monochrome Workspace"}
+        settings = {}
+        if kind == "color_grade":
+            settings = {key: 0.0 for key in (
+                "global_hue", "global_sat", "shadow_hue", "shadow_sat", "shadow_lum",
+                "midtone_hue", "midtone_sat", "midtone_lum", "highlight_hue",
+                "highlight_sat", "highlight_lum", "contrast", "saturation",
+            )}
+        elif kind == "monochrome":
+            settings = {
+                "mix_red": 30.0, "mix_green": 59.0, "mix_blue": 11.0,
+                "brightness": 0.0, "contrast": 0.0, "filter_hue": 45.0,
+                "filter_strength": 0.0, "structure": 0.0, "structure_radius": 3.0,
+                "tone_shadow_hue": 30.0, "tone_shadow_sat": 0.0,
+                "tone_highlight_hue": 45.0, "tone_highlight_sat": 0.0,
+                "tone_balance": 0.0, "grain": 0.0, "grain_size": 1.0,
+                "burn_edges": 0.0, "border_strength": 0.0, "border_width": 2.0,
+            }
+        else:
+            settings = {"exposure": 0.0, "contrast": 0.0, "saturation": 0.0, "clarity": 0.0}
+        return {
+            "id": uuid.uuid4().hex, "name": names.get(kind, kind.title()), "type": kind,
+            "enabled": True, "opacity": 100.0, "blend_mode": "normal", "mask_id": "",
+            "mask_invert": False, "settings": settings,
+        }
+
+    def _current_creative_filter(self):
+        if self.current_path is None:
+            return None
+        filters = self.recipes[self.current_path].creative_filters or []
+        row = self.creative_filter_list.currentRow() if hasattr(self, "creative_filter_list") else -1
+        return filters[row] if 0 <= row < len(filters) else None
+
+    def _sync_creative_ui(self, selected_filter=None, selected_mask=None):
+        if self.current_path is None or not hasattr(self, "creative_filter_list"):
+            return
+        recipe = self.recipes[self.current_path]
+        old_filter = self.creative_filter_list.currentRow() if selected_filter is None else selected_filter
+        self.creative_filter_list.blockSignals(True)
+        self.creative_filter_list.clear()
+        for index, item in enumerate(recipe.creative_filters or []):
+            state = "●" if item.get("enabled", True) else "○"
+            mask = " ⬡" if item.get("mask_id") else ""
+            self.creative_filter_list.addItem(f"{index + 1}. {state} {item.get('name', item.get('type', 'Filter'))}{mask}")
+        if self.creative_filter_list.count():
+            self.creative_filter_list.setCurrentRow(max(0, min(old_filter, self.creative_filter_list.count() - 1)))
+        self.creative_filter_list.blockSignals(False)
+
+        old_mask = self.shared_mask_list.currentRow() if selected_mask is None else selected_mask
+        self.shared_mask_list.blockSignals(True)
+        self.shared_mask_list.clear()
+        for item in recipe.mask_library or []:
+            inv = " INV" if item.get("library_invert") else ""
+            self.shared_mask_list.addItem(f"{item.get('name', 'Mask')} · {item.get('kind', 'brush')}{inv}")
+        if self.shared_mask_list.count():
+            self.shared_mask_list.setCurrentRow(max(0, min(old_mask, self.shared_mask_list.count() - 1)))
+        self.shared_mask_list.blockSignals(False)
+        self._refresh_creative_mask_combo()
+        self._on_creative_filter_selected(self.creative_filter_list.currentRow())
+        self._on_shared_mask_selected(self.shared_mask_list.currentRow())
+
+    def _refresh_creative_mask_combo(self):
+        if self.current_path is None:
+            return
+        current = self._current_creative_filter()
+        selected = str(current.get("mask_id") or "") if current else ""
+        self.creative_mask_combo.blockSignals(True)
+        self.creative_mask_combo.clear()
+        self.creative_mask_combo.addItem("None (whole image)", "")
+        for mask in self.recipes[self.current_path].mask_library or []:
+            self.creative_mask_combo.addItem(mask.get("name", "Mask"), str(mask.get("id", "")))
+        index = self.creative_mask_combo.findData(selected)
+        self.creative_mask_combo.setCurrentIndex(max(0, index))
+        self.creative_mask_combo.blockSignals(False)
+
+    def _add_creative_filter(self):
+        if self.current_path is None:
+            return
+        kind = self.creative_add_type.currentData() or "basic"
+        filters = self.recipes[self.current_path].creative_filters
+        filters.append(self._creative_filter_defaults(kind))
+        self._sync_creative_ui(selected_filter=len(filters) - 1)
+        self._push_history(f"Add {kind} filter")
+        self.render_preview()
+
+    def _move_creative_filter(self, direction):
+        if self.current_path is None:
+            return
+        filters = self.recipes[self.current_path].creative_filters
+        row = self.creative_filter_list.currentRow()
+        target = row + int(direction)
+        if not (0 <= row < len(filters) and 0 <= target < len(filters)):
+            return
+        filters[row], filters[target] = filters[target], filters[row]
+        self._sync_creative_ui(selected_filter=target)
+        self._push_history("Reorder creative filters")
+        self.render_preview()
+
+    def _duplicate_creative_filter(self):
+        if self.current_path is None:
+            return
+        filters = self.recipes[self.current_path].creative_filters
+        row = self.creative_filter_list.currentRow()
+        if not 0 <= row < len(filters):
+            return
+        duplicate = copy.deepcopy(filters[row])
+        duplicate["id"] = uuid.uuid4().hex
+        duplicate["name"] = f"{duplicate.get('name', 'Filter')} Copy"
+        filters.insert(row + 1, duplicate)
+        self._sync_creative_ui(selected_filter=row + 1)
+        self._push_history("Duplicate creative filter")
+        self.render_preview()
+
+    def _delete_creative_filter(self):
+        if self.current_path is None:
+            return
+        filters = self.recipes[self.current_path].creative_filters
+        row = self.creative_filter_list.currentRow()
+        if 0 <= row < len(filters):
+            filters.pop(row)
+            self._sync_creative_ui(selected_filter=min(row, len(filters) - 1))
+            self._push_history("Delete creative filter")
+            self.render_preview()
+
+    def _on_creative_filter_selected(self, row):
+        item = self._current_creative_filter()
+        self.creative_filter_editor.setEnabled(item is not None)
+        if item is None:
+            return
+        kind = str(item.get("type", "basic"))
+        for widget, value in (
+            (self.creative_enabled_cb, bool(item.get("enabled", True))),
+            (self.creative_mask_invert_cb, bool(item.get("mask_invert", False))),
+        ):
+            widget.blockSignals(True); widget.setChecked(value); widget.blockSignals(False)
+        self.creative_opacity.blockSignals(True)
+        self.creative_opacity.set_value(float(item.get("opacity", 100.0)))
+        self.creative_opacity.blockSignals(False)
+        self.creative_blend_combo.blockSignals(True)
+        self.creative_blend_combo.setCurrentText(str(item.get("blend_mode", "normal")).title())
+        self.creative_blend_combo.blockSignals(False)
+        self._refresh_creative_mask_combo()
+        values = item.get("settings") or {}
+        for key, slider in self.creative_setting_rows.items():
+            slider.setVisible(kind in self.creative_setting_types[key])
+            if slider.isVisible():
+                slider.blockSignals(True)
+                slider.set_value(float(values.get(key, 0.0)))
+                slider.blockSignals(False)
+
+    def _set_creative_filter_value(self, key, value):
+        item = self._current_creative_filter()
+        if item is None:
+            return
+        item[key] = value
+        self._sync_creative_ui(selected_filter=self.creative_filter_list.currentRow())
+        self._schedule_history(f"Creative filter {key}")
+        self.render_timer.start()
+
+    def _on_creative_opacity(self, value):
+        self._set_creative_filter_value("opacity", float(value))
+
+    def _on_creative_setting(self, key, value):
+        item = self._current_creative_filter()
+        if item is None:
+            return
+        item.setdefault("settings", {})[key] = float(value)
+        self._schedule_history(f"Creative {key}")
+        self.render_timer.start()
+
+    def _on_creative_mask_changed(self, _index):
+        self._set_creative_filter_value("mask_id", self.creative_mask_combo.currentData() or "")
+
+    def _mask_library(self):
+        return self.recipes[self.current_path].mask_library if self.current_path is not None else []
+
+    def _add_shared_mask(self, kind, source=None):
+        if self.current_path is None:
+            return
+        default_name = {"brush": "Brush Mask", "luminance": "Luminance Mask", "color": "Color Mask", "full": "Full Image"}.get(kind, "Mask")
+        name, ok = QInputDialog.getText(self, "Shared Mask", "Mask name", text=default_name)
+        if not ok or not name.strip():
+            return
+        mask = copy.deepcopy(source or {})
+        mask.update({"id": uuid.uuid4().hex, "name": name.strip(), "kind": kind})
+        mask.setdefault("luminance_min", 0.0)
+        mask.setdefault("luminance_max", 1.0)
+        mask.setdefault("intersect_with", [])
+        self._mask_library().append(mask)
+        self._sync_creative_ui(selected_mask=len(self._mask_library()) - 1)
+        self._push_history("Add shared mask")
+
+    def _shared_mask_from_brush(self):
+        if self.current_path is None:
+            return
+        brushes = self.recipes[self.current_path].brush_masks or []
+        index = getattr(self, "selected_brush_index", -1)
+        if not 0 <= index < len(brushes):
+            QMessageBox.information(self, "Shared Mask", "Select a painted brush mask in the Local tab first.")
+            return
+        source = copy.deepcopy(brushes[index])
+        for key in ("exposure", "contrast", "saturation", "clarity", "temperature", "local_preset", "preset_name", "preset_strength"):
+            source.pop(key, None)
+        self._add_shared_mask("brush", source)
+
+    def _on_shared_mask_selected(self, row):
+        masks = self._mask_library()
+        ok = 0 <= row < len(masks)
+        self.shared_mask_editor.setEnabled(ok)
+        if not ok:
+            self.preview.set_shared_mask_overlay(None)
+            return
+        mask = masks[row]
+        self.shared_mask_invert_cb.blockSignals(True)
+        self.shared_mask_invert_cb.setChecked(bool(mask.get("library_invert", False)))
+        self.shared_mask_invert_cb.blockSignals(False)
+        for slider, key, default in ((self.shared_mask_lum_min, "luminance_min", 0.0), (self.shared_mask_lum_max, "luminance_max", 1.0)):
+            slider.blockSignals(True); slider.set_value(float(mask.get(key, default)) * 100.0); slider.blockSignals(False)
+        self.shared_mask_intersect_combo.blockSignals(True)
+        self.shared_mask_intersect_combo.clear()
+        self.shared_mask_intersect_combo.addItem("None", "")
+        for index, other in enumerate(masks):
+            if index != row:
+                self.shared_mask_intersect_combo.addItem(other.get("name", "Mask"), str(other.get("id", "")))
+        refs = mask.get("intersect_with") or []
+        selected = str(refs[0]) if refs else ""
+        self.shared_mask_intersect_combo.setCurrentIndex(max(0, self.shared_mask_intersect_combo.findData(selected)))
+        self.shared_mask_intersect_combo.blockSignals(False)
+        if self.original_bgr is not None:
+            source = self.original_bgr.astype(np.float32)
+            if np.issubdtype(self.original_bgr.dtype, np.integer):
+                source /= float(np.iinfo(self.original_bgr.dtype).max)
+            overlay = build_shared_mask(source, mask, masks)
+            self.preview.set_shared_mask_overlay(overlay)
+
+    def _on_shared_mask_invert(self, value):
+        masks, row = self._mask_library(), self.shared_mask_list.currentRow()
+        if 0 <= row < len(masks):
+            masks[row]["library_invert"] = bool(value)
+            self._on_shared_mask_selected(row)
+            self._schedule_history("Invert shared mask")
+            self.render_timer.start()
+
+    def _on_shared_mask_range(self, key, value):
+        masks, row = self._mask_library(), self.shared_mask_list.currentRow()
+        if 0 <= row < len(masks):
+            masks[row][key] = float(value) / 100.0
+            self._on_shared_mask_selected(row)
+            self._schedule_history(f"Shared mask {key}")
+            self.render_timer.start()
+
+    def _on_shared_mask_intersection(self, _index):
+        masks, row = self._mask_library(), self.shared_mask_list.currentRow()
+        if 0 <= row < len(masks):
+            ref = self.shared_mask_intersect_combo.currentData() or ""
+            masks[row]["intersect_with"] = [ref] if ref else []
+            self._on_shared_mask_selected(row)
+            self._schedule_history("Shared mask intersection")
+            self.render_timer.start()
+
+    def _duplicate_shared_mask(self):
+        masks, row = self._mask_library(), self.shared_mask_list.currentRow()
+        if 0 <= row < len(masks):
+            duplicate = copy.deepcopy(masks[row])
+            duplicate["id"] = uuid.uuid4().hex
+            duplicate["name"] = f"{duplicate.get('name', 'Mask')} Copy"
+            masks.insert(row + 1, duplicate)
+            self._sync_creative_ui(selected_mask=row + 1)
+            self._push_history("Duplicate shared mask")
+
+    def _delete_shared_mask(self):
+        masks, row = self._mask_library(), self.shared_mask_list.currentRow()
+        if not 0 <= row < len(masks):
+            return
+        removed = str(masks[row].get("id", ""))
+        masks.pop(row)
+        recipe = self.recipes[self.current_path]
+        for item in recipe.creative_filters or []:
+            if str(item.get("mask_id", "")) == removed:
+                item["mask_id"] = ""
+        for mask in masks:
+            mask["intersect_with"] = [ref for ref in mask.get("intersect_with") or [] if str(ref) != removed]
+        self._sync_creative_ui(selected_mask=min(row, len(masks) - 1))
+        self._push_history("Delete shared mask")
+        self.render_preview()
 
     def on_slider(self, key, value):
         if self.current_path is None:
@@ -3952,11 +4396,12 @@ class PhotoLab(QMainWindow):
         cb_geo = QCheckBox("Geometry / crop")
         cb_local = QCheckBox("Local (points / gradients / brushes)")
         cb_fx = QCheckBox("Effects")
-        for cb in (cb_all, cb_tone, cb_color, cb_detail, cb_geo, cb_local, cb_fx):
+        cb_creative = QCheckBox("Creative filters / shared masks")
+        for cb in (cb_all, cb_tone, cb_color, cb_detail, cb_geo, cb_local, cb_fx, cb_creative):
             form.addRow(cb)
 
         def _on_all(v):
-            for cb in (cb_tone, cb_color, cb_detail, cb_geo, cb_local, cb_fx):
+            for cb in (cb_tone, cb_color, cb_detail, cb_geo, cb_local, cb_fx, cb_creative):
                 cb.setEnabled(not v)
         cb_all.toggled.connect(_on_all)
         _on_all(True)
@@ -4007,6 +4452,8 @@ class PhotoLab(QMainWindow):
                 groups += local_keys
             if cb_fx.isChecked():
                 groups += fx_keys
+            if cb_creative.isChecked():
+                groups += ["creative_filters", "mask_library"]
             for k in groups:
                 if hasattr(src, k) and hasattr(dst, k):
                     setattr(dst, k, getattr(src, k))
@@ -4079,9 +4526,10 @@ class PhotoLab(QMainWindow):
                 "keystone_points", "geometry_auto_crop",
                 "crop", "ca_amount", "lens_auto",
             ],
-            "local": ["local_points", "gradients", "brush_masks"],
+            "local": ["local_points", "gradients", "brush_masks", "mask_library"],
             "effects": ["clearview", "microcontrast", "vignette", "film_grain",
                         "black_and_white", "rotate_90", "hdr_look"],
+            "creative": ["creative_filters"],
         }
         for k in groups.get(which, []):
             if hasattr(r, k) and hasattr(fresh, k):

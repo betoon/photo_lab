@@ -54,6 +54,12 @@ Central **non-destructive** image pipeline. No Qt imports.
 
 **Localized presets:** a brush entry may also contain `local_preset` (a serialized `Recipe`), `preset_name`, and `preset_strength`. `apply_local_preset_look` explicitly renders only mask-safe tone/color fields, then `apply_brush_masks` blends that result through the rasterized mask. Never call `apply_recipe` recursively for a local preset: it would repeat geometry, denoise, sharpening, other masks, and output stages. New Recipe fields remain excluded until deliberately audited as spatially blend-safe.
 
+**Creative pipeline:** `Recipe.creative_filters` is an ordered list of independent effect dictionaries. `apply_creative_filter_stack` dispatches each enabled block, blends it with `blend_filter_result`, then limits the result through an optional reusable mask. Supported block types are `basic`, `color_grade`, and `monochrome`. Unknown types are ignored for forward compatibility.
+
+**Shared masks:** `Recipe.mask_library` stores named mask specifications with stable IDs. Filters refer to them through `mask_id`; masks may refer to other masks through `intersect_with`. `build_shared_mask` includes cycle protection. A shared mask owns selection geometry and range gates only—correction values remain on filters or legacy local masks.
+
+Color grading is implemented by `apply_four_way_color_grade`; expanded monochrome processing is implemented by `apply_monochrome_workspace`. Both operate on float BGR data and are mask-safe within the creative stack.
+
 **Thumbnails:** `ThumbnailWorker` and `CatalogThumbWorker` call `extract_embedded_preview` first (embedded JPEG from RAW, else half-size postprocess, else downscaled image).
 
 ---

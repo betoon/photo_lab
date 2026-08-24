@@ -145,6 +145,8 @@ class Recipe:
     local_points: list = field(default_factory=list)
     gradients: list = field(default_factory=list)  # graduated filters
     brush_masks: list = field(default_factory=list)  # painted local masks
+    mask_library: list = field(default_factory=list)  # named reusable mask specifications
+    creative_filters: list = field(default_factory=list)  # ordered post-develop effect blocks
     # Optics (manual / Lensfun-assisted)
     ca_amount: float = 0.0  # lateral chromatic aberration -100..100
     lens_auto: bool = False
@@ -1643,6 +1645,202 @@ def apply_brush_masks(img, masks):
     return np.clip(out, 0, 1)
 
 
+def build_shared_mask(img, spec, library=None, _seen=None):
+    """Rasterize a named reusable mask, including intersections by stable id."""
+    if not spec:
+        return np.ones(img.shape[:2], dtype=np.float32)
+    library = list(library or [])
+    by_id = {str(item.get("id")): item for item in library if item.get("id")}
+    seen = set(_seen or ())
+    mask_id = str(spec.get("id", ""))
+    if mask_id and mask_id in seen:
+        return np.zeros(img.shape[:2], dtype=np.float32)
+    if mask_id:
+        seen.add(mask_id)
+    kind = str(spec.get("kind", "brush")).lower()
+    if kind == "full":
+        mask = np.ones(img.shape[:2], dtype=np.float32)
+    else:
+        source = dict(spec)
+        if kind in ("luminance", "color"):
+            source.setdefault("strokes", [{"x": 0.5, "y": 0.5, "r": 1.5}])
+            source.setdefault("hardness", 1.0)
+            if kind == "color":
+                source["color_range"] = True
+        mask = build_brush_mask(img, source)
+    for ref in spec.get("intersect_with") or []:
+        other = by_id.get(str(ref))
+        if other is not None:
+            mask = np.minimum(mask, build_shared_mask(img, other, library, seen))
+    if spec.get("library_invert"):
+        mask = 1.0 - mask
+    return np.clip(mask, 0, 1).astype(np.float32)
+
+
+def _hue_bgr(hue):
+    hsv = np.array([[[float(hue) % 360.0, 1.0, 1.0]]], dtype=np.float32)
+    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+
+
+def apply_four_way_color_grade(img, settings):
+    """Grade shadows, midtones, highlights, and global color independently."""
+    out = np.clip(img, 0, 1).astype(np.float32)
+    lum = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
+    shadow = np.clip((0.58 - lum) / 0.58, 0, 1) ** 1.5
+    highlight = np.clip((lum - 0.42) / 0.58, 0, 1) ** 1.5
+    midtone = np.clip(1.0 - np.abs(lum - 0.5) / 0.5, 0, 1) ** 1.8
+    result = out.copy()
+    for key, weight in (("shadow", shadow), ("midtone", midtone), ("highlight", highlight)):
+        saturation = float(settings.get(f"{key}_sat", 0.0)) / 100.0
+        if abs(saturation) > 1e-6:
+            color = _hue_bgr(settings.get(f"{key}_hue", 0.0))
+            tinted = result * color[None, None, :] * 1.35
+            result = result * (1.0 - weight[..., None] * abs(saturation)) + tinted * weight[..., None] * abs(saturation)
+        luminance = float(settings.get(f"{key}_lum", 0.0)) / 100.0
+        if abs(luminance) > 1e-6:
+            result += weight[..., None] * luminance * 0.35
+    global_sat = float(settings.get("global_sat", 0.0)) / 100.0
+    if abs(global_sat) > 1e-6:
+        color = _hue_bgr(settings.get("global_hue", 0.0))
+        tinted = result * color[None, None, :] * 1.35
+        result = result * (1.0 - abs(global_sat)) + tinted * abs(global_sat)
+    saturation = float(settings.get("saturation", 0.0))
+    contrast = float(settings.get("contrast", 0.0))
+    if abs(saturation) > 1e-4:
+        result = apply_vibrance_saturation(result, 0.0, saturation)
+    if abs(contrast) > 1e-4:
+        result = (result - 0.5) * (1.0 + contrast / 100.0) + 0.5
+    return np.clip(result, 0, 1)
+
+
+def apply_monochrome_workspace(img, settings):
+    """Expanded monochrome conversion with mixer, virtual filter, structure and toning."""
+    source = np.clip(img, 0, 1).astype(np.float32)
+    b, g, r = cv2.split(source)
+    weights = np.array([
+        float(settings.get("mix_blue", 11.0)),
+        float(settings.get("mix_green", 59.0)),
+        float(settings.get("mix_red", 30.0)),
+    ], dtype=np.float32)
+    total = max(float(np.sum(np.abs(weights))), 1.0)
+    gray = np.clip((b * weights[0] + g * weights[1] + r * weights[2]) / total, 0, 1)
+    filter_strength = float(settings.get("filter_strength", 0.0)) / 100.0
+    if abs(filter_strength) > 1e-6:
+        filter_color = _hue_bgr(settings.get("filter_hue", 45.0))
+        affinity = np.clip(1.0 - np.linalg.norm(source - filter_color[None, None, :], axis=2) / np.sqrt(3), 0, 1)
+        gray = np.clip(gray + (affinity - 0.5) * filter_strength * 0.7, 0, 1)
+    structure = float(settings.get("structure", 0.0)) / 100.0
+    if abs(structure) > 1e-6:
+        radius = max(0.5, float(settings.get("structure_radius", 3.0)))
+        blur = cv2.GaussianBlur(gray, (0, 0), sigmaX=radius)
+        gray = np.clip(gray + (gray - blur) * structure * 1.5, 0, 1)
+    contrast = float(settings.get("contrast", 0.0)) / 100.0
+    brightness = float(settings.get("brightness", 0.0)) / 100.0
+    gray = np.clip((gray - 0.5) * (1.0 + contrast) + 0.5 + brightness * 0.35, 0, 1).astype(np.float32)
+    out = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    out = apply_split_tone(
+        out,
+        float(settings.get("tone_shadow_hue", 30.0)), float(settings.get("tone_shadow_sat", 0.0)),
+        float(settings.get("tone_highlight_hue", 45.0)), float(settings.get("tone_highlight_sat", 0.0)),
+        float(settings.get("tone_balance", 0.0)),
+    )
+    grain = float(settings.get("grain", 0.0)) / 100.0
+    if grain > 1e-6:
+        size = max(0.35, float(settings.get("grain_size", 1.0)))
+        noise_h = max(2, int(out.shape[0] / size))
+        noise_w = max(2, int(out.shape[1] / size))
+        noise = np.random.normal(0, 0.055 * grain, (noise_h, noise_w)).astype(np.float32)
+        noise = cv2.resize(noise, (out.shape[1], out.shape[0]), interpolation=cv2.INTER_LINEAR)
+        out = np.clip(out + noise[..., None], 0, 1)
+    burn = float(settings.get("burn_edges", 0.0)) / 100.0
+    border = float(settings.get("border_strength", 0.0)) / 100.0
+    if burn > 1e-6 or border > 1e-6:
+        h, w = out.shape[:2]
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        edge_x = np.minimum(xx, w - 1 - xx) / max(w * 0.5, 1)
+        edge_y = np.minimum(yy, h - 1 - yy) / max(h * 0.5, 1)
+        edge_distance = np.minimum(edge_x, edge_y)
+        if burn > 1e-6:
+            out *= (1.0 - burn * np.clip(1.0 - edge_distance, 0, 1) ** 2)[..., None]
+        if border > 1e-6:
+            width = float(np.clip(settings.get("border_width", 2.0), 0.2, 15.0)) / 100.0 * 2.0
+            border_mask = np.clip((width - edge_distance) / max(width * 0.4, 1e-4), 0, 1)
+            out *= (1.0 - border * border_mask)[..., None]
+    return np.clip(out, 0, 1)
+
+
+def blend_filter_result(base, filtered, opacity=1.0, mode="normal"):
+    """Blend one creative-filter result over its input."""
+    a = np.clip(base, 0, 1).astype(np.float32)
+    b = np.clip(filtered, 0, 1).astype(np.float32)
+    mode = str(mode or "normal").lower()
+    if mode == "multiply":
+        mixed = a * b
+    elif mode == "screen":
+        mixed = 1.0 - (1.0 - a) * (1.0 - b)
+    elif mode == "soft light":
+        mixed = (1.0 - 2.0 * b) * a * a + 2.0 * b * a
+    elif mode == "overlay":
+        mixed = np.where(a <= 0.5, 2.0 * a * b, 1.0 - 2.0 * (1.0 - a) * (1.0 - b))
+    elif mode == "luminosity":
+        lab_a = cv2.cvtColor(a, cv2.COLOR_BGR2LAB)
+        lab_b = cv2.cvtColor(b, cv2.COLOR_BGR2LAB)
+        lab_a[..., 0] = lab_b[..., 0]
+        mixed = cv2.cvtColor(lab_a, cv2.COLOR_LAB2BGR)
+    elif mode == "color":
+        lab_a = cv2.cvtColor(a, cv2.COLOR_BGR2LAB)
+        lab_b = cv2.cvtColor(b, cv2.COLOR_BGR2LAB)
+        lab_a[..., 1:] = lab_b[..., 1:]
+        mixed = cv2.cvtColor(lab_a, cv2.COLOR_LAB2BGR)
+    else:
+        mixed = b
+    amount = float(np.clip(opacity, 0, 1))
+    return np.clip(a * (1.0 - amount) + mixed * amount, 0, 1)
+
+
+def apply_creative_filter_stack(img, filters, mask_library=None):
+    """Apply ordered, repeatable creative filters with blend, opacity, and shared masks."""
+    if not filters:
+        return img
+    out = np.clip(img, 0, 1).astype(np.float32)
+    library = list(mask_library or [])
+    masks = {str(item.get("id")): item for item in library if item.get("id")}
+    for item in filters or []:
+        if not item.get("enabled", True):
+            continue
+        kind = str(item.get("type", "basic")).lower()
+        settings = item.get("settings") or {}
+        if kind == "color_grade":
+            filtered = apply_four_way_color_grade(out, settings)
+        elif kind == "monochrome":
+            filtered = apply_monochrome_workspace(out, settings)
+        elif kind == "basic":
+            filtered = out.copy()
+            exposure = float(settings.get("exposure", 0.0))
+            contrast = float(settings.get("contrast", 0.0))
+            saturation = float(settings.get("saturation", 0.0))
+            clarity = float(settings.get("clarity", 0.0))
+            filtered *= 2.0 ** exposure
+            filtered = (filtered - 0.5) * (1.0 + contrast / 100.0) + 0.5
+            filtered = apply_vibrance_saturation(np.clip(filtered, 0, 1), 0, saturation)
+            if abs(clarity) > 1e-4:
+                blur = cv2.GaussianBlur(filtered, (0, 0), sigmaX=3)
+                filtered += (filtered - blur) * clarity / 100.0
+        else:
+            continue
+        opacity = float(item.get("opacity", 100.0)) / 100.0
+        blended = blend_filter_result(out, filtered, opacity, item.get("blend_mode", "normal"))
+        mask_id = str(item.get("mask_id") or "")
+        if mask_id and mask_id in masks:
+            mask = build_shared_mask(out, masks[mask_id], library)[..., None]
+            if item.get("mask_invert"):
+                mask = 1.0 - mask
+            out = out * (1.0 - mask) + blended * mask
+        else:
+            out = blended
+    return np.clip(out, 0, 1)
+
+
 def apply_chromatic_aberration_fix(img, amount):
     """Simple lateral CA correction: shift R/B channels radially. amount -100..100."""
     if abs(amount) < 1e-4:
@@ -1933,6 +2131,11 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
 
     if abs(getattr(r, "hdr_look", 0.0)) > 1e-4:
         img = apply_hdr_look(img, r.hdr_look)
+
+    img = apply_creative_filter_stack(
+        img, getattr(r, "creative_filters", None) or [],
+        getattr(r, "mask_library", None) or [],
+    )
 
     if abs(r.vignette) > 1e-4:
         h, w = img.shape[:2]
