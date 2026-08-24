@@ -21,6 +21,7 @@ PRESET_MODULE_FIELDS = {
         "exposure", "smart_light", "contrast", "highlights", "shadows", "whites", "blacks",
         "clarity", "gamma", "curve_shadows", "curve_darks", "curve_mids", "curve_lights",
         "curve_highlights", "curve_points", "curve_r_points", "curve_g_points", "curve_b_points",
+        "zebra_threshold", "zebra_exposure", "zebra_feather",
     ),
     "Color": (
         "temperature", "tint", "wb_as_shot", "creative_temperature", "creative_tint",

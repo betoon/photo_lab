@@ -1510,6 +1510,21 @@ class PhotoLab(QMainWindow):
         box, v = collapsible_group("Exposure Compensation", layout)
         self._add_slider(v, "exposure", "Exposure", -5.0, 5.0, 0.05, 2, 0.0)
 
+        box, v = collapsible_group("Zebra Highlight Adjustment", layout)
+        zebra_hint = QLabel(
+            "Changes exposure only in the striped luminance range. Lower Exposure to recover "
+            "bright areas; Feather softens the boundary."
+        )
+        zebra_hint.setWordWrap(True)
+        zebra_hint.setStyleSheet("color:#888; font-size:11px;")
+        v.addWidget(zebra_hint)
+        self._add_slider(v, "zebra_threshold", "Zebra threshold %", 50.0, 100.0, 1, 0, 95.0)
+        self._add_slider(v, "zebra_exposure", "Exposure (EV)", -5.0, 2.0, 0.05, 2, 0.0)
+        self._add_slider(v, "zebra_feather", "Feather %", 0.0, 25.0, 1, 0, 5.0)
+        zebra_btn = QPushButton("Show / hide zebra overlay (Z)")
+        zebra_btn.clicked.connect(lambda: self.toggle_zebras(not getattr(self.preview, "show_zebras", False)))
+        v.addWidget(zebra_btn)
+
         # Smart Lighting
         box, v = collapsible_group("Smart Lighting", layout)
         self._add_slider(v, "smart_light", "Intensity", 0.0, 100.0, 1, 0, 0.0)
@@ -3000,6 +3015,8 @@ class PhotoLab(QMainWindow):
                 continue
             if hasattr(r, key):
                 row.set_value(getattr(r, key))
+        if hasattr(self.preview, "set_zebra_threshold"):
+            self.preview.set_zebra_threshold(float(getattr(r, "zebra_threshold", 95.0)) / 100.0)
         self.wb_as_shot_cb.blockSignals(True)
         self.wb_as_shot_cb.setChecked(r.wb_as_shot)
         self.wb_as_shot_cb.blockSignals(False)
@@ -3074,6 +3091,8 @@ class PhotoLab(QMainWindow):
         if hasattr(self.recipes[self.current_path], key):
             setattr(self.recipes[self.current_path], key, value)
             self._schedule_history(key)
+        if key == "zebra_threshold" and hasattr(self.preview, "set_zebra_threshold"):
+            self.preview.set_zebra_threshold(float(value) / 100.0)
         # Keep ToneCurveWidget graph in sync with region sliders
         if key in ("curve_shadows", "curve_darks", "curve_mids", "curve_lights", "curve_highlights"):
             if hasattr(self, "tone_curve"):
@@ -3867,7 +3886,8 @@ class PhotoLab(QMainWindow):
         else:
             tone_keys = ["exposure", "smart_light", "contrast", "highlights", "shadows",
                          "whites", "blacks", "clarity", "gamma", "curve_shadows", "curve_darks",
-                         "curve_mids", "curve_lights", "curve_highlights"]
+                         "curve_mids", "curve_lights", "curve_highlights", "zebra_threshold",
+                         "zebra_exposure", "zebra_feather"]
             color_keys = ["temperature", "tint", "wb_as_shot", "creative_temperature", "creative_tint", "vibrance", "saturation",
                           "hsl_hue", "hsl_sat", "hsl_lum"]
             detail_keys = ["denoise_luminance", "denoise_chroma", "denoise_strength",
@@ -3947,7 +3967,8 @@ class PhotoLab(QMainWindow):
         groups = {
             "tone": ["exposure", "smart_light", "contrast", "highlights", "shadows",
                      "whites", "blacks", "clarity", "gamma", "curve_shadows", "curve_darks",
-                     "curve_mids", "curve_lights", "curve_highlights"],
+                     "curve_mids", "curve_lights", "curve_highlights", "zebra_threshold",
+                     "zebra_exposure", "zebra_feather"],
             "color": ["temperature", "tint", "wb_as_shot", "vibrance", "saturation",
                       "hsl_hue", "hsl_sat", "hsl_lum", "soft_proof", "soft_proof_profile",
                       "soft_proof_gamut"],

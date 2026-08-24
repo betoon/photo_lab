@@ -115,6 +115,10 @@ class Recipe:
     blacks: float = 0.0
     clarity: float = 0.0
     gamma: float = 1.0
+    # Luminance-targeted exposure for pixels at/near the zebra threshold.
+    zebra_threshold: float = 95.0  # display-referred luma percent, 50..100
+    zebra_exposure: float = 0.0    # EV applied only through the zebra mask
+    zebra_feather: float = 5.0     # luma transition width in percentage points
 
     temperature: float = 5500.0
     tint: float = 0.0
@@ -783,6 +787,31 @@ def apply_rgb_point_curves(img, r_pts=None, g_pts=None, b_pts=None):
             indices = (out[..., channel] * 255).astype(np.int32)
             out[..., channel] = lut[indices]
     return np.clip(out, 0, 1)
+
+
+def apply_zebra_highlight_exposure(img, exposure=0.0, threshold=95.0, feather=5.0):
+    """Apply exposure only to a soft, display-luminance zebra mask.
+
+    The luma weights intentionally match ImageCanvas' zebra overlay
+    (B/G/R = 0.1/0.6/0.3), so the pixels selected by the edit correspond to
+    the pixels the photographer sees striped before the adjustment.
+    """
+    ev = float(exposure or 0.0)
+    if abs(ev) < 1e-6:
+        return img
+    work = np.asarray(img, dtype=np.float32)
+    clipped = np.clip(work, 0.0, 1.0)
+    lum = clipped[..., 0] * 0.1 + clipped[..., 1] * 0.6 + clipped[..., 2] * 0.3
+    high = float(np.clip(float(threshold or 95.0) / 100.0, 0.5, 1.0))
+    width = float(np.clip(float(feather or 0.0) / 100.0, 0.0, 0.49))
+    if width <= 1e-6:
+        mask = (lum >= high).astype(np.float32)
+    else:
+        low = max(0.0, high - width)
+        mask = np.clip((lum - low) / max(high - low, 1e-6), 0.0, 1.0)
+        mask = mask * mask * (3.0 - 2.0 * mask)  # smoothstep: halo-resistant edge
+    adjusted = work * (2.0 ** ev)
+    return work * (1.0 - mask[..., None]) + adjusted * mask[..., None]
 
 
 def apply_split_tone(img, sh_hue, sh_sat, hi_hue, hi_sat, balance=0.0):
@@ -1699,6 +1728,13 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
             snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
             overlay=True,
         )
+
+    img = apply_zebra_highlight_exposure(
+        img,
+        exposure=getattr(r, "zebra_exposure", 0.0),
+        threshold=getattr(r, "zebra_threshold", 95.0),
+        feather=getattr(r, "zebra_feather", 5.0),
+    )
 
     return _float01_to_dtype(img, output_dtype)
 
