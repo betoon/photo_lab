@@ -576,11 +576,7 @@ class PhotoLab(QMainWindow):
                 candidates.append(mf)
             candidates.append(os.path.join(docs_dir(), name))
         except Exception:
-<<<<<<< Updated upstream
             log.debug("_manual_path: app path lookup failed", exc_info=True)
-=======
-            pass
->>>>>>> Stashed changes
         candidates.extend([
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", name),
             os.path.join(os.getcwd(), "docs", name),
@@ -1793,10 +1789,6 @@ class PhotoLab(QMainWindow):
         zone_hint.setWordWrap(True)
         zone_hint.setStyleSheet("color:#777; font-size:11px;")
         v.addWidget(zone_hint)
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
 
         box, v = collapsible_group("Rotate", layout, checked=False)
         row = QHBoxLayout()
@@ -2689,13 +2681,10 @@ class PhotoLab(QMainWindow):
             r.curve_shadows, r.curve_darks, r.curve_mids,
             r.curve_lights, r.curve_highlights,
         )
-<<<<<<< Updated upstream
         self.tone_curve.set_point_curve("luma", getattr(r, "curve_points", None) or [])
         self.tone_curve.set_point_curve("r", getattr(r, "curve_r_points", None) or [])
         self.tone_curve.set_point_curve("g", getattr(r, "curve_g_points", None) or [])
         self.tone_curve.set_point_curve("b", getattr(r, "curve_b_points", None) or [])
-=======
->>>>>>> Stashed changes
         # HSL channel sliders
         if hasattr(self, "_sync_all_hsl_sliders_from_recipe"):
             self._sync_all_hsl_sliders_from_recipe(r)
@@ -2721,10 +2710,7 @@ class PhotoLab(QMainWindow):
         if hasattr(self, "bw_cb"):
             self.bw_cb.blockSignals(True)
             self.bw_cb.setChecked(bool(r.black_and_white))
-        if hasattr(self, "_sync_ir_astro_widgets"):
-            self._sync_ir_astro_widgets(r)
             self.bw_cb.blockSignals(False)
-<<<<<<< Updated upstream
         if hasattr(self, "_sync_ir_astro_widgets"):
             self._sync_ir_astro_widgets(r)
         if hasattr(self, "zone_enabled_cb"):
@@ -2739,10 +2725,6 @@ class PhotoLab(QMainWindow):
             self.zone_overlay_cb.blockSignals(True)
             self.zone_overlay_cb.setChecked(bool(getattr(r, "zone_overlay", False)))
             self.zone_overlay_cb.blockSignals(False)
-
-=======
-            
->>>>>>> Stashed changes
         # Control points sync
         self.selected_local_index = -1
         self._update_local_points_list()

@@ -354,18 +354,10 @@ def format_raw_error(path: str, err: Optional[BaseException] = None) -> str:
 _RAW_OUTPUT_BPS = 8
 
 def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] = None) -> Tuple[np.ndarray, dict]:
-<<<<<<< Updated upstream
     """Decode into the pipeline's uint8 BGR working format.
 
     ``output_bps`` is accepted for export-worker compatibility. The current
     processing pipeline remains 8-bit/display-referred internally.
-=======
-    """Decode an image into the pipeline's uint8 BGR working format.
-
-    ``output_bps`` is accepted for compatibility with the export worker. The
-    current processing stack is 8-bit/display-referred, so requesting 16-bit
-    affects final file encoding rather than this intermediate decode.
->>>>>>> Stashed changes
     """
     meta = {"is_raw": False, "wb_multipliers": None, "wb_baked": False}
     img_bgr = None
@@ -397,12 +389,9 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                         )
                     img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                     meta["is_raw"] = True
-<<<<<<< Updated upstream
-=======
                     # LibRaw has already applied the camera multipliers to
                     # this rendered RGB image. apply_recipe must not apply
                     # camera_whitebalance a second time.
->>>>>>> Stashed changes
                     meta["wb_baked"] = bool(use_camera_wb)
                     try:
                         meta["wb_multipliers"] = list(raw.camera_whitebalance)
@@ -1438,43 +1427,6 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None):
             overlay=True,
         )
 
-<<<<<<< Updated upstream
-    # Film grain
-    if abs(getattr(r, "film_grain", 0.0)) > 1e-4:
-        amt = r.film_grain / 100.0
-        noise = np.random.randn(*img.shape[:2]).astype(np.float32) * (amt * 0.08)
-        img = np.clip(img + noise[..., None], 0, 1)
-
-
-
-    # Specialty: Infrared + Astro (non-destructive recipe flags)
-    img = apply_ir_processing(img, r)
-    img = apply_astro_processing(img, r)
-
-    # Black and white + Ansel Adams zone system
-    if getattr(r, "black_and_white", False) or getattr(r, "zone_enabled", False):
-        img = apply_zone_system(
-            img,
-            enabled=True,
-            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
-            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
-            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
-            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
-            overlay=bool(getattr(r, "zone_overlay", False)),
-        )
-    elif getattr(r, "zone_overlay", False):
-        img = apply_zone_system(
-            img,
-            enabled=False,
-            placement=float(getattr(r, "zone_placement", 5.0) or 5.0),
-            expansion=float(getattr(r, "zone_expansion", 0.0) or 0.0),
-            filter_name=str(getattr(r, "zone_filter", "none") or "none"),
-            snap=float(getattr(r, "zone_snap", 0.0) or 0.0),
-            overlay=True,
-        )
-
-=======
->>>>>>> Stashed changes
     return (np.clip(img, 0, 1) * 255.0).astype(np.uint8)
 
 

@@ -265,7 +265,6 @@ class ToneCurveWidget(QWidget):
             float(highlights or 0.0),
         ]
         self.update()
-<<<<<<< Updated upstream
         self.repaint()
 
     def set_point_curve(self, key: str, points: list):
@@ -294,9 +293,6 @@ class ToneCurveWidget(QWidget):
 
     def _margin(self):
         return 12
-=======
-        self.repaint()  # force immediate redraw when driven by sliders
->>>>>>> Stashed changes
 
     def _points(self):
         """Five control points: Shadows, Darks, Midtones, Lights, Highlights."""
@@ -658,7 +654,8 @@ class ImageCanvas(QWidget):
             return
         want_clip = getattr(self, "show_clipping", False)
         want_zebra = getattr(self, "show_zebras", False)
-        if not want_clip and not want_zebra:
+        want_peaking = getattr(self, "show_peaking", False)
+        if not want_clip and not want_zebra and not want_peaking:
             return
         rect = self.image_rect()
         if rect.isEmpty():
@@ -686,67 +683,6 @@ class ImageCanvas(QWidget):
                     if yv <= lo:
                         painter.fillRect(px, py, pw, ph, QColor(40, 80, 255, 160))
                     elif yv >= hi:
-<<<<<<< Updated upstream
-                        painter.fillRect(
-                            int(rect.left() + x * sx),
-                            int(rect.top() + y * sy),
-                            max(1, int(step * sx) + 1),
-                            max(1, int(step * sy) + 1),
-                            QColor(255, 40, 40, 160),
-                        )
-            painter.restore()
-
-        if getattr(self, "show_zebras", False):
-            from PyQt6.QtGui import QImage
-            qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-            w, h = qimg.width(), qimg.height()
-            step = max(1, max(w, h) // 400)
-            threshold = int(255 * float(getattr(self, "_zebra_threshold", 0.95)))
-            painter.save()
-            painter.setClipRect(rect)
-            sx = rect.width() / max(w, 1)
-            sy = rect.height() / max(h, 1)
-            for y in range(0, h, step):
-                for x in range(0, w, step):
-                    c = qimg.pixelColor(x, y)
-                    luminance = (c.red() * 3 + c.green() * 6 + c.blue()) // 10
-                    if luminance < threshold:
-                        continue
-                    color = QColor(0, 0, 0, 180) if ((x + y) // max(4, step * 2)) % 2 == 0 else QColor(255, 220, 0, 200)
-                    painter.fillRect(
-                        int(rect.left() + x * sx),
-                        int(rect.top() + y * sy),
-                        max(1, int(step * sx) + 1),
-                        max(1, int(step * sy) + 1),
-                        color,
-                    )
-            painter.restore()
-
-        if getattr(self, "show_peaking", False):
-            from PyQt6.QtGui import QImage
-            qimg = self._pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-            w, h = qimg.width(), qimg.height()
-            step = max(2, max(w, h) // 350)
-            painter.save()
-            painter.setClipRect(rect)
-            sx = rect.width() / max(w, 1)
-            sy = rect.height() / max(h, 1)
-            painter.setPen(QPen(QColor(0, 255, 90, 210), max(1, int(step * sx * 0.6))))
-            for y in range(step, h - step, step):
-                for x in range(step, w - step, step):
-                    c0 = qimg.pixelColor(x, y)
-                    c1 = qimg.pixelColor(x + step, y)
-                    c2 = qimg.pixelColor(x, y + step)
-                    y0 = (c0.red() + c0.green() + c0.blue()) // 3
-                    y1 = (c1.red() + c1.green() + c1.blue()) // 3
-                    y2 = (c2.red() + c2.green() + c2.blue()) // 3
-                    if abs(y0 - y1) + abs(y0 - y2) > 40:
-                        painter.drawPoint(
-                            int(rect.left() + x * sx),
-                            int(rect.top() + y * sy),
-                        )
-            painter.restore()
-=======
                         painter.fillRect(px, py, pw, ph, QColor(255, 40, 40, 160))
                 if want_zebra and yv >= z_thr:
                     # Diagonal zebra stripes (classic video exposure assist)
@@ -757,7 +693,23 @@ class ImageCanvas(QWidget):
                     else:
                         painter.fillRect(px, py, pw, ph, QColor(255, 220, 0, 200))
         painter.restore()
->>>>>>> Stashed changes
+
+        if getattr(self, "show_peaking", False):
+            peak_step = max(2, max(w, h) // 350)
+            painter.save()
+            painter.setClipRect(rect)
+            painter.setPen(QPen(QColor(0, 255, 90, 210), max(1, int(peak_step * sx * 0.6))))
+            for y in range(peak_step, h - peak_step, peak_step):
+                for x in range(peak_step, w - peak_step, peak_step):
+                    c0 = qimg.pixelColor(x, y)
+                    c1 = qimg.pixelColor(x + peak_step, y)
+                    c2 = qimg.pixelColor(x, y + peak_step)
+                    y0 = (c0.red() + c0.green() + c0.blue()) // 3
+                    y1 = (c1.red() + c1.green() + c1.blue()) // 3
+                    y2 = (c2.red() + c2.green() + c2.blue()) // 3
+                    if abs(y0 - y1) + abs(y0 - y2) > 40:
+                        painter.drawPoint(int(rect.left() + x * sx), int(rect.top() + y * sy))
+            painter.restore()
 
     def paintEvent(self, event):
         painter = QPainter(self)

@@ -67,13 +67,10 @@ def _parse_xmp_text(text: str) -> dict:
 
 def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     """Load a Lightroom/ACR .xmp develop preset into a Recipe."""
-<<<<<<< Updated upstream
-=======
     # XMP develop presets are partial edits.  Work on a copy so applying one
     # preserves settings that the preset does not mention (especially the
     # image's current/as-shot WB) and a parse failure cannot mutate the live
     # recipe in place.
->>>>>>> Stashed changes
     r = copy.deepcopy(base) if base is not None else Recipe()
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         text = f.read()
