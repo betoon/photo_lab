@@ -353,12 +353,18 @@ class PhotoLab(QMainWindow):
         try:
             from PyQt6.QtGui import QFont as _QF
             _f = self.font()
-            if _f.pointSize() <= 0:
-                _f.setPixelSize(13)
+            if _f.pointSizeF() <= 0:
+                _f.setPointSizeF(10.0 * self._ui_scale)
                 self.setFont(_f)
         except Exception:
             pass
-        self.resize(1600, 1000)
+        # Choose a startup size that fits inside the usable desktop.  Toolbars,
+        # the Windows frame, and the taskbar reduce the available area below
+        # the monitor's nominal resolution.
+        screen = QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        self.resize(min(1600, available.width()) if available else 1600,
+                    min(1000, available.height()) if available else 1000)
         self.setStyleSheet(self._stylesheet())
 
         self.folder = None
@@ -524,7 +530,7 @@ class PhotoLab(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             font = QFont("Segoe UI")
-            font.setPointSizeF(10.0 * self._ui_scale)
+            font.setPointSizeF(max(1.0, 10.0 * self._ui_scale))
             app.setFont(font)
             self.setFont(font)
         self.setStyleSheet(self._stylesheet())
@@ -1295,9 +1301,19 @@ class PhotoLab(QMainWindow):
         self._set_gps_status(None)
         ll.addWidget(meta_box)
 
-        left.setMinimumWidth(220)
-        left.setMaximumWidth(300)
-        splitter.addWidget(left)
+        # The collection of diagnostics can be taller than a 1080p desktop
+        # after subtracting the taskbar and window frame.  Scrolling the panel
+        # prevents its children from imposing an impossible main-window height.
+        left_scroll = QScrollArea()
+        left_scroll.setObjectName("leftPanelScroll")
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        left_scroll.setMinimumWidth(220)
+        left_scroll.setMaximumWidth(300)
+        left_scroll.setMinimumHeight(0)
+        left_scroll.setWidget(left)
+        splitter.addWidget(left_scroll)
 
         # CENTER: preview
         self.preview = ImageCanvas()
