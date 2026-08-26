@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+__pycache__
+build
+dist
+test_logs
+tests
+Argyll_V3.5.0
+*.zip
+*.tar.gz
+photolab.ini

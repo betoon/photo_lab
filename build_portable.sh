@@ -4,12 +4,17 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "=== PhotoLab portable build ==="
-python3 -c "import PyInstaller" 2>/dev/null || pip install pyinstaller
+python3 -c "import PyInstaller, PyQt6, PySide6, cv2, numpy, PIL, rawpy, tifffile" 2>/dev/null || {
+  echo "ERROR: Build dependencies are incomplete." >&2
+  echo "Install docs/requirements.txt and PyInstaller in this Python environment." >&2
+  exit 1
+}
 
 mkdir -p plugin docs
 
 echo "Building (one-folder)..."
-pyinstaller --noconfirm photo_lab.spec
+python3 -m PyInstaller --noconfirm --clean focus_stacker_pro.spec
+python3 -m PyInstaller --noconfirm --clean photo_lab.spec
 
 echo
 echo "Output: dist/PhotoLab/"

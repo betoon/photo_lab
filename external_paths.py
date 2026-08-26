@@ -47,6 +47,7 @@ def _lensfun_candidates():
 
 def _focus_candidates():
     root = _app_root()
+    yield os.path.join(root, "FocusStackerPro", "FocusStackerPro.exe" if os.name == "nt" else "FocusStackerPro")
     yield os.path.join(root, "run_focus_stacker_pro.py")
     yield os.path.join(root, "focus_stacker_pro", "run.py")
     for name in ("focus-stacker-pro", "focus-stacker-pro.exe"):

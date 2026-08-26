@@ -9,6 +9,9 @@ build_portable.bat
 # Linux / macOS
 chmod +x build_portable.sh
 ./build_portable.sh
+
+# Reproducible Linux x86_64 build from Windows (Docker Desktop)
+build_linux_docker.bat
 ```
 
 Or manually:
@@ -24,6 +27,9 @@ Bundled with the build:
 
 - `docs/` — user & developer manuals (Help menu)
 - `plugin/` — JSON / Lightroom-style presets
+- `lensfun/data/db/` — bundled Lensfun correction database
+- `focus_stacker_pro/` — bundled Focus Stacker Pro integration
+- `photolab.ini.example` — machine-neutral configuration example
 
 ## ffmpeg (Panorama to Video)
 

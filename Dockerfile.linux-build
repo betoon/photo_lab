@@ -1,0 +1,14 @@
+FROM python:3.13-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils libgl1 libglib2.0-0 libxkbcommon-x11-0 libdbus-1-3 \
+    libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+    libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+    libxcb-xfixes0 libegl1 && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY docs/requirements.txt /tmp/requirements.txt
+RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt pyinstaller
+COPY . /src
+RUN rm -rf build dist && ./build_portable.sh && \
+    tar -C /src/dist -czf /src/PhotoLab-linux-x86_64.tar.gz PhotoLab

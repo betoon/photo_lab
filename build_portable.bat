@@ -6,17 +6,23 @@ setlocal
 cd /d "%~dp0"
 
 echo === PhotoLab portable build ===
-python -c "import PyInstaller" 2>nul
+python -c "import PyInstaller, PyQt6, PySide6, cv2, numpy, PIL, rawpy, tifffile" 2>nul
 if errorlevel 1 (
-  echo Installing PyInstaller...
-  pip install pyinstaller
+  echo ERROR: Build dependencies are incomplete.
+  echo Install docs\requirements.txt and PyInstaller in this Python environment.
+  exit /b 1
 )
 
 if not exist plugin mkdir plugin
 if not exist docs mkdir docs
 
 echo Building (one-folder)...
-pyinstaller --noconfirm photo_lab.spec
+python -m PyInstaller --noconfirm --clean focus_stacker_pro.spec
+if errorlevel 1 (
+  echo Focus Stacker Pro build failed.
+  exit /b 1
+)
+python -m PyInstaller --noconfirm --clean photo_lab.spec
 if errorlevel 1 (
   echo Build failed.
   exit /b 1

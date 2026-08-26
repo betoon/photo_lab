@@ -29,7 +29,15 @@ block_cipher = None
 datas = [
     ("docs", "docs"),
     ("plugin", "plugin"),
+    ("photolab.ini.example", "."),
 ]
+
+# Runtime data used by optional but bundled PhotoLab features.
+if os.path.isdir(os.path.join("lensfun", "data", "db")):
+    datas.append((os.path.join("lensfun", "data", "db"), os.path.join("lensfun", "data", "db")))
+packaged_focus_stacker = os.path.join("dist", "FocusStackerPro")
+if os.path.isdir(packaged_focus_stacker):
+    datas.append((packaged_focus_stacker, "FocusStackerPro"))
 
 # Include optional README next to exe
 if os.path.isfile("README.md"):
@@ -61,6 +69,14 @@ hiddenimports = [
     "audio_editor",
     "qt_utils",
     "color_calibration",
+    "config",
+    "configuration_dialog",
+    "external_paths",
+    "script_runner",
+    "map_view",
+    "video_editor",
+    "slideshow",
+    "print_dialog",
 ]
 
 a = Analysis(
@@ -72,7 +88,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        "Cython", "fsspec", "lxml", "pandas", "pyarrow", "pytest",
+        "IPython", "jupyter", "notebook",
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
