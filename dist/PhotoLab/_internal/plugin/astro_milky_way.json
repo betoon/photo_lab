@@ -1,0 +1,8 @@
+{
+  "name": "Astro Milky Way",
+  "astro_stretch": 55.0,
+  "astro_bg_remove": 40.0,
+  "astro_star_emphasis": 25.0,
+  "clarity": 15.0,
+  "denoise_luminance": 20.0
+}

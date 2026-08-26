@@ -1,0 +1,56 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="2C5647D6-C081-4D3A-8912-66302766D743"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:BlackAndWhiteAqua="-60"
+   crs:BlackAndWhiteBlue="-95"
+   crs:BlackAndWhiteMagenta="-30"
+   crs:BlackAndWhitePurple="-50"
+   crs:Blacks2012="-10"
+   crs:Clarity2012="-25"
+   crs:ConvertToServerRGB="False"
+   crs:Dehaze="-10"
+   crs:GrainAmount="18"
+   crs:GrainFrequency="60"
+   crs:GrainSize="35"
+   crs:HasSettings="True"
+   crs:ProcessVersion="15.4"
+   crs:Version="16.0"
+   crs:uuid="2C5647D6-C081-4D3A-8912-66302766D743">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">ethereal_high_key_infrared</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

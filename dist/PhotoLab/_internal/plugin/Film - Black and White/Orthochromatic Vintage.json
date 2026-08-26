@@ -1,0 +1,70 @@
+{
+  "name": "Orthochromatic Vintage",
+  "description": "Early-film-inspired response with dark reds, pale blues, lifted blacks, and visible grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    -30,
+    -16,
+    4,
+    12,
+    16,
+    22,
+    12,
+    -18
+  ],
+  "black_and_white": true,
+  "contrast": 10,
+  "highlights": -8,
+  "shadows": 5,
+  "blacks": 5,
+  "clarity": 1,
+  "film_grain": 22,
+  "vignette": 7,
+  "curve_points": [
+    [
+      0,
+      0.055
+    ],
+    [
+      0.2,
+      0.19
+    ],
+    [
+      0.5,
+      0.49
+    ],
+    [
+      0.82,
+      0.86
+    ],
+    [
+      1,
+      0.975
+    ]
+  ]
+}

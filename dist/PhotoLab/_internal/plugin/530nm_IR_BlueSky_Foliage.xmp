@@ -1,0 +1,95 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0-c000 1.000000, 2026/01/01-00:00:00">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:Version="16.0"
+   crs:ProcessVersion="15.4"
+   crs:PresetType="Look"
+   crs:Cluster=""
+   crs:UUID="E530IR01-BLUE-SKY-ENHANCED-FOLIAGE-2026"
+   crs:SupportsAmount="True"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:HasSettings="True">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">530nm IR Blue Sky &amp; Enhanced Foliage</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">530nm IR</rdf:li>
+    </rdf:Alt>
+   </crs:ShortName>
+   <crs:Parameters>
+    <rdf:Description
+     crs:Temperature="2200"
+     crs:Tint="-60"
+     crs:Exposure="+0.20"
+     crs:Contrast="+15"
+     crs:Highlights="-10"
+     crs:Shadows="+25"
+     crs:Whites="+10"
+     crs:Blacks="-5"
+     crs:Vibrance="+25"
+     crs:Saturation="+10"
+     crs:HueAdjustmentRed="+45"
+     crs:HueAdjustmentOrange="-10"
+     crs:HueAdjustmentYellow="-20"
+     crs:HueAdjustmentGreen="-100"
+     crs:HueAdjustmentAqua="+100"
+     crs:HueAdjustmentBlue="-25"
+     crs:HueAdjustmentPurple="-100"
+     crs:HueAdjustmentMagenta="-100"
+     crs:SaturationAdjustmentRed="+35"
+     crs:SaturationAdjustmentOrange="+40"
+     crs:SaturationAdjustmentYellow="+30"
+     crs:SaturationAdjustmentGreen="-50"
+     crs:SaturationAdjustmentAqua="+20"
+     crs:SaturationAdjustmentBlue="+35"
+     crs:SaturationAdjustmentPurple="-80"
+     crs:SaturationAdjustmentMagenta="-90"
+     crs:LuminanceAdjustmentRed="+10"
+     crs:LuminanceAdjustmentOrange="+15"
+     crs:LuminanceAdjustmentYellow="+20"
+     crs:LuminanceAdjustmentBlue="-15">
+     <!-- Global Hue Map Masking to execute the 180-degree Channel Swap effect inside Lightroom -->
+     <crs:Masks>
+      <rdf:Seq>
+       <rdf:li>
+        <rdf:Description
+         crs:MaskActive="True"
+         crs:MaskName="IR Channel Swap Mask"
+         crs:MaskBlendMode="0"
+         crs:MaskInverted="False"
+         crs:MaskValue="1.0">
+         <crs:MaskGroupBasedCorrections>
+          <rdf:Seq>
+           <rdf:li>
+            <rdf:Description
+             crs:CorrectionActive="True"
+             crs:LocalHue="180.0">
+             <crs:CorrectionMasks>
+              <rdf:Seq>
+               <rdf:li>
+                <rdf:Description
+                 crs:MaskType="Full"
+                 crs:MaskActive="True"/>
+               </rdf:li>
+              </rdf:Seq>
+             </crs:CorrectionMasks>
+            </rdf:Description>
+           </rdf:li>
+          </rdf:Seq>
+         </crs:MaskGroupBasedCorrections>
+        </rdf:Description>
+       </rdf:li>
+      </rdf:Seq>
+     </crs:Masks>
+    </rdf:Description>
+   </crs:Parameters>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

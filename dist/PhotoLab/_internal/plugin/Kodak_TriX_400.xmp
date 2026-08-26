@@ -1,0 +1,59 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="7E33DD5F-FA6E-42B8-BD72-67DECAB935AE"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:ConvertToGrayscale="True"
+   crs:Exposure="+0.10"
+   crs:Contrast="+25"
+   crs:Highlights="+8"
+   crs:Shadows="-12"
+   crs:Blacks="-15"
+   crs:Clarity="+15"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:GrayMixerRed="+15"
+   crs:GrayMixerOrange="+22"
+   crs:GrayMixerYellow="+10"
+   crs:GrayMixerGreen="-5"
+   crs:GrayMixerAqua="-20"
+   crs:GrayMixerBlue="-35"
+   crs:GrayMixerPurple="-15"
+   crs:GrayMixerMagenta="0"
+   crs:uuid="6B2810F5-F5A3-4AC1-832B-393E558B899D">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Kodak_TriX_400</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

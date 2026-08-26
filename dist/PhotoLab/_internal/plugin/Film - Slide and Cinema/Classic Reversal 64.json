@@ -1,0 +1,69 @@
+{
+  "name": "Classic Reversal 64",
+  "description": "Vintage low-speed reversal color with warm reds, muted blues, and compact dynamic range.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 5,
+  "creative_tint": 2,
+  "hsl_hue": [
+    -4,
+    -3,
+    -2,
+    2,
+    1,
+    4,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    13,
+    6,
+    -3,
+    -8,
+    -9,
+    -12,
+    -5,
+    -2
+  ],
+  "hsl_lum": [
+    -2,
+    3,
+    0,
+    -3,
+    -2,
+    -7,
+    0,
+    0
+  ],
+  "contrast": 18,
+  "highlights": -5,
+  "shadows": -7,
+  "blacks": -6,
+  "saturation": -2,
+  "vibrance": 10,
+  "film_grain": 8,
+  "curve_points": [
+    [
+      0,
+      0.01
+    ],
+    [
+      0.2,
+      0.15
+    ],
+    [
+      0.5,
+      0.49
+    ],
+    [
+      0.82,
+      0.87
+    ],
+    [
+      1,
+      0.985
+    ]
+  ]
+}

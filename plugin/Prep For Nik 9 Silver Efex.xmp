@@ -1,0 +1,74 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0-c000 1.000000, 0000/00/00-00:00:00">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="A1B2C3D4E5F67890BCDE1234567890AB"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:HasSettings="True">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Prep For Nik 9 Silver Efex</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default"/>
+    </rdf:Alt>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default"/>
+    </rdf:Alt>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Nik Collection 9 Shortcuts</rdf:li>
+    </rdf:Alt>
+   </crs:Group>
+   <crs:Description>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Flattens profiles and optimizes dynamic range for Silver Efex 9 processing.</rdf:li>
+    </rdf:Alt>
+   </crs:Description>
+   <crs:Look>
+    <rdf:Description
+     crs:Name="Adobe Standard"
+     crs:Amount="1"
+     crs:UUID="A4D4A4B1A0027E720F12E09DEEC057F7"
+     crs:SupportsAmount="False"
+     crs:Group="Adobe">
+    <crs:Parameters>
+     <rdf:Description
+      crs:Version="16.0"
+      crs:ProcessVersion="15.4"/>
+    </crs:Parameters>
+    </rdf:Description>
+   </crs:Look>
+   <crs:Parameters>
+    <rdf:Description
+     crs:Version="16.0"
+     crs:ProcessVersion="15.4"
+     crs:Treatment="Color"
+     crs:Shadows="0"
+     crs:Highlights="0"
+     crs:Brightness="0"
+     crs:Contrast="0"
+     crs:Saturation="0"
+     crs:Sharpness="0"
+     crs:Clarity="0"
+     crs:Dehaze="0"
+     crs:Texture="0"
+     crs:Vibrance="0"
+     crs:ParametricShadows="0"
+     crs:ParametricDarks="0"
+     crs:ParametricLights="0"
+     crs:ParametricHighlights="0"/>
+   </crs:Parameters>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

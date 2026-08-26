@@ -1,0 +1,73 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:ConvertGrayscale="True"
+   crs:Exposure2012="+0.15"
+   crs:Contrast2012="+35"
+   crs:Highlights2012="-12"
+   crs:Shadows2012="-18"
+   crs:Whites2012="+24"
+   crs:Blacks2012="-22"
+   crs:Clarity2012="+30"
+   crs:Texture="+15"
+   crs:GrayMixerRed="+14"
+   crs:GrayMixerOrange="+22"
+   crs:GrayMixerYellow="+6"
+   crs:GrayMixerGreen="-28"
+   crs:GrayMixerCyan="-35"
+   crs:GrayMixerBlue="-42"
+   crs:GrayMixerPurple="-10"
+   crs:GrayMixerMagenta="+5"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:PostCropVignetteAmount="-25"
+   crs:PostCropVignetteMidpoint="35"
+   crs:PostCropVignetteRoundness="0"
+   crs:PostCropVignetteFeather="60"
+   crs:PostCropVignetteStyle="1"
+   crs:Sharpness="+60"
+   crs:SharpenRadius="1.0"
+   crs:SharpenDetail="35"
+   crs:SharpenEdgeMasking="10"
+   crs:GrainAmount="35"
+   crs:GrainSize="40"
+   crs:GrainFrequency="50"
+   crs:uuid="B4C5D6E7-CF90-50E3-934C-9DF2CC6DA809">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Monochrome_Intense_Grit_Silver</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

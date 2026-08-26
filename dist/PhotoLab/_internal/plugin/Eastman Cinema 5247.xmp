@@ -1,0 +1,69 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="0.05"
+   crs:Contrast="18"
+   crs:Highlights="-15"
+   crs:Shadows="12"
+   crs:Blacks="8"
+   crs:Clarity="4"
+   crs:Vibrance="5"
+   crs:Saturation="-4"
+   crs:Temperature="8"
+   crs:Tint="-2"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="-4"
+   crs:SaturationAdjustmentRed="15"
+   crs:LuminanceAdjustmentRed="-4"
+   crs:HueAdjustmentOrange="-2"
+   crs:SaturationAdjustmentOrange="6"
+   crs:HueAdjustmentYellow="-5"
+   crs:HueAdjustmentGreen="-12"
+   crs:SaturationAdjustmentGreen="-15"
+   crs:LuminanceAdjustmentGreen="2"
+   crs:HueAdjustmentBlue="-6"
+   crs:SaturationAdjustmentBlue="-5"
+   crs:LuminanceAdjustmentBlue="-2"
+   crs:GrainSize="28"
+   crs:GrainFrequency="40"
+   crs:GrainAmount="16"
+   crs:uuid="C69C73CA-060D-4D40-AC6F-19CBB835D200">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Eastman Cinema 5247</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

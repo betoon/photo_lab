@@ -1,0 +1,65 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="3B22CC4D-DF5E-41A7-AC69-56CDBFA8249D"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="0.0"
+   crs:Contrast="+15"
+   crs:Highlights="-10"
+   crs:Shadows="-8"
+   crs:Blacks="-5"
+   crs:Clarity="+5"
+   crs:Temperature="-4"
+   crs:Tint="+5"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="-4"
+   crs:SaturationAdjustmentRed="-6"
+   crs:HueAdjustmentGreen="+12"
+   crs:SaturationAdjustmentGreen="+18"
+   crs:LuminanceAdjustmentGreen="-4"
+   crs:HueAdjustmentBlue="-10"
+   crs:SaturationAdjustmentBlue="+12"
+   crs:LuminanceAdjustmentBlue="-6"
+   crs:SplitToningShadowHue="165"
+   crs:SplitToningShadowSaturation="8"
+   crs:SplitToningHighlightHue="0"
+   crs:SplitToningHighlightSaturation="0"
+   crs:SplitToningBalance="-25"
+   crs:uuid="0D1AF8C9-A0DB-41C1-9267-0D329AD72DC2">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Fujifilm_Superia_400</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

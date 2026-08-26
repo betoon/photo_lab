@@ -1,0 +1,78 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="FCF7426F-DFEB-4DF1-8C2F-7B3A91980D75"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:EnableCircularGradientBasedCorrections="True"
+   crs:EnableGradientBasedCorrections="True"
+   crs:GradientBasedCorrections="{"
+   crs:CorrectionActive="True"
+   crs:CorrectionAmount="1"
+   crs:CorrectionID="D0944D88-827A-4609-ADC2-58E9772DD103"
+   crs:CorrectionMasks="{"
+   crs:FullX="0.000305"
+   crs:FullY="0.515454"
+   crs:MaskID="53405B77-52DA-4A54-B8C1-E162B8E9CD59"
+   crs:MaskValue="1"
+   crs:What="Correction"
+   crs:ZeroX="0.806706"
+   crs:ZeroY="0.49305"
+   crs:CorrectionReferenceX="0.403506"
+   crs:CorrectionReferenceY="0.504252"
+   crs:LocalBrightness="0"
+   crs:LocalClarity="0"
+   crs:LocalClarity2012="0.19048"
+   crs:LocalContrast="0"
+   crs:LocalContrast2012="0.59524"
+   crs:LocalDefringe="0"
+   crs:LocalExposure="0"
+   crs:LocalExposure2012="0.4525"
+   crs:LocalHighlights2012="0.09524"
+   crs:LocalLuminanceNoise="0.09524"
+   crs:LocalMoire="0"
+   crs:LocalSaturation="0.20429"
+   crs:LocalShadows2012="0.5"
+   crs:LocalSharpness="0"
+   crs:LocalTemperature="0.80952"
+   crs:LocalTint="-0.66667"
+   crs:LocalToningHue="240"
+   crs:LocalToningSaturation="0"
+   crs:ProcessVersion="6.7"
+   crs:orientation="AB"
+   crs:uuid="A6C75A28-6521-416B-A344-C130D044AAFD">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Contrastly - Light Leaks & Flares - Light Leak 10</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

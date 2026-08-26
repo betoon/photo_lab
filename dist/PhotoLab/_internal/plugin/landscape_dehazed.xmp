@@ -1,0 +1,71 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="379168BD-5678-4555-9B41-BC7F37BF2968"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Blacks2012="-20"
+   crs:ColorNoiseReduction="25"
+   crs:HasSettings="True"
+   crs:Highlights2012="-60"
+   crs:HueAdjustmentBlue="-6"
+   crs:HueAdjustmentMagenta="0"
+   crs:HueAdjustmentOrange="-2"
+   crs:HueAdjustmentPurple="0"
+   crs:HueAdjustmentRed="0"
+   crs:HueAdjustmentYellow="-8"
+   crs:LuminanceAdjustmentAqua="-5"
+   crs:LuminanceAdjustmentBlue="-18"
+   crs:LuminanceAdjustmentGreen="-8"
+   crs:LuminanceAdjustmentMagenta="0"
+   crs:LuminanceAdjustmentPurple="0"
+   crs:LuminanceAdjustmentRed="0"
+   crs:LuminanceSmoothing="15"
+   crs:ParametricDarks="0"
+   crs:ParametricHighlights="0"
+   crs:ParametricLights="0"
+   crs:ParametricShadows="0"
+   crs:ProcessVersion="15.4"
+   crs:Saturation="-2"
+   crs:SaturationAdjustmentMagenta="0"
+   crs:SaturationAdjustmentPurple="0"
+   crs:SharpenDetail="25"
+   crs:SharpenEdgeMasking="15"
+   crs:Sharpness="50"
+   crs:Version="16.0"
+   crs:uuid="379168BD-5678-4555-9B41-BC7F37BF2968">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">landscape_dehazed</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

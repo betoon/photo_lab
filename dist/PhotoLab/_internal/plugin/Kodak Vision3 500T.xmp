@@ -1,0 +1,70 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="0.10"
+   crs:Contrast="12"
+   crs:Highlights="-22"
+   crs:Shadows="18"
+   crs:Blacks="4"
+   crs:Clarity="6"
+   crs:Vibrance="8"
+   crs:Saturation="-2"
+   crs:Temperature="-12"
+   crs:Tint="-2"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="-2"
+   crs:SaturationAdjustmentRed="8"
+   crs:HueAdjustmentOrange="-4"
+   crs:SaturationAdjustmentOrange="5"
+   crs:LuminanceAdjustmentOrange="2"
+   crs:HueAdjustmentBlue="-12"
+   crs:SaturationAdjustmentBlue="15"
+   crs:LuminanceAdjustmentBlue="-4"
+   crs:SplitToningShadowHue="212"
+   crs:SplitToningShadowSaturation="6"
+   crs:SplitToningHighlightHue="42"
+   crs:SplitToningHighlightSaturation="4"
+   crs:SplitToningBalance="-10"
+   crs:GrainSize="20"
+   crs:GrainFrequency="35"
+   crs:GrainAmount="12"
+   crs:uuid="A59C73CA-060D-4D40-AC6F-19CBB835D211">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Kodak Vision3 500T</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

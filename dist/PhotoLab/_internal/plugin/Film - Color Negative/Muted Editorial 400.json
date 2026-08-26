@@ -1,0 +1,69 @@
+{
+  "name": "Muted Editorial 400",
+  "description": "Low-saturation editorial palette with cyan-leaning greens, soft contrast, and calm skin tones.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Color Negative",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": -2,
+  "creative_tint": -1,
+  "hsl_hue": [
+    2,
+    0,
+    5,
+    14,
+    8,
+    -3,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    -9,
+    -5,
+    -20,
+    -24,
+    -13,
+    -16,
+    -14,
+    -12
+  ],
+  "hsl_lum": [
+    2,
+    5,
+    3,
+    8,
+    5,
+    -2,
+    0,
+    0
+  ],
+  "contrast": -7,
+  "highlights": -15,
+  "shadows": 10,
+  "blacks": 4,
+  "saturation": -13,
+  "vibrance": 5,
+  "film_grain": 15,
+  "curve_points": [
+    [
+      0,
+      0.045
+    ],
+    [
+      0.22,
+      0.225
+    ],
+    [
+      0.5,
+      0.51
+    ],
+    [
+      0.82,
+      0.84
+    ],
+    [
+      1,
+      0.975
+    ]
+  ]
+}

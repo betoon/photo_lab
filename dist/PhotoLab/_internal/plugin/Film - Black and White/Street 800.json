@@ -1,0 +1,71 @@
+{
+  "name": "Street 800",
+  "description": "Gritty high-speed street monochrome with dense blacks, punchy midtones, and coarse grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    2,
+    3,
+    0,
+    -2,
+    -3,
+    -5,
+    -2,
+    0
+  ],
+  "black_and_white": true,
+  "contrast": 19,
+  "highlights": -15,
+  "shadows": -2,
+  "blacks": -10,
+  "clarity": 10,
+  "film_grain": 31,
+  "microcontrast": 15,
+  "vignette": 5,
+  "curve_points": [
+    [
+      0,
+      0
+    ],
+    [
+      0.18,
+      0.105
+    ],
+    [
+      0.5,
+      0.475
+    ],
+    [
+      0.82,
+      0.885
+    ],
+    [
+      1,
+      0.985
+    ]
+  ]
+}

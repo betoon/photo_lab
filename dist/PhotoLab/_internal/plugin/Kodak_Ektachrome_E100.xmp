@@ -1,0 +1,65 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="9C44EE6A-BA8F-43C9-CE83-89DECAB045BE"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="+0.10"
+   crs:Contrast="+20"
+   crs:Highlights="+5"
+   crs:Shadows="-10"
+   crs:Blacks="-8"
+   crs:Clarity="+8"
+   crs:Vibrance="+15"
+   crs:Saturation="+2"
+   crs:Temperature="-2"
+   crs:Tint="+1"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="+2"
+   crs:SaturationAdjustmentRed="+12"
+   crs:HueAdjustmentAqua="+8"
+   crs:SaturationAdjustmentAqua="+10"
+   crs:HueAdjustmentBlue="-12"
+   crs:SaturationAdjustmentBlue="+22"
+   crs:LuminanceAdjustmentBlue="-15"
+   crs:HueAdjustmentOrange="+2"
+   crs:SaturationAdjustmentOrange="+4"
+   crs:HueAdjustmentYellow="-4"
+   crs:SaturationAdjustmentYellow="+8"
+   crs:uuid="059C5809-576F-4693-BD64-1EF987887161">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Kodak_Ektachrome_E100</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

@@ -1,0 +1,71 @@
+{
+  "name": "Bleach Bypass Cinema",
+  "description": "Silver-retention cinema aesthetic with low saturation, hard density, and crisp texture.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    -12,
+    -8,
+    -20,
+    -22,
+    -18,
+    -17,
+    -15,
+    -12
+  ],
+  "hsl_lum": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "contrast": 24,
+  "highlights": -18,
+  "shadows": -8,
+  "blacks": -12,
+  "clarity": 9,
+  "vibrance": -8,
+  "saturation": -39,
+  "film_grain": 24,
+  "microcontrast": 16,
+  "curve_points": [
+    [
+      0,
+      0
+    ],
+    [
+      0.18,
+      0.105
+    ],
+    [
+      0.5,
+      0.48
+    ],
+    [
+      0.82,
+      0.89
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}

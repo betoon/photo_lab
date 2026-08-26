@@ -1,0 +1,70 @@
+{
+  "name": "Red Filter Dramatic",
+  "description": "Dramatic red-filter rendering with pale skin and clouds, dark skies, and forceful contrast.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    25,
+    20,
+    5,
+    -12,
+    -22,
+    -38,
+    -25,
+    -8
+  ],
+  "black_and_white": true,
+  "contrast": 21,
+  "highlights": -17,
+  "shadows": -3,
+  "blacks": -10,
+  "clarity": 9,
+  "film_grain": 14,
+  "microcontrast": 14,
+  "curve_points": [
+    [
+      0,
+      0
+    ],
+    [
+      0.18,
+      0.105
+    ],
+    [
+      0.5,
+      0.48
+    ],
+    [
+      0.82,
+      0.89
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}

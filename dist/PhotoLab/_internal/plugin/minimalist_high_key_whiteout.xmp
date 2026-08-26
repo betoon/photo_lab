@@ -1,0 +1,52 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="F4C17C64-3F66-45B7-9A07-5DB99CA9B971"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:BlackAndWhiteGreen="-40"
+   crs:Blacks2012="-5"
+   crs:Clarity2012="-15"
+   crs:ConvertToServerRGB="False"
+   crs:Dehaze="-12"
+   crs:GrainAmount="0"
+   crs:HasSettings="True"
+   crs:ProcessVersion="15.4"
+   crs:Texture="-10"
+   crs:Version="16.0"
+   crs:uuid="F4C17C64-3F66-45B7-9A07-5DB99CA9B971">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">minimalist_high_key_whiteout</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

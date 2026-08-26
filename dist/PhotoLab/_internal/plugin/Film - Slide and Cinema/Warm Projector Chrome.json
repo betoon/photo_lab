@@ -1,0 +1,74 @@
+{
+  "name": "Warm Projector Chrome",
+  "description": "Warm projected-slide color with amber highlights, saturated reds, and dense cool shadows.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Slide and Cinema",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 7,
+  "creative_tint": 1,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    12,
+    9,
+    5,
+    -2,
+    -3,
+    6,
+    2,
+    4
+  ],
+  "hsl_lum": [
+    -1,
+    3,
+    1,
+    -2,
+    -1,
+    -6,
+    0,
+    0
+  ],
+  "contrast": 16,
+  "highlights": -7,
+  "shadows": -4,
+  "blacks": -6,
+  "vibrance": 14,
+  "saturation": 4,
+  "film_grain": 7,
+  "split_shadow_hue": 218,
+  "split_shadow_sat": 5,
+  "split_highlight_hue": 42,
+  "split_highlight_sat": 9,
+  "split_balance": 15,
+  "curve_points": [
+    [
+      0,
+      0.005
+    ],
+    [
+      0.2,
+      0.155
+    ],
+    [
+      0.5,
+      0.495
+    ],
+    [
+      0.82,
+      0.87
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}

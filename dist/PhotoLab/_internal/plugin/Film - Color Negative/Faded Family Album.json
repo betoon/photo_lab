@@ -1,0 +1,74 @@
+{
+  "name": "Faded Family Album",
+  "description": "A gently aged print look with faded blacks, warm paper highlights, and softened blues.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Color Negative",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 8,
+  "creative_tint": 2,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    -8,
+    -5,
+    -14,
+    -21,
+    -20,
+    -25,
+    -18,
+    -15
+  ],
+  "hsl_lum": [
+    2,
+    5,
+    4,
+    6,
+    3,
+    2,
+    0,
+    0
+  ],
+  "contrast": -14,
+  "highlights": -12,
+  "shadows": 12,
+  "blacks": 10,
+  "clarity": -7,
+  "saturation": -18,
+  "film_grain": 17,
+  "vignette": 7,
+  "split_shadow_hue": 190,
+  "split_shadow_sat": 6,
+  "split_highlight_hue": 48,
+  "split_highlight_sat": 12,
+  "curve_points": [
+    [
+      0,
+      0.085
+    ],
+    [
+      0.22,
+      0.245
+    ],
+    [
+      0.5,
+      0.53
+    ],
+    [
+      0.82,
+      0.86
+    ],
+    [
+      1,
+      0.96
+    ]
+  ]
+}

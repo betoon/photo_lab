@@ -1,0 +1,78 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure2012="+0.12"
+   crs:Contrast2012="+18"
+   crs:Highlights2012="-20"
+   crs:Shadows2012="-6"
+   crs:Whites2012="-10"
+   crs:Blacks2012="-14"
+   crs:Clarity2012="+20"
+   crs:Texture="+10"
+   crs:Vibrance="+5"
+   crs:Saturation="-8"
+   crs:Temperature="+2"
+   crs:Tint="+1"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="-1"
+   crs:SaturationAdjustmentRed="+10"
+   crs:LuminanceAdjustmentRed="-3"
+   crs:HueAdjustmentOrange="-2"
+   crs:SaturationAdjustmentOrange="+4"
+   crs:LuminanceAdjustmentOrange="+1"
+   crs:HueAdjustmentYellow="-5"
+   crs:HueAdjustmentGreen="+12"
+   crs:SaturationAdjustmentGreen="-24"
+   crs:LuminanceAdjustmentGreen="-4"
+   crs:HueAdjustmentBlue="-4"
+   crs:SaturationAdjustmentBlue="-16"
+   crs:LuminanceAdjustmentBlue="-5"
+   crs:PostCropVignetteAmount="-42"
+   crs:PostCropVignetteMidpoint="28"
+   crs:PostCropVignetteRoundness="-10"
+   crs:PostCropVignetteFeather="75"
+   crs:PostCropVignetteStyle="1"
+   crs:Sharpness="+65"
+   crs:SharpenRadius="1.0"
+   crs:SharpenDetail="40"
+   crs:SharpenEdgeMasking="15"
+   crs:uuid="A3C4D5E6-BF90-50E3-934C-9DF2CC6DA808">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Leica_28mm_Summaron_1955</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

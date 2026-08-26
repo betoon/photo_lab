@@ -1,0 +1,71 @@
+{
+  "name": "Night Color 1600",
+  "description": "High-speed night color with dense blacks, softened saturation, cool shade, and strong grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Color Negative",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": -4,
+  "creative_tint": 3,
+  "hsl_hue": [
+    0,
+    1,
+    2,
+    7,
+    4,
+    -4,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    -7,
+    -5,
+    -16,
+    -20,
+    -9,
+    -2,
+    -8,
+    -6
+  ],
+  "hsl_lum": [
+    0,
+    1,
+    -3,
+    -3,
+    -1,
+    -6,
+    0,
+    0
+  ],
+  "contrast": 11,
+  "highlights": -18,
+  "shadows": 5,
+  "blacks": -5,
+  "clarity": 3,
+  "vibrance": 4,
+  "saturation": -12,
+  "film_grain": 38,
+  "microcontrast": 5,
+  "curve_points": [
+    [
+      0,
+      0.01
+    ],
+    [
+      0.18,
+      0.15
+    ],
+    [
+      0.5,
+      0.485
+    ],
+    [
+      0.82,
+      0.84
+    ],
+    [
+      1,
+      0.965
+    ]
+  ]
+}

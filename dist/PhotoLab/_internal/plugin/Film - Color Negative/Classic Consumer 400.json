@@ -1,0 +1,69 @@
+{
+  "name": "Classic Consumer 400",
+  "description": "Everyday color negative with lively primaries, warm highlights, and visible medium grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Color Negative",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 5,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    -3,
+    -2,
+    -4,
+    -7,
+    1,
+    3,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    9,
+    5,
+    5,
+    -2,
+    -4,
+    2,
+    1,
+    3
+  ],
+  "hsl_lum": [
+    1,
+    4,
+    3,
+    1,
+    0,
+    -4,
+    0,
+    0
+  ],
+  "contrast": 7,
+  "highlights": -9,
+  "shadows": 3,
+  "vibrance": 13,
+  "saturation": 1,
+  "film_grain": 18,
+  "microcontrast": 3,
+  "curve_points": [
+    [
+      0,
+      0.028
+    ],
+    [
+      0.18,
+      0.18
+    ],
+    [
+      0.5,
+      0.51
+    ],
+    [
+      0.82,
+      0.85
+    ],
+    [
+      1,
+      0.985
+    ]
+  ]
+}

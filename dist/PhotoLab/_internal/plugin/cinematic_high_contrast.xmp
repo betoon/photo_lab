@@ -1,0 +1,67 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0-c000">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:Version="16.0"
+   crs:ProcessVersion="15.4"
+   crs:Contrast2012="+45"
+   crs:Highlights2012="-30"
+   crs:Shadows2012="-55"
+   crs:Whites2012="+15"
+   crs:Blacks2012="-25"
+   crs:Clarity2012="+15"
+   crs:Dehaze="+10"
+   crs:Vibrance="-10"
+   crs:Saturation="+5"
+   crs:ParametricShadows="0"
+   crs:ParametricDarks="0"
+   crs:ParametricLights="0"
+   crs:ParametricHighlights="0"
+   crs:HueAdjustmentRed="0"
+   crs:HueAdjustmentOrange="0"
+   crs:HueAdjustmentYellow="0"
+   crs:HueAdjustmentGreen="0"
+   crs:HueAdjustmentAqua="10"
+   crs:HueAdjustmentBlue="15"
+   crs:HueAdjustmentPurple="0"
+   crs:HueAdjustmentMagenta="0"
+   crs:SaturationAdjustmentRed="+25"
+   crs:SaturationAdjustmentOrange="0"
+   crs:SaturationAdjustmentYellow="0"
+   crs:SaturationAdjustmentGreen="-40"
+   crs:SaturationAdjustmentAqua="0"
+   crs:SaturationAdjustmentBlue="+10"
+   crs:SaturationAdjustmentPurple="0"
+   crs:SaturationAdjustmentMagenta="0"
+   crs:LuminanceAdjustmentRed="-10"
+   crs:LuminanceAdjustmentOrange="0"
+   crs:LuminanceAdjustmentYellow="0"
+   crs:LuminanceAdjustmentGreen="-15"
+   crs:LuminanceAdjustmentAqua="0"
+   crs:LuminanceAdjustmentBlue="0"
+   crs:LuminanceAdjustmentPurple="0"
+   crs:LuminanceAdjustmentMagenta="0"
+   crs:SplitToningShadowHue="215"
+   crs:SplitToningShadowSaturation="12"
+   crs:SplitToningHighlightHue="45"
+   crs:SplitToningHighlightSaturation="8"
+   crs:SplitToningBalance="-20"
+   crs:SplitToningBlending="60"
+   crs:VignetteAmount="-35"
+   crs:VignetteMidpoint="40"
+   crs:GrainAmount="15"
+   crs:GrainSize="25"
+   crs:GrainFrequency="50"
+   crs:HasSettings="True">
+   <crs:ToneCurvePV2012>
+    <rdf:Seq>
+     <rdf:li>0, 12</rdf:li>
+     <rdf:li>64, 45</rdf:li>
+     <rdf:li>128, 128</rdf:li>
+     <rdf:li>192, 210</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

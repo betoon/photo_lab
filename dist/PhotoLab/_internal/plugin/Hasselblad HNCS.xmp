@@ -1,0 +1,74 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="00000000-0000-0000-0000-000000000000"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Exposure="0.15"
+   crs:Contrast="8"
+   crs:Highlights="-10"
+   crs:Shadows="15"
+   crs:Whites="-5"
+   crs:Blacks="4"
+   crs:Clarity="4"
+   crs:Vibrance="6"
+   crs:Saturation="-2"
+   crs:Temperature="0"
+   crs:Tint="0"
+   crs:ToneCurveName2012="Custom"
+   crs:ToneCurvePV2012="{"
+   crs:HueAdjustmentRed="2"
+   crs:SaturationAdjustmentRed="4"
+   crs:LuminanceAdjustmentRed="1"
+   crs:HueAdjustmentOrange="3"
+   crs:SaturationAdjustmentOrange="-2"
+   crs:LuminanceAdjustmentOrange="3"
+   crs:HueAdjustmentYellow="-2"
+   crs:SaturationAdjustmentYellow="-4"
+   crs:HueAdjustmentGreen="5"
+   crs:SaturationAdjustmentGreen="-6"
+   crs:LuminanceAdjustmentGreen="2"
+   crs:HueAdjustmentBlue="-2"
+   crs:SaturationAdjustmentBlue="4"
+   crs:LuminanceAdjustmentBlue="-4"
+   crs:Sharpness="45"
+   crs:SharpenRadius="1.0"
+   crs:SharpenDetail="25"
+   crs:SharpenEdgeMasking="15"
+   crs:GrainAmount="0"
+   crs:uuid="D69C73CA-060D-4D40-AC6F-19CBB835D222">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Hasselblad HNCS</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

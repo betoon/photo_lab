@@ -1,0 +1,65 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c140 79.160451, 2017/05/06-01:08:21        ">
+ <rdf:RDF xmlns:rdf="http://w3.org">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://adobe.com"
+   crs:PresetType="Normal"
+   crs:Cluster=""
+   crs:UUID="DC3BEC08-30C2-4D7C-8A36-AE82F031AC7B"
+   crs:SupportsAmount="False"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="10.3"
+   crs:ProcessVersion="6.7"
+   crs:s="{"
+   crs:settings="{"
+   crs:Blacks2012="-5"
+   crs:CalibrationBlueHue="-80"
+   crs:CalibrationBlueSat="-15"
+   crs:CalibrationGreenHue="-100"
+   crs:CalibrationRedHue="-50"
+   crs:Clarity2012="-8"
+   crs:ConvertToServerRGB="True"
+   crs:GrainAmount="15"
+   crs:GrainFrequency="50"
+   crs:GrainSize="30"
+   crs:HasSettings="True"
+   crs:Highlights2012="-10"
+   crs:HueAdjustmentGreen="-100"
+   crs:HueAdjustmentOrange="-10"
+   crs:HueAdjustmentRed="-5"
+   crs:HueAdjustmentYellow="-100"
+   crs:LuminanceAdjustmentAqua="-5"
+   crs:LuminanceAdjustmentBlue="-12"
+   crs:LuminanceAdjustmentOrange="0"
+   crs:ProcessVersion="15.4"
+   crs:SaturationAdjustmentAqua="-10"
+   crs:SaturationAdjustmentBlue="-15"
+   crs:Version="16.0"
+   crs:uuid="DC3BEC08-30C2-4D7C-8A36-AE82F031AC7B">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">aerochrome_false_color_infrared</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:ShortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:ShortName>
+   <crs:SortName>
+    <rdf:li xml:lang="x-default"/>
+   </crs:SortName>
+   <crs:Group>
+    <rdf:li xml:lang="x-default">Converted Presets</rdf:li>
+   </crs:Group>
+   <crs:Description>
+    <rdf:li xml:lang="x-default"/>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

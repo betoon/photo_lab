@@ -1,0 +1,7 @@
+{
+  "name": "IR Mono",
+  "ir_channel_swap": "none",
+  "ir_false_color": 0.0,
+  "ir_mono": true,
+  "contrast": 10.0
+}

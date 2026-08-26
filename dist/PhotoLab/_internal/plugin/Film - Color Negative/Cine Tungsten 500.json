@@ -1,0 +1,74 @@
+{
+  "name": "Cine Tungsten 500",
+  "description": "Moody tungsten-stock interpretation with cool shadows, amber highlights, and pronounced grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Color Negative",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": -7,
+  "creative_tint": 2,
+  "hsl_hue": [
+    1,
+    0,
+    -4,
+    6,
+    5,
+    -5,
+    0,
+    0
+  ],
+  "hsl_sat": [
+    -7,
+    0,
+    -14,
+    -16,
+    -6,
+    -4,
+    -10,
+    -8
+  ],
+  "hsl_lum": [
+    0,
+    3,
+    0,
+    2,
+    1,
+    -5,
+    0,
+    0
+  ],
+  "contrast": 5,
+  "highlights": -17,
+  "shadows": 7,
+  "blacks": 1,
+  "saturation": -9,
+  "vibrance": 5,
+  "film_grain": 22,
+  "split_shadow_hue": 215,
+  "split_shadow_sat": 13,
+  "split_highlight_hue": 32,
+  "split_highlight_sat": 9,
+  "split_balance": 5,
+  "curve_points": [
+    [
+      0,
+      0.02
+    ],
+    [
+      0.2,
+      0.185
+    ],
+    [
+      0.5,
+      0.495
+    ],
+    [
+      0.82,
+      0.845
+    ],
+    [
+      1,
+      0.975
+    ]
+  ]
+}

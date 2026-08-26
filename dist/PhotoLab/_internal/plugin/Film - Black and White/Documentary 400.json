@@ -1,0 +1,70 @@
+{
+  "name": "Documentary 400",
+  "description": "Classic documentary tonality with strong local contrast and an honest medium grain.",
+  "preset_kind": "film_rendering",
+  "film_family": "Film - Black and White",
+  "version": 1,
+  "wb_as_shot": true,
+  "creative_temperature": 0.0,
+  "creative_tint": 0.0,
+  "hsl_hue": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_sat": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "hsl_lum": [
+    3,
+    5,
+    2,
+    0,
+    -2,
+    -4,
+    -2,
+    0
+  ],
+  "black_and_white": true,
+  "contrast": 13,
+  "highlights": -13,
+  "shadows": 3,
+  "blacks": -6,
+  "clarity": 7,
+  "film_grain": 19,
+  "microcontrast": 10,
+  "curve_points": [
+    [
+      0,
+      0.005
+    ],
+    [
+      0.18,
+      0.135
+    ],
+    [
+      0.5,
+      0.49
+    ],
+    [
+      0.82,
+      0.87
+    ],
+    [
+      1,
+      0.99
+    ]
+  ]
+}
