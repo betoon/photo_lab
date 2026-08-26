@@ -33,6 +33,7 @@ _DEFAULTS: Dict[str, Dict[str, str]] = {
         "export_default_dir": "",
         "scripts_dir": "",
         "argyllcms_dir": "",
+        "focus_stacker_pro": "",
     },
     "performance": {
         "max_raw_workers": "2",
@@ -64,6 +65,9 @@ _ENV_MAP = {
     "PHOTOLAB_FFMPEG": ("paths", "ffmpeg"),
     "PHOTOLAB_CATALOG_DB": ("paths", "catalog_db"),
     "PHOTOLAB_LENSFUN_DIR": ("paths", "lensfun_dir"),
+    "ARGYLLCMS_BIN": ("paths", "argyllcms_dir"),
+    "PHOTOLAB_ARGYLLCMS_DIR": ("paths", "argyllcms_dir"),
+    "PHOTOLAB_FOCUS_STACKER_PRO": ("paths", "focus_stacker_pro"),
 }
 
 

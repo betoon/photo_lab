@@ -27,6 +27,13 @@ def find_argyll_dir(preferred: str = "") -> str:
     candidates = []
     if preferred:
         candidates.append(preferred)
+    try:
+        from external_paths import resolve_path
+        configured = resolve_path("argyllcms_dir")
+        if configured:
+            candidates.append(configured)
+    except Exception:
+        pass
     env = os.environ.get("ARGYLLCMS_BIN", "")
     if env:
         candidates.append(env)
@@ -115,8 +122,7 @@ class ColorCalibrationDialog(QDialog):
         engine = QGroupBox("ArgyllCMS engine")
         form = QFormLayout(engine)
         self.argyll_edit = QLineEdit()
-        preferred = str(self.settings.value("color/argyll_dir", "") or "")
-        self.argyll_edit.setText(find_argyll_dir(preferred))
+        self.argyll_edit.setText(find_argyll_dir())
         form.addRow("bin folder:", _field_row(self.argyll_edit, "Browse…", self._browse_argyll))
         self.engine_status = QLabel(); form.addRow("Status:", self.engine_status)
         root.addWidget(engine)
@@ -203,7 +209,6 @@ class ColorCalibrationDialog(QDialog):
         self.start_monitor.setEnabled(bool(argyll_tool(folder,"dispcal")))
         self.start_camera.setEnabled(bool(argyll_tool(folder,"scanin") and argyll_tool(folder,"colprof")))
         self.install_btn.setEnabled(bool(argyll_tool(folder,"dispwin")))
-        if folder: self.settings.setValue("color/argyll_dir",folder)
 
     def _start_monitor(self):
         exe=argyll_tool(self.argyll_edit.text(),"dispcal"); base=os.path.splitext(self.monitor_output.text().strip())[0]

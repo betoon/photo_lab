@@ -2217,7 +2217,9 @@ def try_lensfun_correct(img, meta, strength=1.0):
     except Exception:
         return img, "Lensfun not installed (pip install lensfunpy)"
     try:
-        db = lensfunpy.Database()
+        from app_paths import primary_lensfun_db
+        configured_db = primary_lensfun_db()
+        db = lensfunpy.Database(paths=[configured_db]) if configured_db else lensfunpy.Database()
         cam_maker = (meta.get("camera") or "").split()[0] if meta.get("camera") else None
         cam_model = meta.get("camera") or ""
         lens_model = meta.get("lens") or ""

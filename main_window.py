@@ -982,6 +982,7 @@ class PhotoLab(QMainWindow):
             "QMenu::separator { height:1px; background:#444; margin:4px 8px; }"
         )
         tools_menu.addAction("Color Calibration Studio…", self.open_color_calibration_studio)
+        tools_menu.addAction("Configuration / INI Editor…", self.show_configuration_editor)
         tools_menu.addSeparator()
         tools_menu.addAction("Merge HDR…", self.merge_hdr_selected)
         tools_menu.addAction("Focus Stack…", self.focus_stack_selected)
@@ -5920,24 +5921,16 @@ class PhotoLab(QMainWindow):
 
     def open_focus_stacker_pro(self):
         """Launch Focus Stacker Pro and hand off selected PhotoLab images."""
-        import sys
         import subprocess
         import tempfile
-        base = os.path.dirname(os.path.abspath(__file__))
-        candidates = [
-            os.path.join(base, "run_focus_stacker_pro.py"),
-            os.path.join(base, "focus_stacker_pro", "run.py"),
-            os.path.expanduser(r"~/Documents/GitHub/focus_stacker/run.py"),
-            r"C:\Users\brian\Documents\GitHub\focus_stacker\run.py",
-        ]
-        script = next((c for c in candidates if os.path.isfile(c)), None)
-        if not script:
+        from external_paths import focus_stacker_command
+        cmd, working_dir = focus_stacker_command()
+        if not cmd:
             QMessageBox.warning(
                 self, "Focus Stacker Pro",
                 "Could not find Focus Stacker Pro.\n\n"
-                "Expected run_focus_stacker_pro.py next to PhotoLab, or\n"
-                "C:\\Users\\brian\\Documents\\GitHub\\focus_stacker\\run.py\n\n"
-                "Install PySide6 in that environment: pip install PySide6",
+                "Choose its application, launcher, or folder in\n"
+                "Tools → Configuration / INI Editor.",
             )
             return
         paths = self._selected_filmstrip_paths()
@@ -5949,7 +5942,7 @@ class PhotoLab(QMainWindow):
             except Exception:
                 pass
         handoff_path = None
-        cmd = [sys.executable, script, "--microscope"]
+        cmd.extend(["--microscope"])
         if paths:
             try:
                 handle, handoff_path = tempfile.mkstemp(prefix="photolab_focus_stack_", suffix=".json")
@@ -5966,8 +5959,7 @@ class PhotoLab(QMainWindow):
                 kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
             else:
                 kwargs["start_new_session"] = True
-            # cwd so relative imports work for focus_stacker_pro/run.py
-            kwargs["cwd"] = os.path.dirname(script) if script.endswith("run.py") else base
+            kwargs["cwd"] = working_dir
             subprocess.Popen(cmd, **kwargs)
             count = len(paths) if handoff_path else 0
             self.statusBar().showMessage(
@@ -5981,6 +5973,10 @@ class PhotoLab(QMainWindow):
                 except OSError:
                     pass
             QMessageBox.warning(self, "Focus Stacker Pro", f"Could not launch:\n{e}")
+
+    def show_configuration_editor(self):
+        from configuration_dialog import ConfigurationDialog
+        ConfigurationDialog(self).exec()
 
     def focus_stack_selected(self):
         """Thin focus-stack UI: select 2+ filmstrip frames → align → fuse → open result."""

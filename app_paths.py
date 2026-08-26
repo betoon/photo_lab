@@ -119,7 +119,7 @@ def manual_file(name: str) -> Optional[str]:
     return None
 
 
-def _looks_like_lensfun_db(path: str) -> bool:
+def looks_like_lensfun_db(path: str) -> bool:
     """True if path is a Lensfun database root (XML profiles or version_N/)."""
     if not path or not os.path.isdir(path):
         return False
@@ -140,11 +140,11 @@ def _looks_like_lensfun_db(path: str) -> bool:
                 if any(f.lower().endswith(".xml") for f in os.listdir(sub)):
                     return True
             except Exception:
-                log.debug("_looks_like_lensfun_db: non-critical failure, continuing", exc_info=True)
+                log.debug("looks_like_lensfun_db: non-critical failure, continuing", exc_info=True)
     return False
 
 
-def lensfun_db_paths() -> List[str]:
+def lensfun_db_paths(include_config: bool = True) -> List[str]:
     """Candidate Lensfun database directories next to the app / cwd / user data.
 
     Order matters: first existing, valid path wins for callers that take one path.
@@ -154,6 +154,15 @@ def lensfun_db_paths() -> List[str]:
       <app>/lensfun/version_1/
       ~/.photolab/lensfun/
     """
+    configured_paths: List[str] = []
+    if include_config:
+        try:
+            from config import get_config
+            configured = get_config().path("lensfun_dir")
+            if configured and looks_like_lensfun_db(configured):
+                configured_paths.append(os.path.abspath(configured))
+        except Exception:
+            pass
     roots = [
         app_root(),
         os.getcwd(),
@@ -177,25 +186,25 @@ def lensfun_db_paths() -> List[str]:
         ("data", "db"),
         ("data", "lensfun"),
     ]
-    out: List[str] = []
-    seen_paths = set()
+    out: List[str] = list(configured_paths)
+    seen_paths = set(configured_paths)
     for root in uniq_roots:
         for parts in subpaths:
             p = os.path.join(root, *parts)
             if p in seen_paths:
                 continue
             seen_paths.add(p)
-            if _looks_like_lensfun_db(p):
+            if looks_like_lensfun_db(p):
                 out.append(p)
             # If version_1 is itself the xml folder, parent is the db root lensfunpy prefers
             parent = os.path.dirname(p)
             if (
                 parts[-1] == "version_1"
-                and _looks_like_lensfun_db(p)
+                and looks_like_lensfun_db(p)
                 and parent not in seen_paths
             ):
                 seen_paths.add(parent)
-                if _looks_like_lensfun_db(parent) or os.path.isdir(parent):
+                if looks_like_lensfun_db(parent) or os.path.isdir(parent):
                     out.append(parent)
     return out
 

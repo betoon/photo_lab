@@ -420,6 +420,15 @@ Requires `pano_video.py` (and optionally `audio_editor.py`) next to PhotoLab, pl
 
 ## Focus Stack
 
+### Local application paths
+
+Use **Tools → Configuration / INI Editor…** to configure the plugin folder,
+ArgyllCMS `bin` folder, Lensfun database, and Focus Stacker Pro. **Apply** saves
+the machine-specific values to `~/.photolab/photolab.ini`; leave a field empty
+to use automatic discovery. The editor can validate entries, open their folders,
+reset them to automatic defaults, and reveal the INI file location. Missing
+optional tools are reported but do not prevent PhotoLab from starting.
+
 Combine a near-to-far (or far-to-near) focus bracket into one sharp image:
 
 1. Open a folder of focus frames (or multi-select in the filmstrip).  

@@ -14,6 +14,7 @@ ffmpeg =
 export_default_dir =
 scripts_dir =
 argyllcms_dir =
+focus_stacker_pro =
 
 [performance]
 max_raw_workers = 2
