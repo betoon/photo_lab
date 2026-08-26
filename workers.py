@@ -18,6 +18,10 @@ import copy
 
 _HEAVY_SEM = threading.Semaphore(2)
 _HEAVY_LIMIT = 2
+# Thumbnail extraction and full RAW decoding both serialize through LibRaw.
+# This flag prevents a folder's thumbnail scan from repeatedly jumping ahead
+# of the image the user explicitly selected.
+_FULL_LOAD_PENDING = threading.Event()
 
 
 class SdImportWorker(QThread):
@@ -185,6 +189,10 @@ class ThumbnailWorker(QThread):
             if self._cancel:
                 break
             try:
+                while _FULL_LOAD_PENDING.is_set() and not self._cancel:
+                    self.msleep(20)
+                if self._cancel:
+                    break
                 # Prefer embedded JPEG from RAW — much faster than full decode
                 img = extract_embedded_preview(p, max_side=120)
                 if img is None:
@@ -197,10 +205,11 @@ class ThumbnailWorker(QThread):
 class ExportWorker(QThread):
     finished_ok = pyqtSignal(str)
     failed = pyqtSignal(str)
+    progress = pyqtSignal(int, str)
 
     def __init__(self, path, recipe, out_path, wb_multipliers=None,
                  watermark_text="", watermark_opacity=0.45, max_dim=0, jpeg_quality=92,
-                 export_16bit=False):
+                 export_16bit=False, source_image=None, source_meta=None):
         super().__init__()
         self.path = path
         self.recipe = recipe
@@ -211,6 +220,8 @@ class ExportWorker(QThread):
         self.max_dim = max_dim
         self.jpeg_quality = jpeg_quality
         self.export_16bit = export_16bit
+        self.source_image = source_image
+        self.source_meta = dict(source_meta or {})
 
     def run(self):
         try:
@@ -218,26 +229,39 @@ class ExportWorker(QThread):
             from imaging import apply_watermark
             with _HEAVY_SEM:
                 bps = 16 if self.export_16bit else None
-                img, meta = load_image(self.path, use_camera_wb=True, output_bps=bps)
+                self.progress.emit(10, "Preparing source image…")
+                if self.source_image is not None and (
+                    not self.export_16bit or self.source_image.dtype == np.uint16
+                ):
+                    img, meta = self.source_image, dict(self.source_meta)
+                else:
+                    self.progress.emit(20, "Decoding RAW file…" if is_raw(self.path) else "Loading image…")
+                    img, meta = load_image(self.path, use_camera_wb=True, output_bps=bps)
                 multipliers = self.wb_multipliers or meta.get("wb_multipliers")
                 out_dtype = np.uint16 if self.export_16bit else np.uint8
+                self.progress.emit(40, "Applying PhotoLab adjustments…")
                 out = apply_recipe(
                     img, self.recipe, wb_multipliers=multipliers, meta=meta,
                     output_dtype=out_dtype,
                 )
                 if self.max_dim and max(out.shape[:2]) > self.max_dim:
+                    self.progress.emit(70, "Resizing output…")
                     h, w = out.shape[:2]
                     scale = self.max_dim / max(h, w)
                     out = cv2.resize(out, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
                 if self.watermark_text:
                     out = apply_watermark(out, self.watermark_text, opacity=self.watermark_opacity)
                 ext = self.out_path.lower().rsplit(".", 1)[-1]
+                self.progress.emit(85, f"Encoding {ext.upper()}…")
                 if ext in ("jpg", "jpeg"):
-                    cv2.imwrite(self.out_path, out, [cv2.IMWRITE_JPEG_QUALITY, int(self.jpeg_quality)])
+                    saved = cv2.imwrite(self.out_path, out, [cv2.IMWRITE_JPEG_QUALITY, int(self.jpeg_quality)])
                 elif ext in ("tif", "tiff") and self.export_16bit:
-                    cv2.imwrite(self.out_path, out)
+                    saved = cv2.imwrite(self.out_path, out)
                 else:
-                    cv2.imwrite(self.out_path, out)
+                    saved = cv2.imwrite(self.out_path, out)
+                if not saved or not os.path.isfile(self.out_path):
+                    raise RuntimeError(f"The {ext.upper()} encoder could not write the selected file.")
+            self.progress.emit(100, "Export complete")
             self.finished_ok.emit(self.out_path)
         except Exception as e:
             self.failed.emit(str(e))
@@ -254,6 +278,7 @@ class LoadImageWorker(QThread):
         self.output_bps = 16 if int(output_bps or 8) >= 16 else 8
 
     def run(self):
+        _FULL_LOAD_PENDING.set()
         try:
             with _HEAVY_SEM:
                 img, meta = load_image(
@@ -262,6 +287,8 @@ class LoadImageWorker(QThread):
             self.loaded.emit(self.path, img, meta)
         except Exception as e:
             self.failed.emit(self.path, str(e))
+        finally:
+            _FULL_LOAD_PENDING.clear()
 
 
 class HdrMergeWorker(QThread):

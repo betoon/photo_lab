@@ -10,6 +10,7 @@ import os
 import json
 import uuid
 import copy
+from collections import OrderedDict
 import cv2
 import numpy as np
 
@@ -380,6 +381,10 @@ class PhotoLab(QMainWindow):
 
         self._load_worker = None
         self._pending_load_path = None
+        # A deliberately small full-resolution cache avoids repeated RAW
+        # decoding while moving back and forth in the filmstrip.
+        self._image_load_cache = OrderedDict()
+        self._image_load_cache_limit = 3
         self.sliders: dict[str, SliderRow] = {}
         self._history_push_pending = False
         self._local_mode = False
@@ -3426,6 +3431,12 @@ class PhotoLab(QMainWindow):
             return
         self.current_path = path
         self.statusBar().showMessage(f"Loading {os.path.basename(path)}…")
+        cached = self._image_load_cache.get(path)
+        if cached is not None:
+            self._image_load_cache.move_to_end(path)
+            img, meta = cached
+            self._on_image_loaded(path, img, dict(meta))
+            return
         if self._load_worker is not None and self._load_worker.isRunning():
             # Never terminate LibRaw mid-decode. Keep only the latest selection
             # queued and start it as soon as the active decode exits cleanly.
@@ -3461,6 +3472,10 @@ class PhotoLab(QMainWindow):
     def _on_image_loaded(self, path, img, meta):
         if path != self.current_path:
             return
+        self._image_load_cache[path] = (img, dict(meta))
+        self._image_load_cache.move_to_end(path)
+        while len(self._image_load_cache) > self._image_load_cache_limit:
+            self._image_load_cache.popitem(last=False)
         self.original_bgr = img
         self.meta_cache[path] = meta
         if path not in self.recipes:
@@ -5829,12 +5844,19 @@ class PhotoLab(QMainWindow):
 
         folder = self.folder or os.path.dirname(paths[0])
         suggested = os.path.join(folder, "panorama_result.tif")
-        out_path, _ = QFileDialog.getSaveFileName(
+        out_path, selected_filter = QFileDialog.getSaveFileName(
             self, "Save panorama", suggested,
             "TIFF (*.tif);;JPEG (*.jpg);;PNG (*.png);;All (*.*)",
         )
         if not out_path:
             return
+        if not os.path.splitext(out_path)[1]:
+            if selected_filter.startswith("PNG"):
+                out_path += ".png"
+            elif selected_filter.startswith("TIFF"):
+                out_path += ".tif"
+            else:
+                out_path += ".jpg"
 
         self.statusBar().showMessage("Stitching panorama…")
         self.log(f"Panorama: {len(paths)} frames → {out_path}")
@@ -7082,6 +7104,12 @@ class PhotoLab(QMainWindow):
             except Exception as e:
                 self.log(f"Sidecar save failed: {e}", level="ERR")
         self.statusBar().showMessage("Exporting…")
+        export_progress = self._make_progress(
+            f"Saving {os.path.basename(out_path)}…", maximum=100
+        )
+        export_progress.setCancelButton(None)
+        export_progress.setValue(0)
+        self._export_progress = export_progress
         meta = self.meta_cache.get(self.current_path, {})
         self.export_worker = ExportWorker(
             self.current_path, self.recipes[self.current_path], out_path,
@@ -7089,10 +7117,35 @@ class PhotoLab(QMainWindow):
             watermark_text=wm,
             max_dim=max_dim,
             jpeg_quality=jpeg_q,
+            source_image=self.original_bgr,
+            source_meta=meta,
         )
-        self.export_worker.finished_ok.connect(lambda p: self.statusBar().showMessage(f"Exported → {p}"))
-        self.export_worker.failed.connect(lambda e: self.statusBar().showMessage(f"Export failed: {e}"))
+        self.export_worker.progress.connect(self._on_export_progress)
+        self.export_worker.finished_ok.connect(self._on_export_finished)
+        self.export_worker.failed.connect(self._on_export_failed)
         self.export_worker.start()
+
+    def _on_export_progress(self, value, message):
+        progress = getattr(self, "_export_progress", None)
+        if progress is not None:
+            progress.setValue(int(value))
+            progress.setLabelText(message)
+        self.statusBar().showMessage(message)
+
+    def _close_export_progress(self):
+        progress = getattr(self, "_export_progress", None)
+        if progress is not None:
+            progress.close()
+        self._export_progress = None
+
+    def _on_export_finished(self, path):
+        self._close_export_progress()
+        self.statusBar().showMessage(f"Exported → {path}", 10000)
+
+    def _on_export_failed(self, error):
+        self._close_export_progress()
+        self.statusBar().showMessage(f"Export failed: {error}", 10000)
+        QMessageBox.warning(self, "Export failed", str(error))
 
 
 
