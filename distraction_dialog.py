@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog,
 
 from distractions import (apply_distraction_operations, apply_reflection_adjustment,
     build_sensor_dust_map, detect_dust_spots, load_images, operations_mask,
-    reflection_mask, separate_reflections, smart_object_mask)
+    edit_reflection_mask, reflection_mask, separate_reflections, smart_object_mask)
 
 
 def _pixmap(image):
@@ -60,6 +60,7 @@ class DistractionDialog(QDialog):
         self.resize(1220, 780); self.setMinimumSize(900, 620)
         self.image=image.copy(); self.recipe=copy.deepcopy(recipe); self.source_path=source_path
         self.operations=copy.deepcopy(getattr(recipe,"distraction_operations",[]) or [])
+        self.reflection_strokes=copy.deepcopy(getattr(recipe,"reflection_mask_strokes",[]) or [])
         self.undo=[]; self.pending=None; self.detected=[]; self.external_preview=None
         self.setStyleSheet("QDialog{background:#151b24;color:#e5edf8}QGroupBox{border:1px solid #334155;border-radius:7px;margin-top:10px;padding-top:8px;font-weight:600}QGroupBox::title{subcontrol-origin:margin;left:9px;padding:0 5px}QPushButton{background:#2563a8;color:white;border:0;border-radius:6px;padding:7px 10px}QPushButton:hover{background:#3480d1}QComboBox,QSpinBox{background:#202b39;color:#edf5ff;border:1px solid #405268;border-radius:4px;padding:4px}QTabWidget::pane{border:1px solid #334155}QTabBar::tab{background:#202b39;padding:8px 14px}QTabBar::tab:selected{background:#2563a8}")
         root=QHBoxLayout(self); controls=QScrollArea(); controls.setWidgetResizable(True); controls.setMaximumWidth(390)
@@ -91,6 +92,9 @@ class DistractionDialog(QDialog):
         self.ref_controls={}
         for label,key,lo,hi,default in [("Detection sensitivity","sensitivity",1,100,55),("Layer opacity","strength",0,100,50),("Highlights","highlights",-100,0,-35),("Saturation","saturation",-100,100,0),("Color neutralization","neutralize",0,100,20),("Local contrast","contrast",-50,100,10),("Mask softness","blur",0,30,8)]:
             s=QSpinBox(); s.setRange(lo,hi); s.setValue(int(getattr(self.recipe,"reflection_"+key,default))); s.valueChanged.connect(self.refresh); f.addRow(label,s); self.ref_controls[key]=s
+        self.ref_brush=QComboBox(); self.ref_brush.addItems(["Inspect / adjust","Paint into mask","Erase from mask"]); f.addRow("Mask brush",self.ref_brush)
+        self.ref_brush_size=QSpinBox(); self.ref_brush_size.setRange(3,300); self.ref_brush_size.setValue(35); self.ref_brush_size.setSuffix(" px"); f.addRow("Mask brush size",self.ref_brush_size)
+        clear=QPushButton("Clear Painted Mask Edits"); clear.clicked.connect(self._clear_reflection_strokes); f.addRow(clear)
         b=QPushButton("Separate Reflections from Several Images…"); b.clicked.connect(self._separate); f.addRow(b)
         note=QLabel("Single-image adjustment reduces glare; it cannot reconstruct detail hidden by a reflection. Multi-image separation works best when the camera is steady and reflections move."); note.setWordWrap(True); f.addRow(note); self.tabs.addTab(tab,"3  Reflections")
 
@@ -104,6 +108,12 @@ class DistractionDialog(QDialog):
     def _set_pending(self,kind): self.pending=(kind,[]); self.status.setText("Click two opposite corners around the object.")
 
     def _clicked(self,x,y):
+        if self.tabs.currentIndex()==2 and self.ref_brush.currentIndex()>0:
+            self.reflection_strokes.append({"x":x,"y":y,
+                "radius":self.ref_brush_size.value()/max(min(self.image.shape[:2]),1),
+                "feather":.3,"mode":"add" if self.ref_brush.currentIndex()==1 else "erase"})
+            self.status.setText(f"Reflection mask {'added' if self.ref_brush.currentIndex()==1 else 'erased'} at the brush position.")
+            self.view_combo.setCurrentText("Reflection Mask"); self.refresh(); return
         tool=self.tool.currentText(); r=self._radius_norm()
         if self.pending and self.pending[0]=="smart":
             self.pending[1].append((x,y))
@@ -174,14 +184,18 @@ class DistractionDialog(QDialog):
         self.external_preview=base; self.status.setText("Separation package saved. The clean-base estimate is shown; open it in PhotoLab to continue editing."); self.refresh()
 
     def _undo(self):
+        if self.tabs.currentIndex()==2 and self.reflection_strokes:
+            self.reflection_strokes.pop(); self.refresh(); return
         if self.undo:self.operations=self.undo.pop(); self.pending=None; self.refresh()
-    def _clear(self): self._snapshot(); self.operations=[]; self.detected=[]; self.refresh()
+    def _clear(self): self._snapshot(); self.operations=[]; self.detected=[]; self.reflection_strokes=[]; self.refresh()
+    def _clear_reflection_strokes(self): self.reflection_strokes=[]; self.refresh()
 
     def _reflection_values(self): return {k:v.value() for k,v in self.ref_controls.items()}
     def refresh(self):
         mode=self.view_combo.currentText() if hasattr(self,"view_combo") else "Corrected Preview"
         rv=self._reflection_values() if hasattr(self,"ref_controls") else {"sensitivity":55,"blur":8,"strength":50,"highlights":-35,"saturation":0,"neutralize":20,"contrast":10}
         rm=reflection_mask(self.image,rv["sensitivity"],rv["blur"])
+        rm=edit_reflection_mask(rm,self.reflection_strokes)
         if mode=="Original": shown=self.image
         elif mode=="Removal Mask": shown=operations_mask(self.image.shape,self.operations)
         elif mode=="Reflection Mask": shown=rm
@@ -194,5 +208,6 @@ class DistractionDialog(QDialog):
     def accept(self):
         self.recipe.distraction_operations=copy.deepcopy(self.operations)
         self.recipe.reflection_enabled=self.ref_enable.isChecked()
+        self.recipe.reflection_mask_strokes=copy.deepcopy(self.reflection_strokes)
         for key,value in self._reflection_values().items(): setattr(self.recipe,"reflection_"+key,float(value))
         super().accept()

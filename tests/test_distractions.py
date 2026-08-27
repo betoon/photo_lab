@@ -3,7 +3,7 @@ import numpy as np
 
 from distractions import (apply_distraction_operations, apply_reflection_adjustment,
     build_sensor_dust_map, detect_dust_spots, operations_mask, reflection_mask,
-    separate_reflections, smart_object_mask)
+    edit_reflection_mask, separate_reflections, smart_object_mask)
 from imaging import Recipe, apply_recipe
 
 
@@ -41,6 +41,14 @@ def test_reflection_mask_and_adjustment_are_bounded():
     assert result.dtype==np.uint8 and result[50,60].mean()<image[50,60].mean()
 
 
+def test_reflection_mask_paint_and_erase_strokes():
+    mask=np.zeros((100,120),np.uint8)
+    painted=edit_reflection_mask(mask,[{"x":.5,"y":.5,"radius":.12,"mode":"add"}])
+    erased=edit_reflection_mask(painted,[{"x":.5,"y":.5,"radius":.06,"mode":"erase"}])
+    assert painted[50,60]>0
+    assert erased[50,60]<painted[50,60]
+
+
 def test_multiframe_reflection_separation_outputs_diagnostics():
     base=np.full((80,100,3),60,np.uint8)
     a=base.copy(); b=base.copy(); cv2.circle(a,(30,40),10,(230,230,230),-1); cv2.circle(b,(65,40),10,(230,230,230),-1)
@@ -54,7 +62,8 @@ def test_smart_mask_and_recipe_round_trip():
     image=np.zeros((80,100,3),np.uint8); image[20:60,30:70]=(200,180,160)
     mask=smart_object_mask(image,(.2,.1,.8,.9))
     assert mask.shape==image.shape[:2] and mask.max()==255
-    recipe=Recipe(distraction_operations=[{"type":"heal","x":.5,"y":.5,"radius":.05}],reflection_enabled=True)
+    recipe=Recipe(distraction_operations=[{"type":"heal","x":.5,"y":.5,"radius":.05}],reflection_enabled=True,
+                  reflection_mask_strokes=[{"x":.4,"y":.4,"radius":.05,"mode":"add"}])
     restored=Recipe.from_dict(recipe.to_dict())
     result=apply_recipe(image,restored)
-    assert restored.reflection_enabled and result.shape==image.shape
+    assert restored.reflection_enabled and restored.reflection_mask_strokes and result.shape==image.shape

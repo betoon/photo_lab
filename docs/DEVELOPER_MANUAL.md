@@ -508,6 +508,10 @@ old sidecars remain compatible through `getattr` defaults and new sidecars seria
 through `asdict`. `apply_recipe` runs cleanup late in the pipeline; coordinates
 describe what the user sees after geometry and crop.
 
+`Recipe.reflection_mask_strokes` stores normalized add/erase dabs. The automatic
+mask is regenerated from the developed image, after which `edit_reflection_mask`
+replays feathered manual corrections before the reflection adjustment is blended.
+
 `distraction_dialog.py` owns the modal workspace. It edits a deep copy and returns
 it only when accepted. The main window creates a developed preview with prior cleanup
 disabled, replaces the Recipe after acceptance, and pushes one history entry.

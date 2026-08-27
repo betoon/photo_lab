@@ -159,6 +159,7 @@ class Recipe:
     reflection_neutralize: float = 20.0
     reflection_contrast: float = 10.0
     reflection_blur: float = 8.0
+    reflection_mask_strokes: list = field(default_factory=list)
     # Optics (manual / Lensfun-assisted)
     ca_amount: float = 0.0  # lateral chromatic aberration -100..100
     lens_auto: bool = False
@@ -2583,6 +2584,7 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
     if operations or bool(getattr(r, "reflection_enabled", False)):
         from distractions import (apply_distraction_operations,
                                    apply_reflection_adjustment,
+                                   edit_reflection_mask,
                                    reflection_mask)
         working = np.clip(img, 0, 1).astype(np.float32)
         if bool(getattr(r, "reflection_enabled", False)):
@@ -2590,6 +2592,9 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
                 working,
                 getattr(r, "reflection_sensitivity", 55.0),
                 getattr(r, "reflection_blur", 8.0),
+            )
+            rmask = edit_reflection_mask(
+                rmask, getattr(r, "reflection_mask_strokes", None) or []
             )
             working = apply_reflection_adjustment(
                 working, rmask,

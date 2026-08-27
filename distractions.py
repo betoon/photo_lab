@@ -169,6 +169,24 @@ def reflection_mask(image: np.ndarray, sensitivity: float = 55.0, blur: float = 
     return np.clip(mask*255, 0, 255).astype(np.uint8)
 
 
+def edit_reflection_mask(mask: np.ndarray, strokes: Iterable[dict]) -> np.ndarray:
+    """Replay normalized add/erase brush marks over an automatic mask."""
+    result = mask.astype(np.float32) / 255.0
+    h, w = result.shape
+    for stroke in strokes or []:
+        dab = np.zeros((h, w), np.float32)
+        _circle(dab, float(stroke.get("x", .5)), float(stroke.get("y", .5)),
+                float(stroke.get("radius", .02)), 1)
+        feather = max(.5, float(stroke.get("feather", .25)) *
+                      float(stroke.get("radius", .02)) * min(h, w))
+        dab = cv2.GaussianBlur(dab, (0, 0), feather)
+        if str(stroke.get("mode", "add")) == "erase":
+            result *= 1.0 - np.clip(dab, 0, 1)
+        else:
+            result = np.maximum(result, np.clip(dab, 0, 1))
+    return np.clip(result * 255, 0, 255).astype(np.uint8)
+
+
 def apply_reflection_adjustment(image: np.ndarray, mask: np.ndarray, strength: float = 50.0,
                                 highlights: float = -35.0, saturation: float = 0.0,
                                 neutralize: float = 20.0, contrast: float = 10.0) -> np.ndarray:

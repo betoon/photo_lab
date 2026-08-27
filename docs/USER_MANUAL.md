@@ -710,6 +710,11 @@ adjust detection sensitivity, opacity, highlights, saturation, color neutrality,
 local contrast, and mask softness. This can reduce glare and veiling contrast, but
 a single image cannot recover detail that a reflection completely obscured.
 
+Choose **Paint into mask** and click missed reflections, or **Erase from mask** and
+click protected detail that was selected incorrectly. Brush size controls each dab;
+Undo removes the most recent reflection-mask dab while the Reflection tab is active.
+These painted changes are stored as normalized recipe strokes and replay at export.
+
 **Separate Reflections from Several Images** is intended for tripod photographs in
 which the reflection changes, such as after moving a light or rotating a polarizer.
 PhotoLab aligns the frames and saves a clean-base estimate, reflection layer,
