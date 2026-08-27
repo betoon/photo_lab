@@ -422,6 +422,11 @@ class PhotoLab(QMainWindow):
 
     # ------------------------------------------------------------------
     def _stylesheet(self):
+        try:
+            from branding import brand_font_family
+            brand_family = brand_font_family().replace('"', '')
+        except Exception:
+            brand_family = "Segoe UI"
         css = """
             QMainWindow, QWidget { background: #181818; color: #ddd; letter-spacing: 0px; }
             QGroupBox, QGroupBox::title, QLabel { letter-spacing: 0px; }
@@ -435,6 +440,11 @@ class PhotoLab(QMainWindow):
             QPushButton:pressed, QToolButton:pressed { background: #1f1f1f; }
             QPushButton:checked, QToolButton:checked {
                 background: #2a6ad4; color: #fff; border-color: #2a6ad4; font-weight: 600;
+                font-family: "__PHOTOLAB_BRAND_FONT__"; font-size: 9px;
+            }
+            QGroupBox::title, QDockWidget::title {
+                font-family: "__PHOTOLAB_BRAND_FONT__"; font-size: 9px;
+                color: #e8edf6;
             }
             
             /* Custom Sleek Scrollbar */
@@ -508,7 +518,9 @@ class PhotoLab(QMainWindow):
                 border: 1px solid #3b3b3b; border-bottom: none;
                 padding: 7px 13px; margin-right: 2px;
                 border-top-left-radius: 5px; border-top-right-radius: 5px;
+                font-family: "__PHOTOLAB_BRAND_FONT__"; font-size: 9px;
             }
+            QTabWidget#RestorationWorkspaceTabs QTabBar::tab { min-width: 150px; }
             QTabBar::tab:hover { background: #343434; color: #ffffff; }
             QTabBar::tab:selected {
                 background: #2a6ad4; color: #ffffff;
@@ -533,6 +545,7 @@ class PhotoLab(QMainWindow):
                 background: #2a6ad4; border-color: #2a6ad4;
             }
         """
+        css = css.replace("__PHOTOLAB_BRAND_FONT__", brand_family)
         return scale_font_sizes(css, self._ui_scale)
 
     def set_interface_scale(self, scale, announce=True):

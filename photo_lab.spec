@@ -29,6 +29,7 @@ block_cipher = None
 datas = [
     ("docs", "docs"),
     ("plugin", "plugin"),
+    (os.path.join("assets", "fonts"), os.path.join("assets", "fonts")),
     ("photolab.ini.example", "."),
 ]
 
@@ -58,6 +59,7 @@ hiddenimports = [
     "PyQt6.QtWidgets",
     "logging_setup",
     "app_paths",
+    "branding",
     "imaging",
     "catalog",
     "workers",

@@ -32,6 +32,7 @@ Bundled with the build:
 
 - `docs/` — user & developer manuals (Help menu)
 - `plugin/` — JSON / Lightroom-style presets
+- `assets/fonts/` — Michroma display font and its SIL Open Font License
 - `lensfun/data/db/` — bundled Lensfun correction database
 - `focus_stacker_pro/` — bundled Focus Stacker Pro integration
 - `photolab.ini.example` — machine-neutral configuration example

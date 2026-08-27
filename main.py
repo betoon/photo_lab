@@ -35,6 +35,13 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("PhotoLab")
+    # Register the bundled display face before constructing any widgets. Dense
+    # controls remain Segoe UI; Michroma is reserved for PhotoLab identity.
+    try:
+        from branding import load_brand_font
+        load_brand_font()
+    except Exception:
+        pass
     try:
         from config import get_config
         from accessibility import clamp_ui_scale
