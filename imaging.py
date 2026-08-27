@@ -148,6 +148,17 @@ class Recipe:
     brush_masks: list = field(default_factory=list)  # painted local masks
     mask_library: list = field(default_factory=list)  # named reusable mask specifications
     creative_filters: list = field(default_factory=list)  # ordered post-develop effect blocks
+    # Remove Distractions workspace. Coordinates are normalized and operations
+    # are replayed at preview or export resolution.
+    distraction_operations: list = field(default_factory=list)
+    reflection_enabled: bool = False
+    reflection_sensitivity: float = 55.0
+    reflection_strength: float = 50.0
+    reflection_highlights: float = -35.0
+    reflection_saturation: float = 0.0
+    reflection_neutralize: float = 20.0
+    reflection_contrast: float = 10.0
+    reflection_blur: float = 8.0
     # Optics (manual / Lensfun-assisted)
     ca_amount: float = 0.0  # lateral chromatic aberration -100..100
     lens_auto: bool = False
@@ -2565,6 +2576,32 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
         threshold=getattr(r, "zebra_threshold", 95.0),
         feather=getattr(r, "zebra_feather", 5.0),
     )
+
+    # Distraction corrections deliberately run late: users mark what they see
+    # in the developed image, and normalized coordinates reproduce at export.
+    operations = getattr(r, "distraction_operations", None) or []
+    if operations or bool(getattr(r, "reflection_enabled", False)):
+        from distractions import (apply_distraction_operations,
+                                   apply_reflection_adjustment,
+                                   reflection_mask)
+        working = np.clip(img, 0, 1).astype(np.float32)
+        if bool(getattr(r, "reflection_enabled", False)):
+            rmask = reflection_mask(
+                working,
+                getattr(r, "reflection_sensitivity", 55.0),
+                getattr(r, "reflection_blur", 8.0),
+            )
+            working = apply_reflection_adjustment(
+                working, rmask,
+                getattr(r, "reflection_strength", 50.0),
+                getattr(r, "reflection_highlights", -35.0),
+                getattr(r, "reflection_saturation", 0.0),
+                getattr(r, "reflection_neutralize", 20.0),
+                getattr(r, "reflection_contrast", 10.0),
+            )
+        if operations:
+            working = apply_distraction_operations(working, operations)
+        img = np.clip(working, 0, 1)
 
     return _float01_to_dtype(img, output_dtype)
 

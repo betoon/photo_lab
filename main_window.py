@@ -44,6 +44,7 @@ from catalog import Catalog
 import sys
 from datetime import datetime
 from accessibility import clamp_ui_scale, scale_font_sizes, UI_SCALE_STEP
+from distraction_dialog import DistractionDialog
 
 
 def collapsible_group(title: str, parent_layout, checked=True):
@@ -713,6 +714,7 @@ class PhotoLab(QMainWindow):
         image_m.addSeparator()
         add_action(image_m, "Graduated Filter", self.toggle_gradient_mode, "G")
         add_action(image_m, "Adjustment Brush", self.toggle_brush_mode, "Shift+B")
+        add_action(image_m, "Remove Distractions…", self.open_remove_distractions, "Ctrl+Shift+R")
         image_m.addSeparator()
         add_action(image_m, "Merge HDR…", self.merge_hdr_selected, "Ctrl+Shift+H")
         add_action(image_m, "Focus Stack…", self.focus_stack_selected, "Ctrl+Shift+F")
@@ -992,6 +994,7 @@ class PhotoLab(QMainWindow):
             "QMenu::separator { height:1px; background:#444; margin:4px 8px; }"
         )
         tools_menu.addAction("Color Calibration Studio…", self.open_color_calibration_studio)
+        tools_menu.addAction("Remove Distractions…", self.open_remove_distractions)
         tools_menu.addAction("Configuration / INI Editor…", self.show_configuration_editor)
         tools_menu.addSeparator()
         tools_menu.addAction("Merge HDR…", self.merge_hdr_selected)
@@ -4519,6 +4522,36 @@ class PhotoLab(QMainWindow):
         self.sliders["temperature"].setEnabled(not checked)
         self.sliders["tint"].setEnabled(not checked)
         self.render_timer.start()
+
+    def open_remove_distractions(self):
+        """Open the guided, non-destructive cleanup workspace."""
+        if self.original_bgr is None or self.current_path is None:
+            QMessageBox.information(self, "Remove Distractions", "Open a photograph first.")
+            return
+        recipe = self.recipes.get(self.current_path)
+        if recipe is None:
+            recipe = Recipe()
+            self.recipes[self.current_path] = recipe
+        # Build the same developed image the user sees, minus existing cleanup,
+        # so brush coordinates match geometry/crop and remain resolution-neutral.
+        base_recipe = copy.deepcopy(recipe)
+        base_recipe.distraction_operations = []
+        base_recipe.reflection_enabled = False
+        try:
+            developed = apply_recipe(
+                self.original_bgr, base_recipe,
+                meta=self.meta_cache.get(self.current_path, {}),
+                output_dtype=np.uint8,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Remove Distractions", f"Could not prepare the cleanup preview:\n{exc}")
+            return
+        dialog = DistractionDialog(self, developed, recipe, self.current_path)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.recipes[self.current_path] = dialog.recipe
+            self._push_history("Remove distractions")
+            self.render_preview()
+            self.statusBar().showMessage("Distraction corrections added to the image recipe", 5000)
 
     def render_preview(self):
         if self.original_bgr is None or self.current_path is None:
