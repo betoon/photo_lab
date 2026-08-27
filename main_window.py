@@ -38,7 +38,7 @@ from imaging import (Recipe, apply_recipe, IMAGE_EXTS, load_image, is_raw,
 from imaging import measure_noise_profile
 from presets import load_preset_file, apply_preset_file, list_preset_files, PRESET_MODULE_FIELDS
 from qt_utils import cv_to_qpixmap
-from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, SdImportWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker
+from workers import ThumbnailWorker, ExportWorker, LoadImageWorker, PreviewRenderWorker, SdImportWorker, CatalogScanWorker, CatalogThumbWorker, HdrMergeWorker, BatchExportWorker, FocusStackWorker, PanoramaWorker, RestorationSaveWorker
 from widgets import HistogramWidget, SliderRow, ImageCanvas, ToneCurveWidget, ColorWheelWidget, HistoryWidget, NavigatorWidget
 from catalog import Catalog
 import sys
@@ -4596,11 +4596,39 @@ class PhotoLab(QMainWindow):
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
         source=os.path.splitext(self.current_path)[0];path,_=QFileDialog.getSaveFileName(self,"Save Restored Copy",source+"_restored.png","PNG (*.png);;TIFF (*.tif *.tiff);;JPEG (*.jpg *.jpeg)")
         if not path:return
-        try:
-            extension=os.path.splitext(path)[1].lower() or ".png";ok,data=cv2.imencode(extension,dialog.result_image)
-            if not ok:raise ValueError("The selected output format could not be encoded")
-            data.tofile(path);self.log(f"Restoration Studio output → {path}");self.statusBar().showMessage(f"Restored copy saved → {path}",8000);self.open_image_path(path)
-        except Exception as exc:QMessageBox.critical(self,"Save failed",str(exc))
+        progress=QProgressDialog("Preparing restored image…","Cancel",0,100,self)
+        progress.setWindowTitle("Saving Restored Image")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0);progress.setAutoClose(False);progress.setAutoReset(False)
+        progress.setValue(1);progress.show()
+        worker=RestorationSaveWorker(dialog.result_image.copy(),path)
+        self._restoration_save_worker=worker;self._restoration_save_progress=progress
+        progress.canceled.connect(worker.cancel)
+        worker.progress.connect(lambda value,message:(progress.setLabelText(message),progress.setValue(value)))
+        worker.completed.connect(self._restoration_save_complete)
+        worker.failed.connect(self._restoration_save_failed)
+        worker.cancelled.connect(self._restoration_save_cancelled)
+        worker.finished.connect(self._restoration_save_thread_finished)
+        worker.start()
+
+    def _finish_restoration_save(self):
+        progress=getattr(self,"_restoration_save_progress",None)
+        if progress is not None:progress.close();progress.deleteLater()
+        self._restoration_save_progress=None
+
+    def _restoration_save_thread_finished(self):
+        worker=getattr(self,"_restoration_save_worker",None)
+        if worker is not None:worker.deleteLater()
+        self._restoration_save_worker=None
+
+    def _restoration_save_complete(self,path):
+        self._finish_restoration_save();self.log(f"Restoration Studio output → {path}");self.statusBar().showMessage(f"Restored copy saved → {path}",8000);self.open_image_path(path)
+
+    def _restoration_save_failed(self,message):
+        self._finish_restoration_save();QMessageBox.critical(self,"Save failed",message)
+
+    def _restoration_save_cancelled(self):
+        self._finish_restoration_save();self.statusBar().showMessage("Restored-image save cancelled",5000)
 
     def render_preview(self):
         if self.original_bgr is None or self.current_path is None:

@@ -24,6 +24,78 @@ _HEAVY_LIMIT = 2
 _FULL_LOAD_PENDING = threading.Event()
 
 
+def write_restored_image_atomic(image, path, progress=None, cancelled=None):
+    """Encode and atomically write a restored image with byte-level progress."""
+    progress = progress or (lambda _value, _message: None)
+    cancelled = cancelled or (lambda: False)
+    path = os.path.abspath(os.fspath(path))
+    extension = os.path.splitext(path)[1].lower() or ".png"
+    temporary = path + ".photolab-part"
+    progress(8, "Encoding restored image…")
+    ok, encoded = cv2.imencode(extension, image)
+    if not ok:
+        raise ValueError("The selected output format could not be encoded")
+    if cancelled():
+        return False
+    payload = memoryview(encoded).cast("B")
+    total = max(1, len(payload))
+    chunk_size = 1024 * 1024
+    try:
+        progress(30, "Writing restored image…")
+        with open(temporary, "wb") as stream:
+            for offset in range(0, total, chunk_size):
+                if cancelled():
+                    return False
+                stream.write(payload[offset:min(total, offset + chunk_size)])
+                fraction = min(1.0, (offset + chunk_size) / total)
+                progress(30 + int(fraction * 62), f"Writing restored image… {min(total, offset + chunk_size):,} of {total:,} bytes")
+            stream.flush()
+            os.fsync(stream.fileno())
+        if cancelled():
+            return False
+        progress(96, "Finalizing restored image…")
+        os.replace(temporary, path)
+        progress(100, "Restored image saved")
+        return True
+    finally:
+        if os.path.exists(temporary):
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+
+
+class RestorationSaveWorker(QThread):
+    """Encode and save Restoration Studio output without freezing the UI."""
+    progress = pyqtSignal(int, str)
+    completed = pyqtSignal(str)
+    failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
+
+    def __init__(self, image, path):
+        super().__init__()
+        self.image = image
+        self.path = os.path.abspath(os.fspath(path))
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        try:
+            saved = write_restored_image_atomic(
+                self.image, self.path,
+                progress=lambda value, message: self.progress.emit(value, message),
+                cancelled=lambda: self._cancel,
+            )
+            if saved:
+                self.completed.emit(self.path)
+            else:
+                self.cancelled.emit()
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class SdImportWorker(QThread):
     """Copy camera media safely; never deletes or modifies the source card."""
     progress = pyqtSignal(int, int, str)

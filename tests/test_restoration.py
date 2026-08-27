@@ -5,6 +5,7 @@ import numpy as np
 from restoration import (ai_confidence_map,blend_ai_result,correct_fading_silvering,
     detect_crease_scratch_mask,grain_aware_restore,load_model_pack,repair_damage,
     restore_photo,run_ai_provider,suppress_stains_texture,wiener_deblur)
+from workers import write_restored_image_atomic
 
 def test_damage_detection_and_repair_preserve_shape():
     image=np.full((120,160,3),140,np.uint8);cv2.line(image,(15,60),(145,62),(245,245,245),3);mask=detect_crease_scratch_mask(image,80,15,10);fixed=repair_damage(image,mask,4,True)
@@ -23,3 +24,14 @@ def test_optional_model_pack_protocol_and_ai_blending(tmp_path):
     a=np.zeros((20,30,3),np.uint8);b=np.full_like(a,200);mask=np.zeros((20,30),np.uint8);mask[:,15:]=255;blended=blend_ai_result(a,b,50,mask);confidence=ai_confidence_map(a,b)
     assert blended[:,:15].max()==0 and 95<=blended[:,20:].mean()<=105 and confidence.shape==a.shape[:2]
     sixteen=np.full((10,12,3),32000,np.uint16);mixed=blend_ai_result(sixteen,np.full((10,12,3),128,np.uint8),50);assert mixed.dtype==np.uint16 and 32000<=mixed.mean()<=33000
+
+def test_restoration_save_is_atomic_and_reports_progress(tmp_path):
+    image=np.full((64,96,3),(30,90,170),np.uint8);output=tmp_path/"restored.png";events=[]
+    assert write_restored_image_atomic(image,output,lambda value,message:events.append((value,message)))
+    loaded=cv2.imread(str(output));assert loaded.shape==image.shape and not (tmp_path/"restored.png.photolab-part").exists()
+    assert events[0][0]==8 and events[-1][0]==100 and any("Writing" in message for _,message in events)
+
+def test_cancelled_restoration_save_leaves_no_partial_file(tmp_path):
+    image=np.zeros((32,32,3),np.uint8);output=tmp_path/"cancelled.png"
+    assert not write_restored_image_atomic(image,output,cancelled=lambda:True)
+    assert not output.exists() and not (tmp_path/"cancelled.png.photolab-part").exists()
