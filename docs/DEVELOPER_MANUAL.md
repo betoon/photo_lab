@@ -493,3 +493,36 @@ On Windows use `;` instead of `:` in `--add-data`. One-folder builds keep `docs/
 - `main.py` applies the scale before constructing widgets; `PhotoLab.set_interface_scale` supports live changes and rescales stylesheet font declarations without changing fixed geometry
 - View menu shortcuts: `Ctrl+=`, `Ctrl+-`, and `Ctrl+0`; Preferences provides named scale presets
 - High-contrast `:focus` styling improves keyboard traversal, and the primary preview/navigation widgets expose accessible names and descriptions
+
+## Remove Distractions architecture
+
+`distractions.py` is the GUI-independent processing layer. Public functions accept
+OpenCV BGR arrays; operation coordinates and radii are normalized. The same recipe
+therefore runs against a reduced preview and full-resolution export. Conversion
+helpers restore the source numeric type, including `uint16`. OpenCV's color inpaint
+path is internally 8-bit, an intentional compatibility compromise.
+
+`Recipe.distraction_operations` stores ordered dictionaries for `heal`, `clone`,
+`inpaint`, `smart`, and `wire`. Reflection controls are explicit Recipe fields, so
+old sidecars remain compatible through `getattr` defaults and new sidecars serialize
+through `asdict`. `apply_recipe` runs cleanup late in the pipeline; coordinates
+describe what the user sees after geometry and crop.
+
+`distraction_dialog.py` owns the modal workspace. It edits a deep copy and returns
+it only when accepted. The main window creates a developed preview with prior cleanup
+disabled, replaces the Recipe after acceptance, and pushes one history entry.
+
+Dust detection uses a robust local-background residual, morphology, connected
+components, compactness/size limits, and a MAD-derived threshold. Folder maps vote
+on fixed sensor-coordinate masks from equal-sized frames. This keeps false-positive
+behavior explainable.
+
+Reflection masks combine bright highlights with low-saturation veiling glare.
+Single-image processing is an adjustment, not reconstruction. Multi-image separation
+uses affine ECC registration, a robust low percentile for the base, positive residuals
+for the reflection layer, and temporal spread for confidence. It saves all derived
+assets plus alignment matrices and scores without replacing the current source.
+
+Smart selection uses OpenCV GrabCut followed by ordinary inpainting. A future optional
+model adapter can produce the same uint8-mask contract without changing recipes or UI.
+Regression coverage lives in `tests/test_distractions.py`.

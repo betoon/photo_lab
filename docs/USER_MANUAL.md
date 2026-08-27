@@ -668,3 +668,66 @@ Number keys **0–5** set star rating (so 1:1 zoom uses **Ctrl+1**).
 - Presets: Milky Way, DSO soft
 
 These are stored in the recipe sidecar like any other edit. Full calibration stacking (darks/flats) can be added later.
+
+## Remove Distractions workspace
+
+Open a photograph and choose **Image → Remove Distractions…** or **Tools ▾ → Remove
+Distractions…** (`Ctrl+Shift+R`). The workspace applies nothing permanently to the
+source. Choose **Apply to Recipe** to add the correction instructions to PhotoLab's
+sidecar recipe; Cancel leaves the recipe unchanged.
+
+### 1 — Manual cleanup
+
+- **Heal:** set Brush size and click dust, a small blemish, or a tiny unwanted
+  object. PhotoLab fills it from the surrounding texture.
+- **Clone:** click a clean source first, then click the distraction. A feathered
+  copy of the source covers the destination.
+- **Content-Aware:** click a small object to replace the brush-sized region from
+  its surroundings.
+- **Wire / Hair:** click the two ends of a thin wire, hair, or scratch. Use several
+  shorter segments for a curved line.
+
+Use **Removal Mask** to inspect exactly what will be replaced. **Undo** reverses the
+last group of marks; **Clear All** removes all cleanup marks in this workspace. Keep
+brush sizes only slightly larger than the distraction to protect fine detail.
+
+### 2 — Sensor dust
+
+**Detect on This Image** finds compact light or dark spots that differ from their
+local background. Increase Sensitivity if obvious spots are missed; decrease it if
+natural texture is selected. Largest spot prevents broad features from being marked.
+
+**Build Reusable Folder Dust Map** compares equal-sized images and keeps spots that
+recur at fixed sensor coordinates. Select images from the same camera, orientation,
+crop, and pixel dimensions. Five or more photographs with varied content normally
+produce a safer map. Save or load the result as a PhotoLab JSON dust map. Always
+inspect the mask because a stationary scene feature can otherwise receive votes.
+
+### 3 — Reflection layer
+
+Enable the editable reflection layer, then inspect **Reflection Mask**. Controls
+adjust detection sensitivity, opacity, highlights, saturation, color neutrality,
+local contrast, and mask softness. This can reduce glare and veiling contrast, but
+a single image cannot recover detail that a reflection completely obscured.
+
+**Separate Reflections from Several Images** is intended for tripod photographs in
+which the reflection changes, such as after moving a light or rotating a polarizer.
+PhotoLab aligns the frames and saves a clean-base estimate, reflection layer,
+reflection and confidence masks, and a JSON alignment report. Open the saved base
+image to continue editing. This is experimental; parallax, motion, or clipped
+highlights can leave artifacts.
+
+### 4 — Smart and line removal
+
+**Start Smart Selection** asks for two opposite corners around a larger unwanted
+object. Leave some background inside the rectangle, then review Removal Mask. Large
+objects crossing faces, text, or repeating geometry usually need clone cleanup.
+
+**Detect Straight Wires / Hairs** proposes strong straight line segments. It can
+also select architectural edges, so mask review is essential.
+
+### Suggested order
+
+Perform lens correction and geometry first, then distraction removal, normal tonal
+and color work, and final sharpening last. At export PhotoLab replays normalized
+marks at output resolution while preserving the original photograph.

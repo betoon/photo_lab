@@ -29,6 +29,9 @@ The Help menu reads the Markdown manuals directly. Update them whenever controls
 - Horizon, Crop, Distortion, Perspective
 - **Control Points** (local radial adjustments)
 - History restore, RAW support, JSON presets
+- **Remove Distractions workspace** — heal/clone, content-aware object and wire removal,
+  automatic dust detection, reusable folder dust maps, editable reflection layers,
+  and experimental aligned multi-image reflection separation
 
 ## Shortcuts
 | Key | Action |
@@ -36,6 +39,7 @@ The Help menu reads the Markdown manuals directly. Update them whenever controls
 | Ctrl+O | Open folder |
 | Ctrl+E | Export |
 | Ctrl+R | Reset |
+| Ctrl+Shift+R | Remove Distractions workspace |
 | C | Split compare |
 | B | Side-by-side |
 | F | Fit |
