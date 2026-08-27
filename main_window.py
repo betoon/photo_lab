@@ -354,7 +354,7 @@ class PhotoLab(QMainWindow):
             from PyQt6.QtGui import QFont as _QF
             _f = self.font()
             if _f.pointSizeF() <= 0:
-                _f.setPointSizeF(10.0 * self._ui_scale)
+                _f = _QF("Segoe UI", max(1, int(round(10.0 * self._ui_scale))))
                 self.setFont(_f)
         except Exception:
             pass
@@ -529,8 +529,7 @@ class PhotoLab(QMainWindow):
             pass
         app = QApplication.instance()
         if app is not None:
-            font = QFont("Segoe UI")
-            font.setPointSizeF(max(1.0, 10.0 * self._ui_scale))
+            font = QFont("Segoe UI", max(1, int(round(10.0 * self._ui_scale))))
             app.setFont(font)
             self.setFont(font)
         self.setStyleSheet(self._stylesheet())
@@ -1176,6 +1175,11 @@ class PhotoLab(QMainWindow):
         root_layout.setSpacing(0)
 
         self.mode_stack = QStackedWidget()
+        # A stacked widget normally adopts the largest minimum-size hint from
+        # every page, including hidden pages.  Ignore those hints so a compact
+        # laptop display can size the active page and use its scroll areas.
+        self.mode_stack.setMinimumSize(0, 0)
+        self.mode_stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         root_layout.addWidget(self.mode_stack)
 
         # ---- Develop page (existing editor) ----
@@ -1377,6 +1381,8 @@ class PhotoLab(QMainWindow):
         self._cat_group = QButtonGroup(self)
         self._cat_group.setExclusive(True)
         self.tool_stack = QStackedWidget()
+        self.tool_stack.setMinimumSize(0, 0)
+        self.tool_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
         categories = [
             ("Light", self._build_light_tab),
             ("Color", self._build_color_tab),
@@ -7053,9 +7059,27 @@ class PhotoLab(QMainWindow):
     def export_current(self):
         if self.current_path is None:
             return
+        source_path = self.current_path
+        recipe = self.recipes.get(source_path)
+        # current_path changes as soon as a filmstrip item is selected, while
+        # its image and recipe are populated asynchronously.  Exporting during
+        # that short interval previously raised KeyError and could use the
+        # preceding image's pixel buffer.
+        if recipe is None or self.original_bgr is None:
+            self.statusBar().showMessage("Please wait for the selected image to finish loading.", 6000)
+            QMessageBox.information(
+                self, "Image is still loading",
+                "PhotoLab has not finished preparing this image and its edit recipe yet. "
+                "Wait for the preview to appear, then export again.",
+            )
+            return
+        running_export = getattr(self, "export_worker", None)
+        if running_export is not None and running_export.isRunning():
+            QMessageBox.information(self, "Export in progress", "Please wait for the current export to finish.")
+            return
         from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout
-        base, ext = os.path.splitext(os.path.basename(self.current_path))
-        if is_raw(self.current_path):
+        base, ext = os.path.splitext(os.path.basename(source_path))
+        if is_raw(source_path):
             ext = ".jpg"
         suggested = os.path.join(self.folder or ".", f"{base}_edited{ext}")
         out_path, _ = QFileDialog.getSaveFileName(
@@ -7116,7 +7140,7 @@ class PhotoLab(QMainWindow):
                 out_path = os.path.splitext(out_path)[0] + ".tif"
         if side_check.isChecked():
             try:
-                save_recipe_sidecar(self.current_path, self.recipes[self.current_path])
+                save_recipe_sidecar(source_path, recipe)
             except Exception as e:
                 self.log(f"Sidecar save failed: {e}", level="ERR")
         self.statusBar().showMessage("Exporting…")
@@ -7126,9 +7150,9 @@ class PhotoLab(QMainWindow):
         export_progress.setCancelButton(None)
         export_progress.setValue(0)
         self._export_progress = export_progress
-        meta = self.meta_cache.get(self.current_path, {})
+        meta = self.meta_cache.get(source_path, {})
         self.export_worker = ExportWorker(
-            self.current_path, self.recipes[self.current_path], out_path,
+            source_path, recipe, out_path,
             wb_multipliers=meta.get("wb_multipliers"),
             watermark_text=wm,
             max_dim=max_dim,
@@ -7670,10 +7694,37 @@ class PhotoLab(QMainWindow):
         self.gps_map_btn.setEnabled(available)
 
     def closeEvent(self, event):
+        self.render_timer.stop()
+        workers = []
         renderer = getattr(self, "_preview_renderer", None)
         if renderer is not None:
             renderer.stop()
-            renderer.wait(2000)
+            workers.append(renderer)
+        for name in ("thumb_worker", "_load_worker", "_scan_worker", "_lib_thumb_worker",
+                     "export_worker", "_batch_worker", "_pano_worker", "_stack_worker", "_hdr_worker"):
+            worker = getattr(self, name, None)
+            if worker is None or worker in workers:
+                continue
+            try:
+                if worker.isRunning():
+                    cancel = getattr(worker, "cancel", None)
+                    if callable(cancel):
+                        cancel()
+                    workers.append(worker)
+            except RuntimeError:
+                pass
+        # Never destroy a live QThread.  Most workers stop immediately; a RAW
+        # decode or full-resolution export is allowed to finish safely.
+        for worker in workers:
+            try:
+                if not worker.wait(30000):
+                    self.statusBar().showMessage(
+                        "PhotoLab is finishing background work before closing…", 5000
+                    )
+                    event.ignore()
+                    return
+            except RuntimeError:
+                pass
         try:
             self.catalog.close()
         except Exception:

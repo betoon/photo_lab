@@ -41,13 +41,10 @@ def main():
         interface_scale = clamp_ui_scale(get_config().get("ui", "interface_scale", "1.0"))
     except Exception:
         interface_scale = 1.0
-    font = QFont("Segoe UI")
-    font.setPointSizeF(max(1.0, 10.0 * interface_scale))
-    # Keep the application font point-based.  A pixel-sized fallback reports
-    # pointSize() == -1 and causes Qt's Windows style code to call
-    # QFont::setPointSize(-1) while resolving widget styles.
-    if font.pointSizeF() <= 0:
-        font.setPointSizeF(10.0)
+    # Construct the font with a valid point size from the outset.  On some
+    # Windows laptop DPI configurations, creating a family-only QFont briefly
+    # leaves it at -1 and the platform style reports setPointSize(-1).
+    font = QFont("Segoe UI", max(1, int(round(10.0 * interface_scale))))
     app.setFont(font)
 
     # Import widgets only after QApplication and its valid default font exist.
