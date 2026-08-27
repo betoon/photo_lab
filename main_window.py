@@ -499,6 +499,22 @@ class PhotoLab(QMainWindow):
             QComboBox QAbstractItemView {
                 background: #202020; color: #eee; selection-background-color: #2a6ad4; border: 1px solid #3d3d3d;
             }
+            QTabWidget::pane {
+                background: #181818; border: 1px solid #343434;
+                border-radius: 4px; top: -1px;
+            }
+            QTabBar::tab {
+                background: #242424; color: #d8d8d8;
+                border: 1px solid #3b3b3b; border-bottom: none;
+                padding: 7px 13px; margin-right: 2px;
+                border-top-left-radius: 5px; border-top-right-radius: 5px;
+            }
+            QTabBar::tab:hover { background: #343434; color: #ffffff; }
+            QTabBar::tab:selected {
+                background: #2a6ad4; color: #ffffff;
+                border-color: #4b83df; font-weight: 600;
+            }
+            QTabBar::tab:disabled { color: #777777; background: #202020; }
             QLineEdit {
                 background: #252525; color: #eee; border: 1px solid #3d3d3d;
                 border-radius: 3px; padding: 4px 8px; font-size: 11px;
