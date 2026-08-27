@@ -47,3 +47,16 @@ then select that folder in PhotoLab's INI editor.
 DDColor's code and selected checkpoint are both identified by their publishers as
 Apache-2.0. Face reconstruction remains separate: CodeFormer's official S-Lab
 license is non-commercial unless separately licensed.
+
+## Restoration Studio workflow
+
+1. Choose a local provider and operation, then click **Run Free Local AI Model
+   (Offline)**. The progress window remains responsive while each candidate runs.
+2. Completed candidates appear immediately in **Preview candidate** and in the main
+   image preview. Use **View → Original** and **Restored Preview** to compare them.
+3. Candidates are temporary by design. Use **Export Selected Candidate** to keep an
+   unblended candidate, or **Apply & Save Copy** to save the selected candidate with
+   the current restoration, blend, and mask settings.
+4. Choose a destination in **Save Restored Copy**. A second progress window shows
+   image encoding and byte-level writing progress. The original is never overwritten
+   unless that exact filename is deliberately selected.

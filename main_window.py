@@ -4594,8 +4594,10 @@ class PhotoLab(QMainWindow):
         except Exception as exc:QMessageBox.warning(self,"Restore & Colorize",f"Could not prepare the photograph:\n{exc}");return
         dialog=RestorationStudioDialog(self,developed,self.current_path)
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        self.statusBar().showMessage("Choose where to save the restored copy…")
+        self.raise_();self.activateWindow();QApplication.processEvents()
         source=os.path.splitext(self.current_path)[0];path,_=QFileDialog.getSaveFileName(self,"Save Restored Copy",source+"_restored.png","PNG (*.png);;TIFF (*.tif *.tiff);;JPEG (*.jpg *.jpeg)")
-        if not path:return
+        if not path:self.statusBar().showMessage("Save Copy cancelled — no file was written",5000);return
         progress=QProgressDialog("Preparing restored image…","Cancel",0,100,self)
         progress.setWindowTitle("Saving Restored Image")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
