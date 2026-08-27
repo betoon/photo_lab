@@ -1,6 +1,6 @@
 """PhotoLab old-photo restoration and optional external AI model-pack protocol."""
 from __future__ import annotations
-import hashlib, json, os, shlex, subprocess, sys, tempfile
+import hashlib, json, os, shlex, shutil, subprocess, sys, tempfile
 from pathlib import Path
 import cv2
 import numpy as np
@@ -81,7 +81,13 @@ def load_model_pack(folder):
 def run_ai_provider(provider,input_path,output_path,capability,fidelity=.7,candidate=1,timeout=900):
     if capability not in provider.get("capabilities",[]):raise ValueError("Provider does not support this operation")
     root=Path(provider["root"]);values={"input":str(input_path),"output":str(output_path),"capability":capability,"fidelity":f"{fidelity:.3f}","candidate":str(candidate),"root":str(root)};command=[str(part).format(**values) for part in provider["command"]]
-    if command[0].lower().endswith(".py"):command.insert(0,sys.executable)
+    if command[0].lower().endswith(".py"):
+        python=sys.executable
+        if getattr(sys,"frozen",False):
+            candidates=(os.environ.get("PHOTOLAB_MODEL_PACK_PYTHON"),root/".venv"/"Scripts"/"python.exe",root/"python"/"python.exe",shutil.which("python"))
+            python=next((str(path) for path in candidates if path and Path(path).is_file()),"")
+            if not python:raise RuntimeError("This model pack requires Python. Install its runtime or set PHOTOLAB_MODEL_PACK_PYTHON.")
+        command.insert(0,python)
     elif not os.path.isabs(command[0]):command[0]=str(root/command[0])
     result=subprocess.run(command,cwd=root,capture_output=True,text=True,timeout=timeout,check=False)
     if result.returncode or not Path(output_path).is_file():raise RuntimeError((result.stderr or result.stdout or "Provider produced no output")[-3000:])

@@ -27,6 +27,10 @@ Supported capabilities are `colorize`, `face_restore`, `reconstruct`, `enhance`,
 directory. Python commands use PhotoLab's Python interpreter. A provider must write a
 readable image to `{output}` and return exit code zero.
 
+Source runs use PhotoLab's active Python interpreter. A packaged PhotoLab build
+discovers Python from `PHOTOLAB_MODEL_PACK_PYTHON`, `.venv\Scripts\python.exe` in
+the pack, `python\python.exe` in the pack, or the system PATH, in that order.
+
 Placeholders: `{input}`, `{output}`, `{capability}`, `{fidelity}`, `{candidate}`, and
 `{root}`. Model authors should preserve orientation and color encoding, tile large
 images where necessary, publish code and weight licenses, and never silently upload
@@ -35,10 +39,11 @@ photographs. PhotoLab labels all provider results as AI-generated interpretation
 ## Recommended Windows pack
 
 The companion folder `C:\Users\brian\Documents\GitHub\photo_lab_ai_model_pack`
-contains an installer and adapter for the official Real-ESRGAN NCNN/Vulkan build.
-It provides local enhancement and 4× super-resolution without requiring PyTorch.
-Run its `install_model_pack.ps1`, then select that folder in PhotoLab's INI editor.
+contains installers and adapters for the official Real-ESRGAN NCNN/Vulkan build and
+the official DDColor paper-tiny model. It provides local colorization, enhancement,
+and 4× super-resolution. Run `install_model_pack.ps1` and `install_ddcolor.ps1`,
+then select that folder in PhotoLab's INI editor.
 
-Colorization and face reconstruction are deliberately separate: model code and
-checkpoint licenses must both permit the intended use. In particular, CodeFormer's
-official S-Lab license is non-commercial unless separately licensed.
+DDColor's code and selected checkpoint are both identified by their publishers as
+Apache-2.0. Face reconstruction remains separate: CodeFormer's official S-Lab
+license is non-commercial unless separately licensed.
