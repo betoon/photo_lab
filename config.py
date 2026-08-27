@@ -34,6 +34,7 @@ _DEFAULTS: Dict[str, Dict[str, str]] = {
         "scripts_dir": "",
         "argyllcms_dir": "",
         "focus_stacker_pro": "",
+        "ai_restoration_model_pack": "",
     },
     "performance": {
         "max_raw_workers": "2",
@@ -68,6 +69,7 @@ _ENV_MAP = {
     "ARGYLLCMS_BIN": ("paths", "argyllcms_dir"),
     "PHOTOLAB_ARGYLLCMS_DIR": ("paths", "argyllcms_dir"),
     "PHOTOLAB_FOCUS_STACKER_PRO": ("paths", "focus_stacker_pro"),
+    "PHOTOLAB_AI_RESTORATION_MODEL_PACK": ("paths", "ai_restoration_model_pack"),
 }
 
 

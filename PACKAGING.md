@@ -1,5 +1,10 @@
 # Packaging PhotoLab
 
+AI restoration models are intentionally not bundled. A portable installation may
+point to an external model-pack folder through the Configuration / INI Editor. This
+keeps the standard build smaller and avoids silently redistributing third-party model
+weights with separate licenses. See `docs/AI_MODEL_PACK.md`.
+
 ## Portable build (recommended)
 
 ```bash

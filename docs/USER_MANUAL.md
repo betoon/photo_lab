@@ -1,5 +1,22 @@
 # PhotoLab User Manual
 
+## Restore & Colorize
+
+Choose **Image → Restore & Colorize** for old prints, damaged scans, and optional
+local-AI interpretation. Restoration Studio works without AI and provides automatic
+crease/scratch masks, a repair-mask brush, tear joining, content-aware filling,
+stain and paper-texture suppression, fading and silvering correction, mild Wiener
+deblur, and grain-aware denoise/detail recovery. Compare Original, Restored Preview,
+and Repair Mask before applying. PhotoLab always saves the result as a new file.
+
+AI Restoration Lab is disabled until an external model-pack folder is selected in
+the Configuration / INI Editor. Compatible local providers may offer colorization,
+face restoration, reconstruction, enhancement, or super-resolution. Fidelity,
+candidate count, blending, selective repair-mask application, and a heuristic
+confidence view are provided. AI can invent identity, texture, objects, and color;
+automatic colorization is plausible interpretation rather than historical evidence.
+See `docs/AI_MODEL_PACK.md` for the provider protocol.
+
 PhotoLab is a non-destructive photo editor inspired by applications such as DxO PhotoLab. Edits are stored as a *recipe* and applied on demand—your original files stay untouched.
 
 ---

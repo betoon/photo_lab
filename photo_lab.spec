@@ -77,6 +77,8 @@ hiddenimports = [
     "video_editor",
     "slideshow",
     "print_dialog",
+    "restoration",
+    "restoration_dialog",
 ]
 
 a = Analysis(

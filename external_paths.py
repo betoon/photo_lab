@@ -55,6 +55,10 @@ def _focus_candidates():
         if found:
             yield found
 
+def _ai_pack_candidates():
+    yield os.path.join(os.path.expanduser("~"), ".photolab", "ai_restoration_model_pack")
+    yield os.path.join(_app_root(), "ai_restoration_model_pack")
+
 
 PATH_SPECS = (
     PathSpec("plugin_dir", "Plugin / presets folder", "folder",
@@ -65,6 +69,8 @@ PATH_SPECS = (
              "Database root containing XML profiles or version_N folders.", _lensfun_candidates),
     PathSpec("focus_stacker_pro", "Focus Stacker Pro", "file_or_folder",
              "Application, Python launcher, or its containing folder.", _focus_candidates),
+    PathSpec("ai_restoration_model_pack", "AI Restoration Model Pack", "folder",
+             "External folder containing photolab-model-pack.json and local model providers.", _ai_pack_candidates),
 )
 
 _BY_KEY = {spec.key: spec for spec in PATH_SPECS}
@@ -101,6 +107,13 @@ def validate_path(key: str, path: str) -> tuple[bool, str]:
     if key == "focus_stacker_pro":
         launcher = _focus_launcher(path)
         return (bool(launcher), f"Launcher found: {launcher}" if launcher else "No application or launcher found")
+    if key == "ai_restoration_model_pack":
+        manifest=os.path.join(path,"photolab-model-pack.json")
+        if not os.path.isfile(manifest):return False,"photolab-model-pack.json was not found"
+        try:
+            from restoration import load_model_pack
+            pack=load_model_pack(path);return True,f"{len(pack['providers'])} provider(s) available"
+        except Exception as exc:return False,str(exc)
     ok = os.path.isdir(path)
     return ok, "Folder found" if ok else "Folder does not exist"
 

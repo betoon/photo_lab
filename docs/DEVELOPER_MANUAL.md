@@ -1,5 +1,14 @@
 # PhotoLab Developer Manual
 
+## Restoration and optional AI providers
+
+`restoration.py` is Qt-free and owns deterministic restoration, model-pack
+validation, external-provider execution, AI blending, and confidence heuristics.
+`restoration_dialog.py` provides the guided workspace. AI output is never inserted
+silently into a Recipe: it is blended explicitly and saved as a new image, preserving
+the original. Model packs live outside PhotoLab and use the documented versioned JSON
+command protocol. Keep model code and weight licensing separate and visible.
+
 Architecture overview for contributors. PhotoLab is a **PyQt6** desktop app with a **NumPy/OpenCV** processing pipeline and optional **rawpy** for RAW files.
 
 ---

@@ -45,6 +45,7 @@ import sys
 from datetime import datetime
 from accessibility import clamp_ui_scale, scale_font_sizes, UI_SCALE_STEP
 from distraction_dialog import DistractionDialog
+from restoration_dialog import RestorationStudioDialog
 
 
 def collapsible_group(title: str, parent_layout, checked=True):
@@ -715,6 +716,7 @@ class PhotoLab(QMainWindow):
         add_action(image_m, "Graduated Filter", self.toggle_gradient_mode, "G")
         add_action(image_m, "Adjustment Brush", self.toggle_brush_mode, "Shift+B")
         add_action(image_m, "Remove Distractions…", self.open_remove_distractions, "Ctrl+Shift+R")
+        add_action(image_m, "Restore & Colorize…", self.open_restoration_studio, "Ctrl+Shift+Alt+R")
         image_m.addSeparator()
         add_action(image_m, "Merge HDR…", self.merge_hdr_selected, "Ctrl+Shift+H")
         add_action(image_m, "Focus Stack…", self.focus_stack_selected, "Ctrl+Shift+F")
@@ -995,6 +997,7 @@ class PhotoLab(QMainWindow):
         )
         tools_menu.addAction("Color Calibration Studio…", self.open_color_calibration_studio)
         tools_menu.addAction("Remove Distractions…", self.open_remove_distractions)
+        tools_menu.addAction("Restore & Colorize…", self.open_restoration_studio)
         tools_menu.addAction("Configuration / INI Editor…", self.show_configuration_editor)
         tools_menu.addSeparator()
         tools_menu.addAction("Merge HDR…", self.merge_hdr_selected)
@@ -4552,6 +4555,23 @@ class PhotoLab(QMainWindow):
             self._push_history("Remove distractions")
             self.render_preview()
             self.statusBar().showMessage("Distraction corrections added to the image recipe", 5000)
+
+    def open_restoration_studio(self):
+        """Open old-photo restoration; results are always saved as a new file."""
+        if self.original_bgr is None or self.current_path is None:
+            QMessageBox.information(self,"Restore & Colorize","Open a photograph first.");return
+        recipe=self.recipes.get(self.current_path,Recipe())
+        try:developed=apply_recipe(self.original_bgr,recipe,meta=self.meta_cache.get(self.current_path,{}),output_dtype=np.uint8)
+        except Exception as exc:QMessageBox.warning(self,"Restore & Colorize",f"Could not prepare the photograph:\n{exc}");return
+        dialog=RestorationStudioDialog(self,developed,self.current_path)
+        if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        source=os.path.splitext(self.current_path)[0];path,_=QFileDialog.getSaveFileName(self,"Save Restored Copy",source+"_restored.png","PNG (*.png);;TIFF (*.tif *.tiff);;JPEG (*.jpg *.jpeg)")
+        if not path:return
+        try:
+            extension=os.path.splitext(path)[1].lower() or ".png";ok,data=cv2.imencode(extension,dialog.result_image)
+            if not ok:raise ValueError("The selected output format could not be encoded")
+            data.tofile(path);self.log(f"Restoration Studio output → {path}");self.statusBar().showMessage(f"Restored copy saved → {path}",8000);self.open_image_path(path)
+        except Exception as exc:QMessageBox.critical(self,"Save failed",str(exc))
 
     def render_preview(self):
         if self.original_bgr is None or self.current_path is None:

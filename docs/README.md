@@ -1,5 +1,12 @@
 # PhotoLab — DxO-inspired photo editor (Python)
 
+PhotoLab includes a guided **Restore & Colorize** workspace. Its built-in Restoration
+Studio repairs creases, scratches, tears, stains, fading, silvering, modest defocus,
+grain, and damaged detail without AI. The optional AI Restoration Lab connects to a
+user-configured external local model pack for colorization, face restoration,
+reconstruction, enhancement, and super-resolution. AI weights are never required by
+the standard application and results are explicitly labeled as interpretive.
+
 ## Documentation set
 
 - `USER_MANUAL.md` — in-app and printable end-user guide.

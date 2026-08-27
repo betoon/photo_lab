@@ -15,3 +15,8 @@ CLIPPING (solid red/blue)
   View → Clipping Warning  OR  keyboard: J
 
 Commit baseline: 4b7b8ee + visibility polish (IR/Astro expanded, Zebras on toolbar)
+RESTORE & COLORIZE
+  Image menu / Tools dropdown → Restore & Colorize…
+  Built-in non-AI repair: restoration.py + restoration_dialog.py
+  External AI path: Tools → Configuration / INI Editor → AI Restoration Model Pack
+  Provider protocol: docs/AI_MODEL_PACK.md
