@@ -31,3 +31,14 @@ Placeholders: `{input}`, `{output}`, `{capability}`, `{fidelity}`, `{candidate}`
 `{root}`. Model authors should preserve orientation and color encoding, tile large
 images where necessary, publish code and weight licenses, and never silently upload
 photographs. PhotoLab labels all provider results as AI-generated interpretations.
+
+## Recommended Windows pack
+
+The companion folder `C:\Users\brian\Documents\GitHub\photo_lab_ai_model_pack`
+contains an installer and adapter for the official Real-ESRGAN NCNN/Vulkan build.
+It provides local enhancement and 4× super-resolution without requiring PyTorch.
+Run its `install_model_pack.ps1`, then select that folder in PhotoLab's INI editor.
+
+Colorization and face reconstruction are deliberately separate: model code and
+checkpoint licenses must both permit the intended use. In particular, CodeFormer's
+official S-Lab license is non-commercial unless separately licensed.
