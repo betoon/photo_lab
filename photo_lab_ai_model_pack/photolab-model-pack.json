@@ -1,0 +1,41 @@
+{
+  "format": "photolab-ai-model-pack-1",
+  "name": "PhotoLab Local AI Model Pack",
+  "version": "1.1.0",
+  "description": "Local, offline restoration providers installed separately from PhotoLab.",
+  "providers": [
+    {
+      "id": "ddcolor_paper_tiny",
+      "name": "DDColor Tiny — Historical Photo Colorization",
+      "capabilities": ["colorize"],
+      "command": [
+        "run_ddcolor.py",
+        "--input", "{input}",
+        "--output", "{output}",
+        "--operation", "{capability}",
+        "--fidelity", "{fidelity}",
+        "--candidate", "{candidate}"
+      ],
+      "license": "Apache-2.0",
+      "upstream": "https://github.com/piddnad/DDColor",
+      "checkpoint": "https://huggingface.co/piddnad/ddcolor_paper_tiny",
+      "notes": "Runs locally using the officially published ImageNet-trained tiny checkpoint. Colors are plausible interpretations, not historical evidence."
+    },
+    {
+      "id": "realesrgan_ncnn_vulkan",
+      "name": "Real-ESRGAN — Photo Enhancement",
+      "capabilities": ["enhance", "super_resolution"],
+      "command": [
+        "run_realesrgan.py",
+        "--input", "{input}",
+        "--output", "{output}",
+        "--operation", "{capability}",
+        "--fidelity", "{fidelity}",
+        "--candidate", "{candidate}"
+      ],
+      "license": "BSD-3-Clause",
+      "upstream": "https://github.com/xinntao/Real-ESRGAN",
+      "notes": "Runs locally. Enhancement preserves the original dimensions; super-resolution produces a 4x result."
+    }
+  ]
+}
