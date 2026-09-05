@@ -46,6 +46,8 @@ from datetime import datetime
 from accessibility import clamp_ui_scale, scale_font_sizes, UI_SCALE_STEP
 from distraction_dialog import DistractionDialog
 from restoration_dialog import RestorationStudioDialog
+from reflection_dialog import ReflectionDialog
+from geometry_guides import GUIDES
 
 
 def collapsible_group(title: str, parent_layout, checked=True):
@@ -1971,10 +1973,40 @@ class PhotoLab(QMainWindow):
         self.level_horizon_btn.setToolTip("Drag a line along the horizon; angle is applied automatically.")
         self.level_horizon_btn.clicked.connect(self.start_horizon_line)
         v.addWidget(self.level_horizon_btn)
-        self.show_grid_cb = QCheckBox("Show grid (rule of thirds + center)")
-        self.show_grid_cb.setToolTip("Overlay grid and center crosshair to help straighten the horizon.")
+        box, v = collapsible_group("Composition Guides", layout)
+        self.show_grid_cb = QCheckBox("Show composition / perspective grid")
+        self.show_grid_cb.setToolTip("Display an image-aligned guide. Guides are never included in exports.")
         self.show_grid_cb.toggled.connect(self._on_show_grid_toggled)
         v.addWidget(self.show_grid_cb)
+        self.grid_combo = QComboBox()
+        for key, label in GUIDES:
+            self.grid_combo.addItem(label, key)
+        self.grid_combo.setToolTip("Choose parallel, composition, or vanishing-point guides; does not warp the photograph.")
+        v.addWidget(self.grid_combo)
+        guide_form = QFormLayout()
+        self.grid_density = QSpinBox()
+        self.grid_density.setRange(4, 30)
+        self.grid_density.setValue(10)
+        guide_form.addRow("Guide density", self.grid_density)
+        self.grid_horizon = QSpinBox()
+        self.grid_horizon.setRange(5, 95)
+        self.grid_horizon.setValue(40)
+        self.grid_horizon.setSuffix(" %")
+        guide_form.addRow("Guide horizon", self.grid_horizon)
+        self.grid_center = QSpinBox()
+        self.grid_center.setRange(5, 95)
+        self.grid_center.setValue(50)
+        self.grid_center.setSuffix(" %")
+        guide_form.addRow("Vanishing center", self.grid_center)
+        v.addLayout(guide_form)
+        self.grid_horizon.setToolTip("Move the vanishing-point horizon vertically within the image.")
+        self.grid_center.setToolTip("Move the vanishing-point arrangement horizontally. Side points sit outside the image.")
+        self.grid_combo.currentIndexChanged.connect(self._on_grid_options)
+        for control in (self.grid_density, self.grid_horizon, self.grid_center):
+            control.valueChanged.connect(self._on_grid_options)
+        self.grid_density.setEnabled(False)
+        self.grid_horizon.setEnabled(False)
+        self.grid_center.setEnabled(False)
         self.show_spiral_cb = QCheckBox("Show Fibonacci / golden spiral")
         self.show_spiral_cb.setToolTip(
             "Golden-ratio spiral locked to the image. Drag the yellow center to move, "
@@ -2015,6 +2047,15 @@ class PhotoLab(QMainWindow):
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#777; font-size:11px;")
         v.addWidget(tip)
+
+        box, v = collapsible_group("Reflection Under a Line", layout, checked=False)
+        reflect_button = QPushButton("Draw / Edit Reflection…")
+        reflect_button.setToolTip("Draw an arbitrary mirror line, choose the source side, preview, then Apply or Cancel. Supports Undo / Redo.")
+        reflect_button.clicked.connect(self.open_line_reflection)
+        v.addWidget(reflect_button)
+        clear_reflection = QPushButton("Clear Line Reflection")
+        clear_reflection.clicked.connect(self.clear_line_reflection)
+        v.addWidget(clear_reflection)
 
         box, v = collapsible_group("Optics / Lens", layout)
         self.lens_auto_cb = QCheckBox("Try Lensfun auto-correction (if installed)")
@@ -4585,6 +4626,51 @@ class PhotoLab(QMainWindow):
             self.render_preview()
             self.statusBar().showMessage("Distraction corrections added to the image recipe", 5000)
 
+    def open_line_reflection(self):
+        if self.original_bgr is None or self.current_path is None:
+            self.statusBar().showMessage("Open an image before drawing a reflection", 5000)
+            return
+        # Flush any slider edit before the dialog creates its single history step.
+        pending = getattr(self, "_pending_history_label", None)
+        if pending:
+            self._push_history(pending)
+            self._pending_history_label = None
+        recipe = self.recipes[self.current_path]
+        base_recipe = copy.deepcopy(recipe)
+        base_recipe.line_reflection_points = []
+        source = self.original_bgr
+        h, w = source.shape[:2]
+        if max(h, w) > 1200:
+            source = cv2.resize(source, (max(2, round(w*1200/max(h, w))),
+                                         max(2, round(h*1200/max(h, w)))), interpolation=cv2.INTER_AREA)
+        meta = self.meta_cache.get(self.current_path, {})
+        try:
+            developed = apply_recipe(source, base_recipe,
+                                     wb_multipliers=meta.get("wb_multipliers"), meta=meta)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reflection Under a Line", f"Could not prepare preview:\n{exc}")
+            return
+        dialog = ReflectionDialog(self, developed, recipe)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.recipes[self.current_path] = dialog.recipe
+            self._push_history("Reflection under a line")
+            self.render_preview()
+            self.statusBar().showMessage("Reflection applied. Use Undo / Redo or Draw / Edit Reflection to refine.", 6000)
+
+    def clear_line_reflection(self):
+        if self.current_path is None:
+            return
+        recipe = self.recipes[self.current_path]
+        if not recipe.line_reflection_points:
+            return
+        pending = getattr(self, "_pending_history_label", None)
+        if pending:
+            self._push_history(pending)
+            self._pending_history_label = None
+        recipe.line_reflection_points = []
+        self._push_history("Clear line reflection")
+        self.render_preview()
+
     def open_restoration_studio(self):
         """Open old-photo restoration; results are always saved as a new file."""
         if self.original_bgr is None or self.current_path is None:
@@ -4754,6 +4840,15 @@ class PhotoLab(QMainWindow):
         self.crop_tool_btn.setChecked(False)
         self.preview.set_crop_mode(False)
         self.render_preview()
+
+    def _on_grid_options(self, *_):
+        kind = self.grid_combo.currentData()
+        perspective = kind in ("one", "two", "three")
+        self.grid_density.setEnabled(kind not in ("thirds", "phi"))
+        self.grid_horizon.setEnabled(perspective)
+        self.grid_center.setEnabled(perspective)
+        self.preview.set_grid_options(kind, self.grid_density.value(),
+                                      self.grid_horizon.value()/100., self.grid_center.value()/100.)
 
     def _on_show_grid_toggled(self, checked):
         if hasattr(self, "preview"):
@@ -5133,7 +5228,8 @@ class PhotoLab(QMainWindow):
                 "horizon", "distortion", "perspective", "perspective_horizontal",
                 "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
                 "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
-                "keystone_points", "geometry_auto_crop",
+                "keystone_points", "geometry_auto_crop", "line_reflection_points",
+                "line_reflection_side", "line_reflection_opacity", "line_reflection_feather",
                 "crop", "ca_amount", "lens_auto",
             ]
             local_keys = ["local_points", "gradients", "brush_masks"]
@@ -5229,7 +5325,8 @@ class PhotoLab(QMainWindow):
                 "horizon", "distortion", "perspective", "perspective_horizontal",
                 "warp_top", "warp_bottom", "warp_left", "warp_right", "wide_angle",
                 "diorama_strength", "diorama_position", "diorama_width", "diorama_angle",
-                "keystone_points", "geometry_auto_crop",
+                "keystone_points", "geometry_auto_crop", "line_reflection_points",
+                "line_reflection_side", "line_reflection_opacity", "line_reflection_feather",
                 "crop", "ca_amount", "lens_auto",
             ],
             "local": ["local_points", "gradients", "brush_masks", "mask_library"],

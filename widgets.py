@@ -6,6 +6,7 @@ import math
 import uuid
 import cv2
 import numpy as np
+from geometry_guides import guide_segments
 from PyQt6.QtCore import Qt, QRect, QPoint, QPointF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QMouseEvent, QPainterPath, QRadialGradient, QPolygon
 from PyQt6.QtWidgets import QWidget, QLabel, QSlider, QGridLayout, QDoubleSpinBox, QSizePolicy, QStyle, QStyleOptionSpinBox
@@ -533,6 +534,10 @@ class ImageCanvas(QWidget):
         self._grad_drag = None  # None | 'new' | 'p0' | 'p1' | 'line'
         self._grad_temp = None
         self.show_grid = False
+        self.grid_kind = "thirds"
+        self.grid_density = 10
+        self.grid_horizon = 0.4
+        self.grid_center = 0.5
         self.show_spiral = False
         # Composition guide color: 'yellow' | 'white' | 'cyan' | 'black'
         self.guide_color = "yellow"
@@ -661,6 +666,13 @@ class ImageCanvas(QWidget):
 
     def set_show_grid(self, enabled: bool):
         self.show_grid = bool(enabled)
+        self.update()
+
+    def set_grid_options(self, kind, density=10, horizon=0.4, center=0.5):
+        self.grid_kind = kind
+        self.grid_density = density
+        self.grid_horizon = horizon
+        self.grid_center = center
         self.update()
 
     def set_guide_color(self, name: str):
@@ -932,16 +944,19 @@ class ImageCanvas(QWidget):
                 ix0, iy0, sw, sh = rect.left(), rect.top(), rect.width(), rect.height()
                 g_line, g_center, _, _ = self._guide_colors()
                 painter.setPen(QPen(g_line, 1, Qt.PenStyle.SolidLine))
-                for frac in (1 / 3, 2 / 3):
-                    x = ix0 + int(sw * frac)
-                    y = iy0 + int(sh * frac)
-                    painter.drawLine(x, iy0, x, iy0 + sh)
-                    painter.drawLine(ix0, y, ix0 + sw, y)
-                painter.setPen(QPen(g_center, 1, Qt.PenStyle.DashLine))
-                cx = ix0 + sw // 2
-                cy = iy0 + sh // 2
-                painter.drawLine(cx, iy0, cx, iy0 + sh)
-                painter.drawLine(ix0, cy, ix0 + sw, cy)
+                painter.save()
+                painter.setClipRect(rect)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                for x0, y0, x1, y1 in guide_segments(
+                    self.grid_kind, sw, sh, self.grid_density,
+                    self.grid_horizon, self.grid_center,
+                ):
+                    painter.drawLine(QPointF(ix0+x0, iy0+y0), QPointF(ix0+x1, iy0+y1))
+                painter.restore()
+                if self.grid_kind == "thirds":
+                    painter.setPen(QPen(g_center, 1, Qt.PenStyle.DashLine))
+                    painter.drawLine(ix0 + sw//2, iy0, ix0 + sw//2, iy0 + sh)
+                    painter.drawLine(ix0, iy0 + sh//2, ix0 + sw, iy0 + sh//2)
                 painter.setPen(QPen(g_line, 1))
                 painter.drawRect(ix0, iy0, sw - 1, sh - 1)
             

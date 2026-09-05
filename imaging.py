@@ -223,6 +223,10 @@ class Recipe:
     diorama_angle: float = 0.0
     keystone_points: list = field(default_factory=list)  # normalized TL,TR,BR,BL source quad
     geometry_auto_crop: bool = False
+    line_reflection_points: list = field(default_factory=list)  # normalized endpoints on developed image
+    line_reflection_side: int = -1
+    line_reflection_opacity: float = 100.0
+    line_reflection_feather: float = 0.0
     crop: Optional[Tuple[float, float, float, float]] = field(default=None)
 
     clearview: float = 0.0
@@ -2608,6 +2612,13 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
             working = apply_distraction_operations(working, operations)
         img = np.clip(working, 0, 1)
 
+    if getattr(r, "line_reflection_points", None):
+        from line_reflection import reflect_under_line
+        img = reflect_under_line(
+            img, r.line_reflection_points, getattr(r, "line_reflection_side", -1),
+            getattr(r, "line_reflection_opacity", 100.0),
+            getattr(r, "line_reflection_feather", 0.0),
+        )
     return _float01_to_dtype(img, output_dtype)
 
 
