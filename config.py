@@ -35,6 +35,7 @@ _DEFAULTS: Dict[str, Dict[str, str]] = {
         "argyllcms_dir": "",
         "focus_stacker_pro": "",
         "ai_restoration_model_pack": "",
+        "nikon_sdk": "",
     },
     "performance": {
         "max_raw_workers": "2",

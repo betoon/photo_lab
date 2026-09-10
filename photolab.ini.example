@@ -5,6 +5,7 @@
 ; Never commit real api_key or serial values to git.
 
 [paths]
+nikon_sdk =
 plugin_dir =
 docs_dir =
 lensfun_dir =

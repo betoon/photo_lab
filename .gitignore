@@ -46,6 +46,7 @@ lensfun/ChangeLog
 *.tar.gz
 
 # Platform build products are release artifacts, not source.
+tools/nikon_decoder.exe
 build/
 dist/
 

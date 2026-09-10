@@ -60,7 +60,14 @@ def _ai_pack_candidates():
     yield os.path.join(_app_root(), "ai_restoration_model_pack")
 
 
+def _nikon_sdk_candidates():
+    from nikon_raw import sdk_candidates
+    yield from (str(path) for path in sdk_candidates())
+
+
 PATH_SPECS = (
+    PathSpec("nikon_sdk", "Nikon Image SDK", "folder",
+             "Image SDK folder for direct Nikon NEF RAW decoding.", _nikon_sdk_candidates),
     PathSpec("plugin_dir", "Plugin / presets folder", "folder",
              "JSON and XMP presets available to PhotoLab.", _plugin_candidates),
     PathSpec("argyllcms_dir", "ArgyllCMS bin folder", "folder",

@@ -689,6 +689,15 @@ def load_image(path: str, use_camera_wb: bool = True, output_bps: Optional[int] 
                 except Exception as e2:
                     raw_failure = e2
                     print(f"rawpy retry failed for {path}: {e2}")
+    if img_bgr is None and os.path.splitext(path)[1].lower() in (".nef", ".nrw"):
+        try:
+            from nikon_raw import decode_nef
+            img_bgr = decode_nef(path, decode_bps)
+            meta.update({"is_raw": True, "wb_baked": True,
+                         "decode_bps": decode_bps, "raw_decoder": "nikon_sdk"})
+        except Exception as sdk_error:
+            log.warning("Nikon SDK could not decode %s: %s", path, sdk_error)
+            raw_failure = RuntimeError(f"{raw_failure}; Nikon SDK: {sdk_error}")
     if img_bgr is None:
         if is_raw(path):
             # Some cameras expose a full-size embedded JPEG even when LibRaw

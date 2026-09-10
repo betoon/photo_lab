@@ -46,7 +46,12 @@ if os.path.isfile("README.md"):
 if os.path.isfile("PACKAGING.md"):
     datas.append(("PACKAGING.md", "."))
 
+nikon_helper = os.path.join("tools", "nikon_decoder.exe")
+if os.path.isfile(nikon_helper):
+    datas.append((nikon_helper, "tools"))
+
 hiddenimports = [
+    "nikon_raw",
     "rawpy",
     "PIL",
     "PIL.Image",

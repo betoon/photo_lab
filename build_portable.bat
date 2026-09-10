@@ -16,6 +16,11 @@ if errorlevel 1 (
 if not exist plugin mkdir plugin
 if not exist docs mkdir docs
 
+if exist "..\nikon_sdk\Image SDK\Library\win\Include\Nkfl_Interface.h" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_nikon_decoder.ps1
+  if errorlevel 1 exit /b 1
+)
+
 echo Building (one-folder)...
 python -m PyInstaller --noconfirm --clean focus_stacker_pro.spec
 if errorlevel 1 (
