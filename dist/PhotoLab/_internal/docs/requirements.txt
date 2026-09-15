@@ -1,11 +1,13 @@
 # PhotoLab dependencies
 PyQt6>=6.5
+PySide6>=6.5
 opencv-python>=4.8
 numpy>=1.24
 Pillow>=10.0
 rawpy>=0.19
 pydub>=0.25
 ExifRead>=3.0
+tifffile>=2024.1
 
 # Optional
 # lensfunpy>=1.0   # Lensfun geometry correction

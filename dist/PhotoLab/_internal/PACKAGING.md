@@ -1,5 +1,10 @@
 # Packaging PhotoLab
 
+AI restoration models are intentionally not bundled. A portable installation may
+point to an external model-pack folder through the Configuration / INI Editor. This
+keeps the standard build smaller and avoids silently redistributing third-party model
+weights with separate licenses. See `docs/AI_MODEL_PACK.md`.
+
 ## Portable build (recommended)
 
 ```bash
@@ -9,6 +14,9 @@ build_portable.bat
 # Linux / macOS
 chmod +x build_portable.sh
 ./build_portable.sh
+
+# Reproducible Linux x86_64 build from Windows (Docker Desktop)
+build_linux_docker.bat
 ```
 
 Or manually:
@@ -24,6 +32,10 @@ Bundled with the build:
 
 - `docs/` — user & developer manuals (Help menu)
 - `plugin/` — JSON / Lightroom-style presets
+- `assets/fonts/` — Michroma display font and its SIL Open Font License
+- `lensfun/data/db/` — bundled Lensfun correction database
+- `focus_stacker_pro/` — bundled Focus Stacker Pro integration
+- `photolab.ini.example` — machine-neutral configuration example
 
 ## ffmpeg (Panorama to Video)
 

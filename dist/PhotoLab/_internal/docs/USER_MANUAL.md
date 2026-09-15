@@ -1,5 +1,22 @@
 # PhotoLab User Manual
 
+## Restore & Colorize
+
+Choose **Image → Restore & Colorize** for old prints, damaged scans, and optional
+local-AI interpretation. Restoration Studio works without AI and provides automatic
+crease/scratch masks, a repair-mask brush, tear joining, content-aware filling,
+stain and paper-texture suppression, fading and silvering correction, mild Wiener
+deblur, and grain-aware denoise/detail recovery. Compare Original, Restored Preview,
+and Repair Mask before applying. PhotoLab always saves the result as a new file.
+
+AI Restoration Lab is disabled until an external model-pack folder is selected in
+the Configuration / INI Editor. Compatible local providers may offer colorization,
+face restoration, reconstruction, enhancement, or super-resolution. Fidelity,
+candidate count, blending, selective repair-mask application, and a heuristic
+confidence view are provided. AI can invent identity, texture, objects, and color;
+automatic colorization is plausible interpretation rather than historical evidence.
+See `docs/AI_MODEL_PACK.md` for the provider protocol.
+
 PhotoLab is a non-destructive photo editor inspired by applications such as DxO PhotoLab. Edits are stored as a *recipe* and applied on demand—your original files stay untouched.
 
 ---
@@ -420,6 +437,15 @@ Requires `pano_video.py` (and optionally `audio_editor.py`) next to PhotoLab, pl
 
 ## Focus Stack
 
+### Local application paths
+
+Use **Tools → Configuration / INI Editor…** to configure the plugin folder,
+ArgyllCMS `bin` folder, Lensfun database, and Focus Stacker Pro. **Apply** saves
+the machine-specific values to `~/.photolab/photolab.ini`; leave a field empty
+to use automatic discovery. The editor can validate entries, open their folders,
+reset them to automatic defaults, and reveal the INI file location. Missing
+optional tools are reported but do not prevent PhotoLab from starting.
+
 Combine a near-to-far (or far-to-near) focus bracket into one sharp image:
 
 1. Open a folder of focus frames (or multi-select in the filmstrip).  
@@ -659,3 +685,71 @@ Number keys **0–5** set star rating (so 1:1 zoom uses **Ctrl+1**).
 - Presets: Milky Way, DSO soft
 
 These are stored in the recipe sidecar like any other edit. Full calibration stacking (darks/flats) can be added later.
+
+## Remove Distractions workspace
+
+Open a photograph and choose **Image → Remove Distractions…** or **Tools ▾ → Remove
+Distractions…** (`Ctrl+Shift+R`). The workspace applies nothing permanently to the
+source. Choose **Apply to Recipe** to add the correction instructions to PhotoLab's
+sidecar recipe; Cancel leaves the recipe unchanged.
+
+### 1 — Manual cleanup
+
+- **Heal:** set Brush size and click dust, a small blemish, or a tiny unwanted
+  object. PhotoLab fills it from the surrounding texture.
+- **Clone:** click a clean source first, then click the distraction. A feathered
+  copy of the source covers the destination.
+- **Content-Aware:** click a small object to replace the brush-sized region from
+  its surroundings.
+- **Wire / Hair:** click the two ends of a thin wire, hair, or scratch. Use several
+  shorter segments for a curved line.
+
+Use **Removal Mask** to inspect exactly what will be replaced. **Undo** reverses the
+last group of marks; **Clear All** removes all cleanup marks in this workspace. Keep
+brush sizes only slightly larger than the distraction to protect fine detail.
+
+### 2 — Sensor dust
+
+**Detect on This Image** finds compact light or dark spots that differ from their
+local background. Increase Sensitivity if obvious spots are missed; decrease it if
+natural texture is selected. Largest spot prevents broad features from being marked.
+
+**Build Reusable Folder Dust Map** compares equal-sized images and keeps spots that
+recur at fixed sensor coordinates. Select images from the same camera, orientation,
+crop, and pixel dimensions. Five or more photographs with varied content normally
+produce a safer map. Save or load the result as a PhotoLab JSON dust map. Always
+inspect the mask because a stationary scene feature can otherwise receive votes.
+
+### 3 — Reflection layer
+
+Enable the editable reflection layer, then inspect **Reflection Mask**. Controls
+adjust detection sensitivity, opacity, highlights, saturation, color neutrality,
+local contrast, and mask softness. This can reduce glare and veiling contrast, but
+a single image cannot recover detail that a reflection completely obscured.
+
+Choose **Paint into mask** and click missed reflections, or **Erase from mask** and
+click protected detail that was selected incorrectly. Brush size controls each dab;
+Undo removes the most recent reflection-mask dab while the Reflection tab is active.
+These painted changes are stored as normalized recipe strokes and replay at export.
+
+**Separate Reflections from Several Images** is intended for tripod photographs in
+which the reflection changes, such as after moving a light or rotating a polarizer.
+PhotoLab aligns the frames and saves a clean-base estimate, reflection layer,
+reflection and confidence masks, and a JSON alignment report. Open the saved base
+image to continue editing. This is experimental; parallax, motion, or clipped
+highlights can leave artifacts.
+
+### 4 — Smart and line removal
+
+**Start Smart Selection** asks for two opposite corners around a larger unwanted
+object. Leave some background inside the rectangle, then review Removal Mask. Large
+objects crossing faces, text, or repeating geometry usually need clone cleanup.
+
+**Detect Straight Wires / Hairs** proposes strong straight line segments. It can
+also select architectural edges, so mask review is essential.
+
+### Suggested order
+
+Perform lens correction and geometry first, then distraction removal, normal tonal
+and color work, and final sharpening last. At export PhotoLab replays normalized
+marks at output resolution while preserving the original photograph.
