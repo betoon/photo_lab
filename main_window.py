@@ -107,16 +107,17 @@ class PresetBrowserDialog(QDialog):
         hdr.setStyleSheet("font-size:16px; font-weight:700; color:#eee;")
         root.addWidget(hdr)
 
-        path_row = QHBoxLayout()
-        self.path_lbl = QLabel(self._plugin_dir or "(no plugin folder)")
-        self.path_lbl.setStyleSheet("color:#888; font-size:11px;")
-        self.path_lbl.setWordWrap(True)
-        path_row.addWidget(self.path_lbl, 1)
-        browse_btn = QPushButton("Folder…")
-        browse_btn.setToolTip("Choose another preset folder")
-        browse_btn.clicked.connect(self._pick_folder)
-        path_row.addWidget(browse_btn)
-        root.addLayout(path_row)
+        folder_row = QHBoxLayout()
+        folder_label = QLabel("Preset folder")
+        folder_row.addWidget(folder_label)
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("All categories", "all")
+        self.category_combo.addItem("Favorites", "favorites")
+        self.category_combo.setToolTip("Choose a preset category to browse inside PhotoLab")
+        folder_label.setBuddy(self.category_combo)
+        self.category_combo.currentIndexChanged.connect(self._filter)
+        folder_row.addWidget(self.category_combo, 1)
+        root.addLayout(folder_row)
 
         filt_row = QHBoxLayout()
         self.search = QLineEdit()
@@ -129,11 +130,6 @@ class PresetBrowserDialog(QDialog):
         self.type_combo.addItem("XMP", "xmp")
         self.type_combo.currentIndexChanged.connect(self._filter)
         filt_row.addWidget(self.type_combo)
-        self.category_combo = QComboBox()
-        self.category_combo.addItem("All categories", "all")
-        self.category_combo.addItem("Favorites", "favorites")
-        self.category_combo.currentIndexChanged.connect(self._filter)
-        filt_row.addWidget(self.category_combo)
         root.addLayout(filt_row)
 
         self.list = QListWidget()
@@ -362,15 +358,6 @@ class PresetBrowserDialog(QDialog):
     def _accept_item(self, item):
         self.selected_path = item.data(Qt.ItemDataRole.UserRole)
         self.accept()
-
-    def _pick_folder(self):
-        d = QFileDialog.getExistingDirectory(self, "Preset folder", self._plugin_dir or "")
-        if d:
-            self._plugin_dir = d
-            self.path_lbl.setText(d)
-            self.reload()
-
-
 
 class PhotoLab(QMainWindow):
     def __init__(self):
