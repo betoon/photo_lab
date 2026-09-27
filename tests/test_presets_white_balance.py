@@ -45,6 +45,20 @@ def test_absolute_xmp_wb_is_applied(tmp_path):
     assert result.wb_as_shot is False
 
 
+@pytest.mark.parametrize("attrs", ['crs:ConvertToGrayscale="False"', 'crs:Treatment="Color"'])
+def test_color_preset_clears_previous_monochrome_without_mutating_base(tmp_path, attrs):
+    base = Recipe(black_and_white=True, exposure=0.5)
+    result = xmp_to_recipe(_xmp(tmp_path, attrs), base=base)
+    assert result.black_and_white is False
+    assert result.exposure == 0.5
+    assert base.black_and_white is True
+
+
+def test_preset_without_treatment_preserves_monochrome(tmp_path):
+    result = xmp_to_recipe(_xmp(tmp_path, 'crs:Contrast2012="15"'), base=Recipe(black_and_white=True))
+    assert result.black_and_white is True
+
+
 def test_baked_raw_camera_wb_is_not_applied_twice():
     src = np.full((12, 12, 3), 128, dtype=np.uint8)
     multipliers = [2.0, 1.0, 1.5, 1.0]

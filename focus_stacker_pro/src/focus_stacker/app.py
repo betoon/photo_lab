@@ -912,7 +912,7 @@ def main(argv=None) -> int:
         QPushButton:disabled { background: #253047; color: #64748b; border-color: #334155; }
         QPlainTextEdit#debugConsole {
             background: #050b14; color: #86efac; border: 1px solid #0e7490; border-radius: 8px;
-            padding: 12px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 10pt;
+            padding: 12px; font-family: "Segoe UI", sans-serif; font-size: 10pt;
             selection-background-color: #164e63; selection-color: white;
         }
         QProgressBar {

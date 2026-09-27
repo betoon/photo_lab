@@ -35,13 +35,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("PhotoLab")
-    # Register the bundled display face before constructing any widgets. Dense
-    # controls remain Segoe UI; Michroma is reserved for PhotoLab identity.
-    try:
-        from branding import load_brand_font
-        load_brand_font()
-    except Exception:
-        pass
+    from branding import DEFAULT_UI_FAMILY
     try:
         from config import get_config
         from accessibility import clamp_ui_scale
@@ -51,14 +45,14 @@ def main():
     # Construct the font with a valid point size from the outset.  On some
     # Windows laptop DPI configurations, creating a family-only QFont briefly
     # leaves it at -1 and the platform style reports setPointSize(-1).
-    font = QFont("Segoe UI", max(1, int(round(10.0 * interface_scale))))
+    font = QFont(DEFAULT_UI_FAMILY, max(1, int(round(10.0 * interface_scale))))
     app.setFont(font)
 
     # Import widgets only after QApplication and its valid default font exist.
     from main_window import PhotoLab
 
     win = PhotoLab()
-    win.show()
+    win.showMaximized()
     sys.exit(app.exec())
 
 

@@ -232,8 +232,11 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     # B&W
     bw = g("ConvertToGrayscale", "Treatment")
     if bw is not None:
-        if str(bw).lower() in ("true", "1", "blackandwhite", "black & white"):
+        treatment = str(bw).strip().lower()
+        if treatment in ("true", "1", "blackandwhite", "black & white"):
             r.black_and_white = True
+        elif treatment in ("false", "0", "color", "colour"):
+            r.black_and_white = False
 
     # HSL — HueAdjustmentRed etc. / SaturationAdjustmentRed / LuminanceAdjustmentRed
     hsl_map = [

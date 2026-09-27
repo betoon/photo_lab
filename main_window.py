@@ -44,6 +44,7 @@ from catalog import Catalog
 import sys
 from datetime import datetime
 from accessibility import clamp_ui_scale, scale_font_sizes, UI_SCALE_STEP
+from branding import DEFAULT_UI_FAMILY
 from distraction_dialog import DistractionDialog
 from restoration_dialog import RestorationStudioDialog
 from reflection_dialog import ReflectionDialog
@@ -358,7 +359,7 @@ class PhotoLab(QMainWindow):
             from PyQt6.QtGui import QFont as _QF
             _f = self.font()
             if _f.pointSizeF() <= 0:
-                _f = _QF("Segoe UI", max(1, int(round(10.0 * self._ui_scale))))
+                _f = _QF(DEFAULT_UI_FAMILY, max(1, int(round(10.0 * self._ui_scale))))
                 self.setFont(_f)
         except Exception:
             pass
@@ -424,13 +425,9 @@ class PhotoLab(QMainWindow):
 
     # ------------------------------------------------------------------
     def _stylesheet(self):
-        try:
-            from branding import brand_font_family
-            brand_family = brand_font_family().replace('"', '')
-        except Exception:
-            brand_family = "Segoe UI"
+        brand_family = DEFAULT_UI_FAMILY
         css = """
-            QMainWindow, QWidget { background: #181818; color: #ddd; letter-spacing: 0px; }
+            QMainWindow, QWidget { background: #181818; color: #ddd; letter-spacing: 0px; font-family: "__PHOTOLAB_BRAND_FONT__"; }
             QGroupBox, QGroupBox::title, QLabel { letter-spacing: 0px; }
             QLabel { color: #ccc; }
             QPushButton, QToolButton {
@@ -442,10 +439,10 @@ class PhotoLab(QMainWindow):
             QPushButton:pressed, QToolButton:pressed { background: #1f1f1f; }
             QPushButton:checked, QToolButton:checked {
                 background: #2a6ad4; color: #fff; border-color: #2a6ad4; font-weight: 600;
-                font-family: "__PHOTOLAB_BRAND_FONT__"; font-size: 9px;
+                font-size: 11px;
             }
             QGroupBox::title, QDockWidget::title {
-                font-family: "__PHOTOLAB_BRAND_FONT__"; font-size: 9px;
+                font-size: 11px;
                 color: #e8edf6;
             }
             
@@ -520,7 +517,7 @@ class PhotoLab(QMainWindow):
                 border: 1px solid #3b3b3b; border-bottom: none;
                 padding: 7px 13px; margin-right: 2px;
                 border-top-left-radius: 5px; border-top-right-radius: 5px;
-                font-family: "__PHOTOLAB_BRAND_FONT__"; font-size: 9px;
+                font-size: 11px;
             }
             QTabWidget#RestorationWorkspaceTabs QTabBar::tab { min-width: 150px; }
             QTabBar::tab:hover { background: #343434; color: #ffffff; }
@@ -562,10 +559,14 @@ class PhotoLab(QMainWindow):
             pass
         app = QApplication.instance()
         if app is not None:
-            font = QFont("Segoe UI", max(1, int(round(10.0 * self._ui_scale))))
+            font = QFont(DEFAULT_UI_FAMILY, max(1, int(round(10.0 * self._ui_scale))))
             app.setFont(font)
             self.setFont(font)
         self.setStyleSheet(self._stylesheet())
+        if hasattr(self, "corrections_panel"):
+            panel_width = int(round(340 + 100 * (self._ui_scale - 1.0)))
+            self.corrections_panel.setMinimumWidth(max(340, panel_width))
+            self.corrections_panel.setMaximumWidth(max(380, panel_width + 40))
         if announce and self.statusBar():
             self.statusBar().showMessage(f"Interface text scale: {self._ui_scale:.0%}")
 
@@ -857,11 +858,11 @@ class PhotoLab(QMainWindow):
         lines = md.splitlines()
         out = [
             "<html><head><style>"
-            "body{font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#ddd;background:#1a1a1a;padding:12px;}"
+            "body{font-family:Segoe UI;font-size:13px;color:#ddd;background:#1a1a1a;padding:12px;}"
             "h1{color:#fff;font-size:22px;border-bottom:1px solid #444;padding-bottom:6px;}"
             "h2{color:#9cf;font-size:17px;margin-top:1.2em;}"
             "h3{color:#bde;font-size:14px;}"
-            "code,pre{font-family:Consolas,monospace;background:#111;color:#cfc;}"
+            "code,pre{font-family:Segoe UI;background:#111;color:#cfc;}"
             "pre{padding:8px;border:1px solid #333;overflow-x:auto;}"
             "table{border-collapse:collapse;margin:8px 0;}"
             "th,td{border:1px solid #444;padding:4px 8px;}"
@@ -1149,7 +1150,7 @@ class PhotoLab(QMainWindow):
         self.debug_console.setMaximumBlockCount(5000)
         self.debug_console.setStyleSheet(
             "QPlainTextEdit { background:#0e0e0e; color:#b0e0b0; "
-            "font-family: Consolas, 'Courier New', monospace; font-size:11px; border:1px solid #333; }"
+            "font-family: 'Segoe UI'; font-size:11px; border:1px solid #333; }"
         )
         v.addWidget(self.debug_console)
         btn_row = QHBoxLayout()
@@ -1226,6 +1227,8 @@ class PhotoLab(QMainWindow):
         outer.setSpacing(0)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.develop_splitter = splitter
+        splitter.setChildrenCollapsible(False)
         outer.addWidget(splitter, stretch=1)
 
         # LEFT: histogram + navigator + history (DxO-style)
@@ -1381,6 +1384,7 @@ class PhotoLab(QMainWindow):
 
         # RIGHT: DxO-style tool panel
         right = QWidget()
+        self.corrections_panel = right
         # Keep correction controls readable when interface text scaling is used.
         # The category selector below wraps, so this only needs a modest growth
         # rather than consuming the image-preview area at large text sizes.
@@ -1406,6 +1410,11 @@ class PhotoLab(QMainWindow):
         self.search_edit.setPlaceholderText("Search for corrections…")
         self.search_edit.textChanged.connect(self._filter_corrections)
         rl.addWidget(self.search_edit)
+        self.search_edit.setClearButtonEnabled(True)
+        self.correction_search_hint = QLabel("No matching corrections")
+        self.correction_search_hint.setWordWrap(True)
+        self.correction_search_hint.hide()
+        rl.addWidget(self.correction_search_hint)
 
         # Category tabs (Light / Color / Detail / Geometry / Effects)
         # DxO-style category selector.  A fixed single row overflowed the
@@ -1462,6 +1471,12 @@ class PhotoLab(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
+        # Child size hints can exceed the sidebars' maximum widths. Letting
+        # QSplitter seed its sizes from those hints reserves blank gutters
+        # beside the capped widgets. Start from widths inside their bounds;
+        # the expanding preview receives all additional desktop space.
+        sidebar_width = max(340, panel_width)
+        splitter.setSizes([260, max(200, self.width() - 260 - sidebar_width - 8), sidebar_width])
 
         # Filmstrip
         film_box = QGroupBox("Filmstrip")
@@ -2700,8 +2715,61 @@ class PhotoLab(QMainWindow):
         self.render_preview()
 
     def _filter_corrections(self, text: str):
-        # Simple: could hide groups whose title doesn't match
-        pass
+        """Find correction groups across categories without changing edits."""
+        query = text.strip().casefold()
+        saved = getattr(self, "_correction_search_state", None)
+        if not query:
+            if saved is not None:
+                for group, hidden in saved["groups"].items():
+                    group.setVisible(not hidden)
+                for button in self._cat_buttons:
+                    button.setEnabled(True)
+                index = saved["index"]
+                self.tool_stack.setCurrentIndex(index)
+                self._cat_buttons[index].setChecked(True)
+                self._correction_search_state = None
+            self.correction_search_hint.hide()
+            return
+
+        if saved is None:
+            groups = {}
+            for index in range(self.tool_stack.count()):
+                for group in self.tool_stack.widget(index).findChildren(QGroupBox):
+                    parent = group.parentWidget()
+                    while parent is not None and not isinstance(parent, QGroupBox):
+                        parent = parent.parentWidget()
+                    if parent is None:
+                        groups[group] = group.isHidden()
+            saved = {"groups": groups, "index": self.tool_stack.currentIndex()}
+            self._correction_search_state = saved
+
+        matches = {}
+        for index in range(self.tool_stack.count()):
+            page = self.tool_stack.widget(index)
+            for group, hidden in saved["groups"].items():
+                if not page.isAncestorOf(group):
+                    continue
+                words = [group.title()]
+                for child in group.findChildren(QWidget):
+                    if isinstance(child, (QLabel, QPushButton, QCheckBox)):
+                        words.append(child.text())
+                    elif isinstance(child, QGroupBox):
+                        words.append(child.title())
+                    elif isinstance(child, QComboBox):
+                        words.extend(child.itemText(i) for i in range(child.count()))
+                matched = not hidden and query in " ".join(words).casefold()
+                group.setVisible(matched)
+                if matched:
+                    matches.setdefault(index, group)
+            self._cat_buttons[index].setEnabled(index in matches)
+        self.correction_search_hint.setVisible(not matches)
+        if matches:
+            index = self.tool_stack.currentIndex()
+            if index not in matches:
+                index = next(iter(matches))
+            self.tool_stack.setCurrentIndex(index)
+            self._cat_buttons[index].setChecked(True)
+            self.tool_stack.widget(index).ensureWidgetVisible(matches[index])
 
     # ------------------------------------------------------------------
     # Folder / load
@@ -4923,9 +4991,13 @@ class PhotoLab(QMainWindow):
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
-            self.showNormal()
+            if getattr(self, "_maximized_before_fullscreen", False):
+                self.showMaximized()
+            else:
+                self.showNormal()
             self.statusBar().showMessage("Exited full screen")
         else:
+            self._maximized_before_fullscreen = self.isMaximized()
             self.showFullScreen()
             self.statusBar().showMessage("Full screen — press F11 to exit")
 
