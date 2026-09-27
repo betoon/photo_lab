@@ -37,3 +37,10 @@ Include this directory in your packager data files, for example PyInstaller:
 ```
 
 See `docs/DEVELOPER_MANUAL.md` → Packaging.
+
+
+## Browsing by folder
+
+Presets are grouped by HDR subject, film type, camera/lens looks, infrared, astronomy, architecture, landscape, monochrome, cinema, vintage, and adjustments. Ambiguous standalone looks remain at the root and appear as Uncategorized. The browser opens Uncategorized initially and remembers the last chosen category; All categories and Favorites remain available. Nested folder names remain distinct. Numbered looks sort numerically. Folder imports include subfolders.
+
+`preset-folders.tsv` records original and new relative paths so existing favorites follow the organized files. Preset contents have not changed.

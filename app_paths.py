@@ -96,14 +96,16 @@ def ensure_plugin_dir() -> str:
 
 
 def list_bundled_presets() -> List[str]:
-    """All .json / .xmp files in the plugin folder (non-recursive)."""
+    """All .json / .xmp files, including preset category subfolders."""
     d = plugin_dir()
     out: List[str] = []
     if not os.path.isdir(d):
         return out
-    for name in sorted(os.listdir(d)):
-        if name.lower().endswith((".json", ".xmp")):
-            out.append(os.path.join(d, name))
+    for directory, folders, files in os.walk(d):
+        folders.sort(key=str.lower)
+        for name in sorted(files, key=str.lower):
+            if name.lower().endswith((".json", ".xmp")):
+                out.append(os.path.join(directory, name))
     return out
 
 

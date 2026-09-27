@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import json
 import uuid
+import re
 import copy
 from collections import OrderedDict
 import cv2
@@ -222,7 +223,7 @@ class PresetBrowserDialog(QDialog):
                 files.extend(list_preset_files(d, recursive=True))
             except Exception:
                 pass
-        # de-dupe by basename preference for plugin dir order
+        # De-duplicate overlapping roots by full path.
         seen = set()
         unique = []
         for f in files:
@@ -231,10 +232,34 @@ class PresetBrowserDialog(QDialog):
                 continue
             seen.add(key)
             unique.append(f)
-        unique.sort(key=lambda p: os.path.basename(p).lower())
+        unique.sort(key=lambda p: [int(t) if t.isdigit() else t
+                                  for t in re.split(r"(\d+)", os.path.basename(p).lower())])
         self._all_files = unique
-        current = self.category_combo.currentData()
-        categories = sorted({os.path.basename(os.path.dirname(p)) for p in unique if os.path.dirname(p)})
+        # Keep complete relative folder names; nested folders may share a name.
+        self._categories = {}
+        for path in unique:
+            for directory in dirs:
+                relative = os.path.relpath(path, directory)
+                if relative != os.pardir and not relative.startswith(os.pardir + os.sep):
+                    self._categories[path] = os.path.dirname(relative).replace(os.sep, " / ") or "Uncategorized"
+                    break
+        # A shipped move manifest preserves favorites without guessing by name.
+        for directory in dirs:
+            manifest = os.path.join(directory, "preset-folders.tsv")
+            try:
+                with open(manifest, encoding="utf-8-sig") as stream:
+                    for line in stream:
+                        old, new = line.rstrip("\n").split("\t")
+                        old = os.path.normcase(os.path.abspath(os.path.join(directory, old)))
+                        new = os.path.normcase(os.path.abspath(os.path.join(directory, new)))
+                        if old in self._favorites and new in seen:
+                            self._favorites.remove(old)
+                            self._favorites.add(new)
+            except (OSError, ValueError):
+                pass
+        self._settings.setValue("preset_favorites", "\n".join(sorted(self._favorites)))
+        current = self._settings.value("preset_category", "Uncategorized")
+        categories = sorted(set(self._categories.values()))
         self.category_combo.blockSignals(True)
         self.category_combo.clear()
         self.category_combo.addItem("All categories", "all")
@@ -242,7 +267,7 @@ class PresetBrowserDialog(QDialog):
         for category in categories:
             self.category_combo.addItem(category, category)
         idx = self.category_combo.findData(current)
-        self.category_combo.setCurrentIndex(max(0, idx))
+        self.category_combo.setCurrentIndex(idx if idx >= 0 else (2 if categories else 0))
         self.category_combo.blockSignals(False)
         self._filter()
 
@@ -250,6 +275,7 @@ class PresetBrowserDialog(QDialog):
         q = (self.search.text() or "").strip().lower()
         kind = self.type_combo.currentData() or "all"
         category = self.category_combo.currentData() or "all"
+        self._settings.setValue("preset_category", category)
         self.list.clear()
         for path in self._all_files:
             name = os.path.basename(path)
@@ -261,7 +287,7 @@ class PresetBrowserDialog(QDialog):
                 continue
             if category == "favorites" and normalized not in self._favorites:
                 continue
-            if category not in ("all", "favorites") and os.path.basename(os.path.dirname(path)) != category:
+            if category not in ("all", "favorites") and self._categories.get(path) != category:
                 continue
             if q and q not in name.lower():
                 continue
@@ -7759,7 +7785,7 @@ class PhotoLab(QMainWindow):
         )
         if not folder:
             return
-        files = list_preset_files(folder)
+        files = list_preset_files(folder, recursive=True)
         if not files:
             QMessageBox.information(self, "Import Presets", "No .xmp or .json presets found in that folder.")
             return
