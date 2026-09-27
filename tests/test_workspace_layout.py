@@ -101,3 +101,27 @@ def test_correction_search_finds_other_categories_and_restores_view(window):
     assert window.tool_stack.currentIndex() == original
     assert all(button.isEnabled() for button in window._cat_buttons)
     assert window.correction_search_hint.isHidden()
+
+
+def test_xmp_application_updates_controls_and_reset_clears_imported_edits(window, tmp_path, monkeypatch):
+    import numpy as np
+    from imaging import Recipe
+    from tests.test_xmp_advanced import xmp, curve
+
+    window.current_path = 'test-photo'
+    window.original_bgr = np.full((24, 24, 3), 30, dtype=np.uint8)
+    window.recipes[window.current_path] = Recipe()
+    monkeypatch.setattr(window, 'render_preview', lambda: None)
+    path = xmp(tmp_path, 'crs:AutoTone="True" crs:Dehaze="-30" '
+               'crs:ColorGradeGlobalHue="40" crs:ColorGradeGlobalSat="25"',
+               curve('ToneCurvePV2012', ['0, 10', '255, 245']))
+    window._apply_preset_path(path)
+    recipe = window.recipes[window.current_path]
+    assert recipe.exposure > 0
+    assert window.sliders['clearview'].value() == -30
+    assert window.sliders['grade_global_sat'].value() == 25
+    assert window.color_grade_cb.isChecked()
+    window.reset_module('color')
+    assert not recipe.color_grade_enabled and recipe.grade_global_sat == 0
+    window.reset_module('tone')
+    assert recipe.curve_points == [] and recipe.curve_mode == 'luma'

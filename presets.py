@@ -10,17 +10,20 @@ from __future__ import annotations
 import os
 import re
 import copy
+import math
+import numpy as np
 import xml.etree.ElementTree as ET
 from typing import Optional, Tuple, List, Iterable
 
-from imaging import Recipe
+from imaging import Recipe, _image_to_float01, apply_white_balance, apply_creative_white_balance
+from xmp_support import GRADE_FIELDS, estimate_auto_tone
 
 
 PRESET_MODULE_FIELDS = {
     "Tone": (
         "exposure", "smart_light", "contrast", "highlights", "shadows", "whites", "blacks",
         "clarity", "gamma", "curve_shadows", "curve_darks", "curve_mids", "curve_lights",
-        "curve_highlights", "curve_points", "curve_r_points", "curve_g_points", "curve_b_points",
+        "curve_highlights", "curve_mode", "curve_points", "curve_r_points", "curve_g_points", "curve_b_points",
         "zone_enabled", "zone_placement", "zone_expansion", "zone_filter", "zone_snap", "zone_overlay",
         "zebra_threshold", "zebra_exposure", "zebra_feather",
     ),
@@ -29,7 +32,7 @@ PRESET_MODULE_FIELDS = {
         "vibrance", "saturation", "hsl_hue", "hsl_sat", "hsl_lum", "split_shadow_hue",
         "split_shadow_sat", "split_highlight_hue", "split_highlight_sat", "split_balance",
         "black_and_white", "ir_channel_swap", "ir_false_color", "ir_mono",
-    ),
+    ) + GRADE_FIELDS,
     "Detail": (
         "denoise_luminance", "denoise_chroma", "denoise_strength", "denoise_detail",
         "denoise_method", "noise_profile", "denoise_edge_preserve", "denoise_deband",
@@ -68,7 +71,8 @@ def _f(val, default=None) -> Optional[float]:
         return default
     try:
         s = str(val).strip().replace("+", "")
-        return float(s)
+        number = float(s)
+        return number if math.isfinite(number) else default
     except (TypeError, ValueError):
         return default
 
@@ -105,7 +109,8 @@ def _parse_xmp_text(text: str) -> dict:
     return found
 
 
-def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
+def xmp_to_recipe(path: str, base: Optional[Recipe] = None, *, image_bgr=None, meta=None,
+                  resolve_auto=True) -> Recipe:
     """Load a Lightroom/ACR .xmp develop preset into a Recipe."""
     # XMP develop presets are partial edits.  Work on a copy so applying one
     # preserves settings that the preset does not mention (especially the
@@ -117,6 +122,7 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
 
     d = _parse_xmp_text(text)
     # Also try ElementTree for structured files
+    root = None
     try:
         root = ET.fromstring(text)
         for el in root.iter():
@@ -135,6 +141,31 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
             if k in d and d[k] not in (None, ""):
                 return d[k]
         return default
+
+    # Resolve Auto before explicit values so fixed values in mixed presets win.
+    # Materializing these once makes preview/export and history deterministic.
+    if resolve_auto and str(g("AutoTone", default="false")).strip().lower() in ("true", "1"):
+        if image_bgr is None:
+            raise ValueError("This Auto Tone preset needs an open image to analyze")
+        step = max(1, math.ceil(max(image_bgr.shape[:2]) / 512))
+        source = _image_to_float01(image_bgr[::step, ::step])
+        # WB overrides in the same preset are also used for the analysis.
+        temp = _f(g("Temperature"))
+        tint = _f(g("Tint"))
+        absolute = temp is not None and 2000 <= temp <= 50000
+        as_shot = r.wb_as_shot and not absolute
+        if not (as_shot and meta and meta.get("wb_baked")):
+            source = apply_white_balance(
+                source, min(temp, 12000) if absolute else r.temperature,
+                tint if absolute and tint is not None else r.tint,
+                as_shot=as_shot, multipliers=(meta or {}).get("wb_multipliers"),
+            )
+        source = apply_creative_white_balance(
+            source, temp if temp is not None and not absolute else r.creative_temperature,
+            tint if tint is not None and not absolute else r.creative_tint,
+        )
+        for key, value in estimate_auto_tone(source).items():
+            setattr(r, key, value)
 
     # Exposure (stops)
     exp = _f(g("Exposure2012", "Exposure"))
@@ -168,7 +199,7 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
         r.microcontrast = max(-100.0, min(100.0, tex))
     dehaze = _f(g("Dehaze"))
     if dehaze is not None:
-        r.clearview = max(0.0, min(100.0, dehaze))
+        r.clearview = max(-100.0, min(100.0, dehaze))
 
     # Vibrance / Saturation
     vib = _f(g("Vibrance"))
@@ -260,29 +291,93 @@ def xmp_to_recipe(path: str, base: Optional[Recipe] = None) -> Recipe:
     r.hsl_sat = tuple(sat_l)
     r.hsl_lum = tuple(lum_l)
 
-    # Parametric curve-ish from Lights/Darks if present
-    # ToneCurvePV2012 is a list — skip full parse; optional Shadows/Highlights already mapped
+    # Structured RDF curve sequences are 0..255 input/output coordinates.
+    for tags, field in (
+        (("ToneCurvePV2012", "ToneCurve"), "curve_points"),
+        (("ToneCurvePV2012Red", "ToneCurveRed"), "curve_r_points"),
+        (("ToneCurvePV2012Green", "ToneCurveGreen"), "curve_g_points"),
+        (("ToneCurvePV2012Blue", "ToneCurveBlue"), "curve_b_points"),
+    ):
+        if root is None:
+            continue
+        node = next((root.find(".//crs:" + tag, _NS) for tag in tags
+                     if root.find(".//crs:" + tag, _NS) is not None), None)
+        if node is None:
+            continue
+        points = []
+        for item in node.findall(".//rdf:li", _NS):
+            pair = (item.text or "").split(",")
+            if len(pair) != 2:
+                raise ValueError("Invalid XMP tone curve point")
+            x, y = _f(pair[0]), _f(pair[1])
+            if x is None or y is None or not (0 <= x <= 255 and 0 <= y <= 255):
+                raise ValueError("XMP curve coordinates must be finite and in 0..255")
+            points.append([x / 255.0, y / 255.0])
+        if points:
+            points.sort(key=lambda p: p[0])
+            if len(points) < 2 or any(a[0] == b[0] for a, b in zip(points, points[1:])):
+                raise ValueError("XMP curves require at least two distinct input coordinates")
+        elif node.find("rdf:Seq", _NS) is None:
+            raise ValueError("XMP tone curve is missing its RDF sequence")
+        setattr(r, field, points)
+        if field == "curve_points":
+            r.curve_mode = "rgb"
+
+    for src, dst in (("ParametricShadows", "curve_shadows"),
+                     ("ParametricDarks", "curve_darks"),
+                     ("ParametricLights", "curve_lights"),
+                     ("ParametricHighlights", "curve_highlights")):
+        value = _f(g(src))
+        if value is not None:
+            setattr(r, dst, max(-100.0, min(100.0, value)))
+
+    grade_map = {
+        "SplitToningShadowHue": ("split_shadow_hue", 0, 360),
+        "SplitToningShadowSaturation": ("split_shadow_sat", 0, 100),
+        "SplitToningHighlightHue": ("split_highlight_hue", 0, 360),
+        "SplitToningHighlightSaturation": ("split_highlight_sat", 0, 100),
+        "SplitToningBalance": ("split_balance", -100, 100),
+        "ColorGradeMidtoneHue": ("grade_midtone_hue", 0, 360),
+        "ColorGradeMidtoneSat": ("grade_midtone_sat", 0, 100),
+        "ColorGradeMidtoneLum": ("grade_midtone_lum", -100, 100),
+        "ColorGradeShadowLum": ("split_shadow_lum", -100, 100),
+        "ColorGradeHighlightLum": ("split_highlight_lum", -100, 100),
+        "ColorGradeGlobalHue": ("grade_global_hue", 0, 360),
+        "ColorGradeGlobalSat": ("grade_global_sat", 0, 100),
+        "ColorGradeGlobalLum": ("grade_global_lum", -100, 100),
+        "ColorGradeBlending": ("grade_blending", 0, 100),
+        "ColorGradeBalance": ("split_balance", -100, 100),
+    }
+    for src, (dst, low, high) in grade_map.items():
+        value = _f(g(src))
+        if value is not None:
+            setattr(r, dst, max(low, min(high, value)))
+            r.color_grade_enabled = True
 
     return r
 
 
-def load_preset_file(path: str, base: Optional[Recipe] = None) -> Recipe:
+def load_preset_file(path: str, base: Optional[Recipe] = None, *, image_bgr=None, meta=None,
+                     resolve_auto=True) -> Recipe:
     """Load .json (PhotoLab) or .xmp (Lightroom/ACR) preset."""
     ext = os.path.splitext(path)[1].lower()
     if ext == ".json":
         return Recipe.load_json(path)
     if ext in (".xmp", ".XMP"):
-        return xmp_to_recipe(path, base=base)
+        return xmp_to_recipe(path, base=base, image_bgr=image_bgr, meta=meta, resolve_auto=resolve_auto)
     raise ValueError(f"Unsupported preset format: {ext} (use .json or .xmp)")
 
 
 def apply_preset_file(path: str, base: Optional[Recipe] = None, strength: float = 1.0,
-                      modules: Optional[Iterable[str]] = None) -> Recipe:
+                      modules: Optional[Iterable[str]] = None, *, image_bgr=None, meta=None) -> Recipe:
     """Apply a preset non-destructively with strength and module filtering."""
     original = copy.deepcopy(base) if base is not None else Recipe()
-    target = load_preset_file(path, base=original)
     amount = max(0.0, min(1.0, float(strength)))
     enabled = set(PRESET_MODULE_FIELDS.keys() if modules is None else modules)
+    if amount == 0 or not enabled:
+        return original
+    target = load_preset_file(path, base=original, image_bgr=image_bgr, meta=meta,
+                              resolve_auto="Tone" in enabled)
     result = copy.deepcopy(original)
 
     for module, names in PRESET_MODULE_FIELDS.items():
@@ -302,6 +397,27 @@ def apply_preset_file(path: str, base: Optional[Recipe] = None, strength: float 
             else:
                 value = copy.deepcopy(after if amount >= 0.5 else before)
             setattr(result, name, value)
+    if "Tone" in enabled and amount > 0:
+        for name in ("curve_points", "curve_r_points", "curve_g_points", "curve_b_points"):
+            before, after = getattr(original, name), getattr(target, name)
+            if before == after:
+                continue
+            a = before or [[0, 0], [1, 1]]
+            b = after or [[0, 0], [1, 1]]
+            xs = sorted({0.0, 1.0, *(p[0] for p in a), *(p[0] for p in b)})
+            ya = np.interp(xs, [p[0] for p in a], [p[1] for p in a])
+            yb = np.interp(xs, [p[0] for p in b], [p[1] for p in b])
+            setattr(result, name, [[float(x), float(y)] for x, y in zip(xs, ya+(yb-ya)*amount)])
+        result.curve_mode = target.curve_mode
+    if "Color" in enabled and amount > 0 and target.color_grade_enabled:
+        result.color_grade_enabled = True
+        # Strength changes tint intensity, not its hue when fading from neutral.
+        # Between two existing tints, follow the shortest arc around the wheel.
+        for prefix in ("split_shadow", "grade_midtone", "split_highlight", "grade_global"):
+            a, b = getattr(original, prefix + "_hue"), getattr(target, prefix + "_hue")
+            sa, sb = getattr(original, prefix + "_sat"), getattr(target, prefix + "_sat")
+            hue = b if sa == 0 else a if sb == 0 else (a + ((b-a+180) % 360-180)*amount) % 360
+            setattr(result, prefix + "_hue", hue)
     return result
 
 

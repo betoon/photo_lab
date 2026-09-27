@@ -45,6 +45,7 @@ import sys
 from datetime import datetime
 from accessibility import clamp_ui_scale, scale_font_sizes, UI_SCALE_STEP
 from branding import DEFAULT_UI_FAMILY
+from xmp_support import GRADE_FIELDS
 from distraction_dialog import DistractionDialog
 from restoration_dialog import RestorationStudioDialog
 from reflection_dialog import ReflectionDialog
@@ -1722,7 +1723,7 @@ class PhotoLab(QMainWindow):
 
         # ClearView Plus
         box, v = collapsible_group("ClearView Plus", layout, checked=False)
-        self._add_slider(v, "clearview", "Intensity", 0.0, 100.0, 1, 0, 0.0)
+        self._add_slider(v, "clearview", "Dehaze / haze", -100.0, 100.0, 1, 0, 0.0)
 
         # Contrast
         box, v = collapsible_group("Contrast", layout)
@@ -1790,6 +1791,18 @@ class PhotoLab(QMainWindow):
         # HSL / Color — full 8-channel panel (Lightroom-style)
         box, v = collapsible_group("HSL / Color", layout)
         self._build_hsl_panel(v)
+
+        box, v = collapsible_group("Color Grading", layout)
+        self.color_grade_cb = QCheckBox("Enable color grading")
+        self.color_grade_cb.toggled.connect(self._on_color_grade_enabled)
+        v.addWidget(self.color_grade_cb)
+        for prefix, label in (("split_shadow", "Shadow"), ("grade_midtone", "Midtone"),
+                              ("split_highlight", "Highlight"), ("grade_global", "Global")):
+            self._add_slider(v, prefix + "_hue", label + " hue", 0, 360, 1, 0, 0)
+            self._add_slider(v, prefix + "_sat", label + " saturation", 0, 100, 1, 0, 0)
+            self._add_slider(v, prefix + "_lum", label + " luminance", -100, 100, 1, 0, 0)
+        self._add_slider(v, "split_balance", "Balance", -100, 100, 1, 0, 0)
+        self._add_slider(v, "grade_blending", "Blending", 0, 100, 1, 0, 50)
 
         # Soft Proofing
         box, v = collapsible_group("Soft Proofing", layout, checked=False)
@@ -2698,6 +2711,13 @@ class PhotoLab(QMainWindow):
         layout.addStretch(1)
         scroll.setWidget(inner)
         return scroll
+
+    def _on_color_grade_enabled(self, checked):
+        if self.current_path is None:
+            return
+        self.recipes[self.current_path].color_grade_enabled = bool(checked)
+        self._schedule_history("Color grading")
+        self.render_timer.start()
 
     def _on_bw(self, checked):
         if self.current_path is None:
@@ -3736,6 +3756,10 @@ class PhotoLab(QMainWindow):
             self.proof_combo.blockSignals(True)
             self.proof_combo.setCurrentText(r.soft_proof_profile)
             self.proof_combo.blockSignals(False)
+        if hasattr(self, "color_grade_cb"):
+            self.color_grade_cb.blockSignals(True)
+            self.color_grade_cb.setChecked(bool(r.color_grade_enabled))
+            self.color_grade_cb.blockSignals(False)
         if hasattr(self, "bw_cb"):
             self.bw_cb.blockSignals(True)
             self.bw_cb.setChecked(bool(r.black_and_white))
@@ -5307,6 +5331,8 @@ class PhotoLab(QMainWindow):
             local_keys = ["local_points", "gradients", "brush_masks"]
             fx_keys = ["clearview", "microcontrast", "vignette", "film_grain", "black_and_white",
                        "rotate_90", "hdr_look"]
+            tone_keys += ["curve_mode", "curve_points", "curve_r_points", "curve_g_points", "curve_b_points"]
+            color_keys += list(GRADE_FIELDS)
             groups = []
             if cb_tone.isChecked():
                 groups += tone_keys
@@ -5406,6 +5432,8 @@ class PhotoLab(QMainWindow):
                         "black_and_white", "rotate_90", "hdr_look"],
             "creative": ["creative_filters"],
         }
+        groups["tone"] += ["curve_mode", "curve_points", "curve_r_points", "curve_g_points", "curve_b_points"]
+        groups["color"] += list(GRADE_FIELDS)
         for k in groups.get(which, []):
             if hasattr(r, k) and hasattr(fresh, k):
                 setattr(r, k, getattr(fresh, k))
@@ -5691,6 +5719,10 @@ class PhotoLab(QMainWindow):
             self.zone_enabled_cb.blockSignals(True)
             self.zone_enabled_cb.setChecked(True)
             self.zone_enabled_cb.blockSignals(False)
+        if hasattr(self, "color_grade_cb"):
+            self.color_grade_cb.blockSignals(True)
+            self.color_grade_cb.setChecked(bool(r.color_grade_enabled))
+            self.color_grade_cb.blockSignals(False)
         if hasattr(self, "bw_cb"):
             self.bw_cb.blockSignals(True)
             self.bw_cb.setChecked(True)
@@ -6799,7 +6831,8 @@ class PhotoLab(QMainWindow):
             return
         try:
             # A neutral base makes the stored look independent of current global edits.
-            local_recipe = load_preset_file(path, base=Recipe())
+            local_recipe = load_preset_file(path, base=Recipe(), image_bgr=self.original_bgr,
+                                            meta=self.meta_cache.get(self.current_path, {}))
             mask = self.recipes[self.current_path].brush_masks[idx]
             mask["local_preset"] = local_recipe.to_dict()
             mask["preset_name"] = os.path.basename(path)
@@ -7676,7 +7709,8 @@ class PhotoLab(QMainWindow):
             return
         try:
             self.recipes[self.current_path] = apply_preset_file(
-                path, base=self._preset_preview_base, strength=strength, modules=modules
+                path, base=self._preset_preview_base, strength=strength, modules=modules,
+                image_bgr=self.original_bgr, meta=self.meta_cache.get(self.current_path, {})
             )
             self.sync_sliders_to_recipe()
             self.render_preview()
@@ -7688,7 +7722,8 @@ class PhotoLab(QMainWindow):
             return
         try:
             r = apply_preset_file(
-                path, base=self.recipes.get(self.current_path), strength=strength, modules=modules
+                path, base=self.recipes.get(self.current_path), strength=strength, modules=modules,
+                image_bgr=self.original_bgr, meta=self.meta_cache.get(self.current_path, {})
             )
             self.recipes[self.current_path] = r
             self.sync_sliders_to_recipe()
@@ -7730,7 +7765,8 @@ class PhotoLab(QMainWindow):
             return
         # Apply first; report count
         try:
-            r = load_preset_file(files[0], base=self.recipes.get(self.current_path))
+            r = load_preset_file(files[0], base=self.recipes.get(self.current_path),
+                                 image_bgr=self.original_bgr, meta=self.meta_cache.get(self.current_path, {}))
             self.recipes[self.current_path] = r
             self.sync_sliders_to_recipe()
             self._push_history(f"Preset: {os.path.basename(files[0])}")

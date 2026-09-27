@@ -19,6 +19,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import cv2
+from xmp_support import apply_master_curve, apply_imported_grade, interpolate_curve
 
 log = logging.getLogger(__name__)
 
@@ -169,6 +170,7 @@ class Recipe:
     curve_mids: float = 0.0
     curve_lights: float = 0.0
     curve_highlights: float = 0.0
+    curve_mode: str = "luma"  # legacy Lab curve; XMP master curves use rgb
     curve_points: list = field(default_factory=list)
     curve_r_points: list = field(default_factory=list)
     curve_g_points: list = field(default_factory=list)
@@ -178,6 +180,16 @@ class Recipe:
     split_highlight_hue: float = 0.0
     split_highlight_sat: float = 0.0
     split_balance: float = 0.0
+    color_grade_enabled: bool = False
+    split_shadow_lum: float = 0.0
+    grade_midtone_hue: float = 0.0
+    grade_midtone_sat: float = 0.0
+    grade_midtone_lum: float = 0.0
+    split_highlight_lum: float = 0.0
+    grade_global_hue: float = 0.0
+    grade_global_sat: float = 0.0
+    grade_global_lum: float = 0.0
+    grade_blending: float = 50.0
 
     denoise_luminance: float = 0.0
     denoise_chroma: float = 0.0
@@ -229,7 +241,7 @@ class Recipe:
     line_reflection_feather: float = 0.0
     crop: Optional[Tuple[float, float, float, float]] = field(default=None)
 
-    clearview: float = 0.0
+    clearview: float = 0.0  # -100..100: soften haze / increase local contrast
     microcontrast: float = 0.0
     vignette: float = 0.0
     film_grain: float = 0.0
@@ -1097,9 +1109,9 @@ def apply_rgb_point_curves(img, r_pts=None, g_pts=None, b_pts=None):
     out = np.clip(img, 0, 1).astype(np.float32).copy()
     for channel, points in ((0, b_pts), (1, g_pts), (2, r_pts)):
         if points and len(points) >= 2:
-            lut = _points_to_lut(points)
-            indices = (out[..., channel] * 255).astype(np.int32)
-            out[..., channel] = lut[indices]
+            # Continuous sampling keeps identity channel curves lossless.
+            lut = _points_to_lut(points, size=4096)
+            out[..., channel] = interpolate_curve(out[..., channel], np.linspace(0, 1, len(lut)), lut)
     return np.clip(out, 0, 1)
 
 
@@ -1836,7 +1848,7 @@ def apply_local_preset_look(img, preset):
         blur = cv2.GaussianBlur(out, (0, 0), sigmaX=3)
         out += (out - blur) * (p.clarity / 100.0)
     out = apply_tone_curve(out, p.curve_shadows, p.curve_darks, p.curve_mids, p.curve_lights, p.curve_highlights)
-    out = apply_point_curve_luma(out, getattr(p, "curve_points", None) or [])
+    out = (apply_master_curve if p.curve_mode == "rgb" else apply_point_curve_luma)(out, p.curve_points)
     out = apply_rgb_point_curves(out, getattr(p, "curve_r_points", None) or [],
                                  getattr(p, "curve_g_points", None) or [],
                                  getattr(p, "curve_b_points", None) or [])
@@ -1845,8 +1857,9 @@ def apply_local_preset_look(img, preset):
         out = out ** (1.0 / max(float(p.gamma), 0.05))
     out = apply_vibrance_saturation(out, p.vibrance, p.saturation)
     out = apply_hsl_selective(out, p.hsl_hue or (0,) * 8, p.hsl_sat or (0,) * 8, p.hsl_lum or (0,) * 8)
-    out = apply_split_tone(out, p.split_shadow_hue, p.split_shadow_sat,
-                           p.split_highlight_hue, p.split_highlight_sat, p.split_balance)
+    if not p.color_grade_enabled:
+        out = apply_split_tone(out, p.split_shadow_hue, p.split_shadow_sat,
+                               p.split_highlight_hue, p.split_highlight_sat, p.split_balance)
     if abs(float(getattr(p, "clearview", 0.0))) > 1e-4:
         amount = p.clearview / 100.0
         lab = cv2.cvtColor(np.clip(out, 0, 1), cv2.COLOR_BGR2LAB)
@@ -1859,6 +1872,7 @@ def apply_local_preset_look(img, preset):
         out += (out - blur) * (p.microcontrast / 100.0)
     if bool(getattr(p, "black_and_white", False)):
         out = cv2.cvtColor(cv2.cvtColor(np.clip(out, 0, 1), cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    out = apply_imported_grade(out, p)
     return np.clip(out, 0, 1)
 
 
@@ -2437,7 +2451,7 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
         img = img + (img - blur) * (r.clarity / 100.0)
 
     img = apply_tone_curve(img, r.curve_shadows, r.curve_darks, r.curve_mids, r.curve_lights, r.curve_highlights)
-    img = apply_point_curve_luma(img, getattr(r, "curve_points", None) or [])
+    img = (apply_master_curve if r.curve_mode == "rgb" else apply_point_curve_luma)(img, r.curve_points)
     img = apply_rgb_point_curves(
         img,
         getattr(r, "curve_r_points", None) or [],
@@ -2455,14 +2469,11 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
     sat_o = r.hsl_sat if r.hsl_sat is not None else (0,) * 8
     lum_o = r.hsl_lum if r.hsl_lum is not None else (0,) * 8
     img = apply_hsl_selective(img, hue_o, sat_o, lum_o)
-    img = apply_split_tone(
-        img,
-        getattr(r, "split_shadow_hue", 0.0),
-        getattr(r, "split_shadow_sat", 0.0),
-        getattr(r, "split_highlight_hue", 0.0),
-        getattr(r, "split_highlight_sat", 0.0),
-        getattr(r, "split_balance", 0.0),
-    )
+    if not r.color_grade_enabled:
+        img = apply_split_tone(
+            img, r.split_shadow_hue, r.split_shadow_sat,
+            r.split_highlight_hue, r.split_highlight_sat, r.split_balance,
+        )
 
     # Local control points
     if r.local_points:
@@ -2548,6 +2559,8 @@ def apply_recipe(img_bgr, r, wb_multipliers=None, meta=None, output_dtype=np.uin
     if getattr(r, "black_and_white", False):
         gray = cv2.cvtColor(np.clip(img, 0, 1), cv2.COLOR_BGR2GRAY)
         img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    img = apply_imported_grade(img, r)
 
     # Film grain
     if abs(getattr(r, "film_grain", 0.0)) > 1e-4:
